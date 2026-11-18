@@ -5,6 +5,7 @@ import { authRoutes, requireAuth, issueSetupCode } from './auth.js';
 import { apiRoutes } from './routes.js';
 import { ingestHandler } from './ingest.js';
 import { startScheduler } from './sync.js';
+import { recoverRuns } from './runner.js';
 import { HttpError } from './util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,6 +68,7 @@ export function startServer({ host = '127.0.0.1', port = 4317 } = {}) {
     server.once('listening', () => {
       if (!schedulerStarted) {
         schedulerStarted = true;
+        recoverRuns();
         startScheduler();
       }
       resolve({ port: server.address().port, setupCode: issueSetupCode(), close: () => server.close() });

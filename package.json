@@ -1,7 +1,7 @@
 {
   "name": "ai-command-center",
   "productName": "AI Command Center",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "One dashboard for your AI tools: what's running, what's next, what you've spent, and what needs attention.",
   "author": "AI Command Center",
   "private": true,

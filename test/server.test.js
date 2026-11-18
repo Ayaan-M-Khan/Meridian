@@ -115,4 +115,5 @@ test('demo state has the live shape and is flagged', () => {
   const live = buildState();
   for (const key of Object.keys(live)) assert.ok(key in d, `demo is missing ${key}`);
   for (const key of Object.keys(live.tools[0])) assert.ok(key in d.tools[0], `demo tool is missing ${key}`);
+  for (const key of Object.keys(live.tasks[0])) assert.ok(key in d.tasks[0], `demo task is missing ${key}`);
 });

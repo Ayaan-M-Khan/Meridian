@@ -1,5 +1,6 @@
 import { db, getSettings, getRaw } from './db.js';
 import { adapters } from './adapters/index.js';
+import { estimate, pastDurations, progressHistory } from './eta.js';
 import { lastNDays, nowIso, rowTokens, startOfUtcMonth, sumField, sumNullable, utcDay } from './util.js';
 
 const ACTIVE_WINDOW_MS = 15 * 60_000;
@@ -9,6 +10,33 @@ const sumTokens = (rows) => sumNullable(rows.map(rowTokens));
 export function publicSettings() {
   const enc = getRaw('summary_key_enc');
   return { ...getSettings(), summary_key_set: Boolean(enc), summary_key_hint: getRaw('summary_key_hint') ?? null };
+}
+
+/** One task as the UI and the assistant see it, with its finish estimate and the controls this app can offer. */
+export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
+  const builtin = adapterOf.get(t.integration_id) === 'claude-assistant';
+  const est = estimate(t, history.get(t.id) ?? [], durations.get(`${t.integration_id}|${t.name}`) ?? [], now.getTime());
+  return {
+    id: t.id,
+    integration_id: t.integration_id,
+    tool_name: t.tool_name,
+    external_id: t.external_id,
+    name: t.name,
+    description: t.description,
+    status: t.status,
+    progress: t.progress,
+    step: t.step ?? null,
+    started_at: t.started_at,
+    eta: t.eta,
+    ...est,
+    scheduled_for: t.scheduled_for,
+    finished_at: t.finished_at,
+    error: t.error,
+    has_result: Boolean(t.result),
+    updated_at: t.updated_at,
+    runner: builtin ? 'claude' : null,
+    controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry'],
+  };
 }
 
 /** Everything the UI renders, in one payload. The demo payload (demo.js) has the same shape. */
@@ -28,6 +56,10 @@ export function buildState(now = new Date()) {
     .prepare(`SELECT e.id, e.kind, e.message, e.created_at, i.name AS tool_name FROM events e LEFT JOIN integrations i ON i.id = e.integration_id ORDER BY e.id DESC LIMIT 40`)
     .all();
   const notifications = db.prepare('SELECT id, kind, severity, title, body, read, created_at FROM notifications ORDER BY id DESC LIMIT 100').all();
+
+  const history = progressHistory(tasks.filter((t) => t.status === 'running').map((t) => t.id));
+  const durations = pastDurations(tasks);
+  const adapterOf = new Map(ints.map((i) => [i.id, i.adapter]));
 
   const tools = ints.map((i) => {
     const a = adapters[i.adapter];
@@ -74,6 +106,9 @@ export function buildState(now = new Date()) {
 
   const enabled = tools.filter((t) => t.enabled);
   const enabledIds = new Set(enabled.map((t) => t.id));
+  // The assistant's own Claude requests are also in an Anthropic Admin integration's figures; count them once.
+  const hasAnthropicApi = enabled.some((t) => t.adapter === 'anthropic');
+  const counted = enabled.filter((t) => !(hasAnthropicApi && t.adapter === 'claude-assistant'));
   const isToday = (iso) => iso?.startsWith(today);
   const count = (status) => tasks.filter((t) => t.status === status && enabledIds.has(t.integration_id)).length;
 
@@ -88,9 +123,9 @@ export function buildState(now = new Date()) {
     failed_today: tasks.filter((t) => t.status === 'failed' && isToday(t.finished_at)).length,
     cost_today: sumNullable(enabled.map((t) => t.cost_today)),
     cost_mtd: sumNullable(enabled.map((t) => t.cost_mtd)),
-    tokens_today: sumNullable(enabled.map((t) => t.tokens_today)),
-    tokens_mtd: sumNullable(enabled.map((t) => t.tokens_mtd)),
-    requests_mtd: sumNullable(enabled.map((t) => t.requests_mtd)),
+    tokens_today: sumNullable(counted.map((t) => t.tokens_today)),
+    tokens_mtd: sumNullable(counted.map((t) => t.tokens_mtd)),
+    requests_mtd: sumNullable(counted.map((t) => t.requests_mtd)),
     tools_reporting_cost: enabled.filter((t) => t.cost_mtd != null).length,
     ceiling_usd: settings.monthly_ceiling_usd,
   };
@@ -117,23 +152,7 @@ export function buildState(now = new Date()) {
     models.set(r.model, m);
   }
 
-  const taskView = tasks.map((t) => ({
-    id: t.id,
-    integration_id: t.integration_id,
-    tool_name: t.tool_name,
-    external_id: t.external_id,
-    name: t.name,
-    description: t.description,
-    status: t.status,
-    progress: t.progress,
-    started_at: t.started_at,
-    eta: t.eta,
-    scheduled_for: t.scheduled_for,
-    finished_at: t.finished_at,
-    error: t.error,
-    updated_at: t.updated_at,
-    controls: [],
-  }));
+  const taskView = tasks.map((t) => taskViewOf(t, history, durations, adapterOf, now));
 
   const upcoming = taskView
     .filter((t) => (t.status === 'scheduled' || t.status === 'queued') && enabledIds.has(t.integration_id))

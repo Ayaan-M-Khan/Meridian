@@ -1,4 +1,5 @@
 import { db, getSettings, notify } from './db.js';
+import { estimate, pastDurations, progressHistory } from './eta.js';
 import { addDays, lastNDays, startOfUtcDay, startOfUtcMonth, utcDay } from './util.js';
 
 const usd = (n) => `$${n.toFixed(2)}`;
@@ -92,4 +93,46 @@ export function evaluateAlerts(now = new Date()) {
       dedupe: `sched:${t.id}:${t.scheduled_for}`,
     });
   }
+
+  watchRunningTasks(now);
+}
+
+/** The ETA watcher: flags running tasks that stopped reporting progress or ran well past their expected finish. */
+function watchRunningTasks(now) {
+  const running = db
+    .prepare(`SELECT t.*, i.name AS tool FROM tasks t JOIN integrations i ON i.id = t.integration_id WHERE t.status = 'running' AND i.enabled = 1`)
+    .all();
+  if (!running.length) return;
+  const names = [...new Set(running.map((t) => t.name))];
+  const finished = db
+    .prepare(`SELECT integration_id, name, status, started_at, finished_at FROM tasks WHERE status = 'completed' AND name IN (${names.map(() => '?').join(',')}) ORDER BY finished_at DESC LIMIT 500`)
+    .all(...names);
+  const history = progressHistory(running.map((t) => t.id));
+  const durations = pastDurations(finished);
+  for (const t of running) {
+    const e = estimate(t, history.get(t.id) ?? [], durations.get(`${t.integration_id}|${t.name}`) ?? [], now.getTime());
+    if (e.stalled) {
+      notify({
+        kind: 'task_stalled',
+        severity: 'warn',
+        title: `No progress on ${t.name}`,
+        body: `${t.tool} last reported progress ${minutesAgo(t.updated_at, now)} at ${Math.round(t.progress ?? 0)}%. It may be stuck.`,
+        dedupe: `stall:${t.id}:${t.updated_at}`,
+      });
+    }
+    if (e.overdue) {
+      notify({
+        kind: 'task_overdue',
+        severity: 'warn',
+        title: `${t.name} is taking longer than expected`,
+        body: `${t.tool} ${e.eta_source === 'reported' ? 'said it would finish' : 'was on track to finish'} by ${e.eta_at.slice(11, 16)} UTC and is still running.`,
+        dedupe: `overdue:${t.id}:${e.eta_at.slice(0, 16)}`,
+      });
+    }
+  }
+}
+
+function minutesAgo(iso, now) {
+  const m = Math.round((now.getTime() - Date.parse(iso)) / 60_000);
+  return m >= 120 ? `${Math.round(m / 60)} hours ago` : `${m} minutes ago`;
 }

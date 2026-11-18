@@ -99,9 +99,32 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- Progress reports over time, used to estimate when a running task will finish.
+CREATE TABLE IF NOT EXISTS task_progress (
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  at TEXT NOT NULL,
+  progress REAL NOT NULL
+);
+
+-- Conversations with the Claude assistant. messages holds the Messages API transcript as JSON.
+CREATE TABLE IF NOT EXISTS assistant_threads (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  messages TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_usage_day ON usage_daily(day);
 CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at);
+CREATE INDEX IF NOT EXISTS idx_progress_task ON task_progress(task_id, at);
 `);
+
+// Columns added after the first release.
+const taskCols = new Set(db.prepare('PRAGMA table_info(tasks)').all().map((c) => c.name));
+for (const [col, type] of [['step', 'TEXT'], ['result', 'TEXT']]) {
+  if (!taskCols.has(col)) db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${type}`);
+}
 
 export function tx(fn) {
   db.exec('BEGIN');
@@ -121,9 +144,12 @@ export const DEFAULT_SETTINGS = {
   sync_minutes: 30,
   summary_interval_hours: 6,
   spike_multiplier: 2,
+  assistant_web_search: false,
   notify: {
     task_failed: true,
     task_completed: false,
+    task_stalled: true,
+    task_overdue: true,
     scheduled: true,
     usage_warning: true,
     limit_reached: true,

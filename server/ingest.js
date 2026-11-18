@@ -1,6 +1,7 @@
 import { db, tx, addEvent, notify } from './db.js';
 import { sha256, safeEqual } from './crypto.js';
 import { evaluateAlerts } from './alerts.js';
+import { recordProgress } from './eta.js';
 import { HttpError, nowIso } from './util.js';
 
 export const TASK_STATUSES = ['running', 'queued', 'scheduled', 'completed', 'failed'];
@@ -42,6 +43,8 @@ export function parseTask(t, i) {
     scheduled_for: time(t.scheduled_for, `${at}.scheduled_for`),
     finished_at: time(t.finished_at, `${at}.finished_at`) ?? (['completed', 'failed'].includes(t.status) ? nowIso() : null),
     error: str(t.error, 2000, `${at}.error`),
+    step: str(t.step, 300, `${at}.step`),
+    result: str(t.result, 20000, `${at}.result`),
   };
 }
 
@@ -61,20 +64,30 @@ export function parseUsage(u, i) {
 export function upsertTask(integration, t) {
   const prev = db.prepare('SELECT id, status FROM tasks WHERE integration_id = ? AND external_id = ?').get(integration.id, t.external_id);
   const now = nowIso();
+  // A running task with no start time starts now, so its elapsed time and ETA can be worked out.
+  const startedAt = t.started_at ?? (t.status === 'running' && prev?.status !== 'running' ? now : null);
   db.prepare(
-    `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, started_at, eta, scheduled_for, finished_at, error, created_at, updated_at)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, started_at, eta, scheduled_for, finished_at, error, step, result, created_at, updated_at)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(integration_id, external_id) DO UPDATE SET
        name = excluded.name, description = COALESCE(excluded.description, description), status = excluded.status,
        progress = excluded.progress, started_at = COALESCE(excluded.started_at, started_at), eta = excluded.eta,
-       scheduled_for = excluded.scheduled_for, finished_at = excluded.finished_at, error = excluded.error, updated_at = excluded.updated_at`,
-  ).run(integration.id, t.external_id, t.name, t.description, t.status, t.progress, t.started_at, t.eta, t.scheduled_for,
-    t.finished_at, t.error, now, now);
+       scheduled_for = excluded.scheduled_for, finished_at = excluded.finished_at, error = excluded.error,
+       step = excluded.step, result = COALESCE(excluded.result, result), updated_at = excluded.updated_at`,
+  ).run(integration.id, t.external_id, t.name, t.description, t.status, t.progress, startedAt, t.eta, t.scheduled_for,
+    t.finished_at, t.error, t.step ?? null, t.result ?? null, now, now);
 
-  if (prev?.status === t.status) return;
+  const taskId = prev?.id ?? db.prepare('SELECT id FROM tasks WHERE integration_id = ? AND external_id = ?').get(integration.id, t.external_id).id;
+  if (t.status === 'running') recordProgress(taskId, t.progress, now);
+  if (prev?.status !== t.status) announce(integration, taskId, t);
+  return taskId;
+}
+
+/** Adds the activity-feed entry and any notification for a task that changed status. */
+export function announce(integration, taskId, t, { quiet = false } = {}) {
   const verb = { running: 'started', queued: 'queued', scheduled: 'scheduled', completed: 'completed', failed: 'failed' }[t.status];
   addEvent(integration.id, `task_${t.status}`, `${integration.name} ${verb} “${t.name}”${t.status === 'failed' && t.error ? `: ${t.error}` : ''}`);
-  const taskId = prev?.id ?? db.prepare('SELECT id FROM tasks WHERE integration_id = ? AND external_id = ?').get(integration.id, t.external_id).id;
+  if (quiet) return;
   if (t.status === 'failed') {
     notify({ kind: 'task_failed', severity: 'err', title: `Task failed: ${t.name}`, body: `${integration.name}: ${t.error ?? 'No error message was reported.'}`, dedupe: `failed:${taskId}:${t.finished_at}` });
   } else if (t.status === 'completed') {

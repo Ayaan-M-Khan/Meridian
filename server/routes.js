@@ -8,6 +8,10 @@ import { refreshSummary, SUMMARY_KEY_AAD } from './summary.js';
 import { evaluateAlerts } from './alerts.js';
 import { parseUsage, upsertUsage } from './ingest.js';
 import { AdapterError, HttpError, nowIso } from './util.js';
+import { startClaudeTask, cancelClaudeTask, retryClaudeTask } from './runner.js';
+import { ToolInputError } from './assistant-tools.js';
+import { claudeClient } from './claude.js';
+import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
 
 function getIntegration(id) {
   const row = db.prepare('SELECT * FROM integrations WHERE id = ?').get(Number(id));
@@ -157,6 +161,7 @@ export function apiRoutes(app) {
       if (!(n >= 1.2 && n <= 20)) throw new HttpError(400, 'Spike threshold must be between 1.2× and 20×.');
       s.spike_multiplier = n;
     }
+    if ('assistant_web_search' in body) s.assistant_web_search = Boolean(body.assistant_web_search);
     if (body.notify && typeof body.notify === 'object') {
       for (const k of Object.keys(s.notify)) if (k in body.notify) s.notify[k] = Boolean(body.notify[k]);
     }
@@ -176,4 +181,63 @@ export function apiRoutes(app) {
   });
 
   app.post('/api/summary/refresh', async (req, res) => res.json(await refreshSummary()));
+
+  // ── Tasks ──
+  app.get('/api/tasks/:id', (req, res) => {
+    const t = db.prepare('SELECT id, description, result FROM tasks WHERE id = ?').get(Number(req.params.id));
+    if (!t) throw new HttpError(404, 'That task no longer exists.');
+    const progress = db.prepare('SELECT at, progress FROM task_progress WHERE task_id = ? ORDER BY at').all(t.id);
+    res.json({ ...t, progress });
+  });
+
+  app.post('/api/claude-tasks', (req, res) => {
+    const { name, instructions } = req.body ?? {};
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) throw new HttpError(400, 'Give the task a name of 1–80 characters.');
+    if (typeof instructions !== 'string' || !instructions.trim() || instructions.length > 2000) throw new HttpError(400, 'Write the instructions, up to 2,000 characters.');
+    const t = startClaudeTask({ name: name.trim(), instructions: instructions.trim() });
+    res.status(201).json({ id: t.id, status: t.status });
+  });
+
+  const control = (fn) => (req, res) => {
+    try {
+      res.json(fn(Number(req.params.id)));
+    } catch (err) {
+      if (err instanceof ToolInputError) throw new HttpError(400, err.message);
+      throw err;
+    }
+  };
+  app.post('/api/tasks/:id/cancel', control(cancelClaudeTask));
+  app.post('/api/tasks/:id/retry', control(retryClaudeTask));
+
+  // ── Assistant ──
+  app.get('/api/assistant/threads', (req, res) => res.json(listThreads()));
+  app.post('/api/assistant/threads', (req, res) => res.status(201).json(createThread()));
+  app.get('/api/assistant/threads/:id', (req, res) => res.json(threadView(req.params.id)));
+  app.delete('/api/assistant/threads/:id', (req, res) => {
+    deleteThread(req.params.id);
+    res.json({ ok: true });
+  });
+  app.post('/api/assistant/threads/:id/stop', (req, res) => {
+    stopThread(req.params.id);
+    res.json({ ok: true });
+  });
+  app.post('/api/assistant/threads/:id/messages', async (req, res) => {
+    const text = req.body?.text;
+    if (typeof text !== 'string' || !text.trim()) throw new HttpError(400, 'Type a message first.');
+    if (text.length > 8000) throw new HttpError(400, 'Keep messages under 8,000 characters.');
+    threadView(req.params.id); // 404 before streaming starts
+    claudeClient(); // readable error before streaming starts when no key is set
+    res.status(200).set({ 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+    const emit = (ev) => {
+      if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(ev)}\n`);
+    };
+    try {
+      await sendMessage(req.params.id, text.trim(), emit);
+    } catch (err) {
+      emit({ type: 'error', message: err instanceof HttpError ? err.message : 'Something went wrong on the server.', unsent: text });
+      if (!(err instanceof HttpError)) console.error('[acc] assistant:', err);
+    }
+    res.end();
+  });
 }

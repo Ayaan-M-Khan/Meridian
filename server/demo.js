@@ -65,13 +65,15 @@ export function demoState(now = new Date()) {
 
   const T = (id, tool, name, status, extra = {}) => ({
     id, integration_id: tool, tool_name: tools.find((t) => t.id === tool).name, external_id: `demo-${id}`, name, status,
-    description: null, progress: null, started_at: null, eta: null, scheduled_for: null, finished_at: null, error: null,
-    updated_at: ago(5), controls: [], ...extra,
+    description: null, progress: null, step: null, started_at: null, eta: null,
+    eta_at: null, eta_source: null, stalled: false, overdue: false, longer_than_usual: false, typical_ms: null,
+    scheduled_for: null, finished_at: null, error: null, has_result: false,
+    updated_at: ago(5), runner: null, controls: [], ...extra,
   });
   const tasks = [
-    T(1, 3, 'Weekly competitor digest', 'running', { description: 'Collect pricing pages from 14 competitors and summarize changes since last week.', progress: 64, started_at: ago(18), eta: ahead(9), updated_at: ago(1) }),
-    T(2, 1, 'Summarize support tickets', 'running', { description: 'Group yesterday’s 212 tickets by theme and draft a summary for the support lead.', progress: 30, started_at: ago(6), updated_at: ago(2) }),
-    T(3, 2, 'Classify inbound leads', 'running', { description: 'Score new sign-ups by company size and intent.', started_at: ago(25), updated_at: ago(4) }),
+    T(1, 3, 'Weekly competitor digest', 'running', { description: 'Collect pricing pages from 14 competitors and summarize changes since last week.', progress: 64, step: 'Comparing pricing pages', started_at: ago(18), eta: ahead(9), eta_at: ahead(9), eta_source: 'reported', updated_at: ago(1) }),
+    T(2, 1, 'Summarize support tickets', 'running', { description: 'Group yesterday’s 212 tickets by theme and draft a summary for the support lead.', progress: 30, started_at: ago(6), eta_at: ahead(14), eta_source: 'progress', updated_at: ago(2) }),
+    T(3, 2, 'Classify inbound leads', 'running', { description: 'Score new sign-ups by company size and intent.', progress: 45, started_at: ago(50), stalled: true, typical_ms: 30 * 60_000, longer_than_usual: true, updated_at: ago(24) }),
     T(4, 3, 'Draft monthly usage report', 'scheduled', { scheduled_for: ahead(48), description: 'Compile this month’s numbers into a shareable doc.', updated_at: ago(300) }),
     T(5, 1, 'Re-index product docs', 'queued', { description: 'Waiting for the digest run to finish.', updated_at: ago(20) }),
     T(6, 3, 'Backfill CRM notes', 'scheduled', { scheduled_for: ahead(60 * 9), updated_at: ago(600) }),

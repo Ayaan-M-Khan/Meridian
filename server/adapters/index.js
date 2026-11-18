@@ -8,6 +8,7 @@
  *                  'api'     read from the provider's official API
  *                  'manual'  entered by you in this app
  *                  'webhook' reported by your own scripts with the ingest token
+ *                  'app'     measured or controlled by this app itself (built-in Claude assistant only)
  *                  'none'    not available for this service
  *   notes:         plain-language limits of the integration, shown in the UI
  *   test({ secret })?          -> { ok, detail }   throws AdapterError with a readable message
@@ -32,6 +33,22 @@ function tracked(id, name, vendor, notes, capabilities = manual) {
   };
 }
 
+/** Built in: Claude working inside this app (the assistant, background tasks and the AI summary). Added automatically. */
+export const CLAUDE_ASSISTANT = {
+  id: 'claude-assistant',
+  name: 'Claude assistant',
+  vendor: 'Anthropic',
+  kind: 'builtin',
+  description: 'Claude working inside this app: the assistant, background tasks and the AI summary.',
+  credential: null,
+  capabilities: { usage: 'app', cost: 'none', limits: 'none', tasks: 'app', control: 'app' },
+  notes: [
+    'Tokens and requests are measured by this app from each Claude response, using the Claude API key in Settings.',
+    'Cost is not shown here because the API response does not include a price. If you also add the Claude API (Admin key) integration, your real spend appears there, and these tokens are left out of the totals so they are not counted twice.',
+    'Background tasks run while the app is open. Closing the app stops any that are still running.',
+  ],
+};
+
 const list = [
   anthropic,
   openai,
@@ -54,7 +71,7 @@ const list = [
   ]),
 ];
 
-export const adapters = Object.fromEntries(list.map((a) => [a.id, a]));
+export const adapters = Object.fromEntries([...list, CLAUDE_ASSISTANT].map((a) => [a.id, a]));
 
 export const catalog = () =>
   list.map(({ id, name, vendor, kind, description, credential, capabilities, notes }) => ({

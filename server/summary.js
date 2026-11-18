@@ -1,10 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { getRaw, setRaw, getSettings } from './db.js';
-import { decrypt } from './crypto.js';
 import { buildState } from './state.js';
+import { claudeClient, claudeErrorMessage, claudeKey, recordUsage, MODEL, CLAUDE_KEY_AAD as SUMMARY_KEY_AAD } from './claude.js';
 import { nowIso } from './util.js';
-
-const SUMMARY_KEY_AAD = 'summary';
 
 /** The facts a summary may mention. Nulls mean "not available", and the summary must say so rather than guess. */
 export function buildFacts(state) {
@@ -20,7 +17,9 @@ export function buildFacts(state) {
       budget_used_pct: t.budget_pct == null ? null : Math.round(t.budget_pct),
       data_complete_up_to: t.data_refreshed_at,
     })),
-    running: tasks.filter((t) => t.status === 'running').map((t) => ({ name: t.name, tool: t.tool_name, progress: t.progress })),
+    running: tasks.filter((t) => t.status === 'running').map((t) => ({
+      name: t.name, tool: t.tool_name, progress: t.progress, expected_finish: t.eta_at, finish_estimate_basis: t.eta_source, stalled: t.stalled,
+    })),
     next_up: upcoming.slice(0, 5).map((t) => ({ name: t.name, tool: t.tool_name, at: t.scheduled_for })),
     completed_today: stats.completed_today,
     failed_today: tasks.filter((t) => t.status === 'failed' && t.finished_at?.startsWith(state.generated_at.slice(0, 10))).map((t) => ({ name: t.name, tool: t.tool_name, error: t.error })),
@@ -59,10 +58,9 @@ const SYSTEM = `You write the daily status summary at the top of a dashboard tha
 Write 3 to 5 plain sentences, no lists, no headings, no greeting. Cover what is running, what finished or failed today, what is scheduled next, and any connection problems, budgets near their limit, or spending worth knowing about.
 Use only the facts in the JSON. A null value means the data is not available: say so briefly when it matters, and never estimate it. Spending figures may lag by up to a day for API providers; mention this only if spending is the main point.`;
 
-async function aiSummary(facts, apiKey) {
-  const client = new Anthropic({ apiKey });
-  const res = await client.beta.messages.create({
-    model: 'claude-opus-5-5',
+async function aiSummary(facts) {
+  const res = await claudeClient().beta.messages.create({
+    model: MODEL,
     max_tokens: 4000,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
@@ -70,16 +68,14 @@ async function aiSummary(facts, apiKey) {
     system: SYSTEM,
     messages: [{ role: 'user', content: `Current state:\n${JSON.stringify(facts)}` }],
   });
+  recordUsage(res.usage, res.model);
   if (res.stop_reason === 'refusal') throw new Error('The model declined to write this summary.');
   const text = res.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   if (!text) throw new Error('The model returned an empty summary.');
   return text;
 }
 
-export function summaryKey() {
-  const enc = getRaw('summary_key_enc');
-  return enc ? decrypt(enc, SUMMARY_KEY_AAD) : null;
-}
+export const summaryKey = claudeKey;
 
 export async function refreshSummary() {
   const facts = buildFacts(buildState());
@@ -87,10 +83,9 @@ export async function refreshSummary() {
   let result;
   if (key && facts.tools.length) {
     try {
-      result = { text: await aiSummary(facts, key), source: 'ai', generated_at: nowIso() };
+      result = { text: await aiSummary(facts), source: 'ai', generated_at: nowIso() };
     } catch (err) {
-      const reason = err instanceof Anthropic.AuthenticationError ? 'the Claude API key was rejected' : err.message;
-      result = { text: ruleSummary(facts), source: 'rules', generated_at: nowIso(), error: `AI summary unavailable: ${reason}` };
+      result = { text: ruleSummary(facts), source: 'rules', generated_at: nowIso(), error: `AI summary unavailable: ${claudeErrorMessage(err)}` };
     }
   } else {
     result = { text: ruleSummary(facts), source: 'rules', generated_at: nowIso() };
