@@ -1,0 +1,101 @@
+# AI Command Center
+
+One dashboard for your AI tools: what's running, what's next, what you've spent, and what needs attention. It shows only data a tool actually reports. Anything a provider doesn't expose is marked as unavailable, never filled in.
+
+## Desktop app (Windows)
+
+Download `AI-Command-Center-Setup-<version>.exe` from the Releases page, or build it yourself (below), and run it. It installs AI Command Center with a Start Menu entry and a desktop shortcut. Open it like any other app; closing the window quits it. On first launch, choose a username and password.
+
+The app isn't code-signed yet, so Windows SmartScreen may warn you the first time. Choose **More info → Run anyway**.
+
+The desktop app keeps its data in `%APPDATA%\AI Command Center\data`. It syncs, raises alerts and accepts task reports only while it's open. Its local server listens on port 4317, or a free port if 4317 is taken.
+
+Build the installer:
+
+```bash
+npm install
+npm run dist
+```
+
+The installer is written to `dist/`. Use `npm run app` to open the desktop app without packaging it, and `npm run icons` to regenerate the icons from `assets/icon.svg`.
+
+## Run it as a server
+
+Requires Node.js 22.13 or later (it uses the built-in `node:sqlite`).
+
+```bash
+npm install
+npm start
+```
+
+Open http://127.0.0.1:4317. On first run the server console prints a one-time **setup code**; enter it in the browser to create the single account. Server mode keeps its own data in `./data`, separate from the desktop app.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `4317` | HTTP port |
+| `HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` to open it from your phone on the same network, ideally behind HTTPS. |
+| `ACC_MASTER_KEY` | generated into `data/master.key` | 32-byte key (64 hex chars or base64) that encrypts stored API keys. Back it up. |
+| `ACC_DATA_DIR` | `./data` | Where the SQLite database lives |
+| `ACC_TRUST_PROXY` | off | Set to `1` behind a reverse proxy so secure cookies work |
+
+Run the tests with `npm test`. They are offline; provider APIs are mocked.
+
+## What each integration can see
+
+| Tool | Usage | Cost | Limits | Tasks |
+| --- | --- | --- | --- | --- |
+| Claude API (Admin key) | API, by model | API, by model | Your budget | Your scripts |
+| OpenAI API (Admin key) | API, by model | API, daily total | Your budget | Your scripts |
+| Custom agent / automation | Your scripts | Your scripts | Your budget | Your scripts |
+| Claude Pro/Max, ChatGPT plans, Gemini, Perplexity, Cursor, Copilot | You log it | You log it | Your budget | Your scripts |
+
+- **Plan limits** (ChatGPT, Claude.ai, Cursor, Copilot) are not available through these providers' APIs, so they are not shown.
+- **Anthropic** data comes from the Usage and Cost Analytics API. It usually arrives within 4 hours and can take up to 24, so today's figures often look low. The app shows how recent the data is.
+- **Tasks** are not exposed by any provider's usage API. They come from your own agents through the ingest endpoint below.
+- **Task controls** (pause, resume, cancel, restart) are not supported by any integration yet. The UI shows them as unavailable.
+
+## Reporting tasks and usage from your scripts
+
+Each tool has an ingest token, shown once when you add the tool and replaceable from its detail panel.
+
+```bash
+curl -X POST http://127.0.0.1:4317/api/ingest/<tool-id> \
+  -H "Authorization: Bearer <ingest-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tasks": [
+      {"id": "run-42", "name": "Nightly report", "status": "running", "progress": 40,
+       "started_at": "2026-11-17T21:00:00Z", "eta": "2026-11-17T21:20:00Z"}
+    ],
+    "usage": [
+      {"day": "2026-11-17", "model": "claude-opus-5-5", "input_tokens": 120000, "output_tokens": 30000, "requests": 42, "cost_usd": 1.85}
+    ]
+  }'
+```
+
+- `status` is one of `running`, `queued`, `scheduled`, `completed`, `failed`. Send `scheduled_for` with scheduled tasks and `error` with failed ones.
+- Re-sending the same task `id` updates it. A usage row sets that day's totals for that model. Rows don't add up.
+- A single task can also be sent as `{"task": {...}}`.
+
+## Adding an integration
+
+Add a module in `server/adapters/` and list it in `server/adapters/index.js`. The comment at the top of that file describes the shape: metadata, a `capabilities` map that states honestly what the service exposes, plain-language `notes`, and optional `test()` and `sync()` functions that return daily rows. The UI, alerts and summary pick it up without other changes.
+
+## How it fits together
+
+- `electron/main.js`: the desktop shell. It starts the server inside the app, opens the window, and passes the first-run setup code straight to the window.
+- `server/app.js`: Express server, security headers, routing. `server/index.js` runs it from the command line.
+- `server/auth.js`: single account, scrypt passwords, HttpOnly SameSite=Strict session cookies, login throttling.
+- `server/crypto.js`: AES-256-GCM encryption for stored keys. Keys are never sent back to the browser, only a short hint.
+- `server/sync.js`: every minute, syncs API tools that are due (every 30 minutes by default), runs alerts, and refreshes the summary.
+- `server/alerts.js`: budget warnings and limits, total-spend ceiling, spending spikes, upcoming scheduled tasks. Each alert is created only once.
+- `server/summary.js`: the daily summary. With a Claude API key in Settings it is written by Claude Opus 5.5 (refusal fallback enabled). Without one, it is built from your data by fixed rules.
+- `server/state.js`: builds the single payload the UI renders. `server/demo.js` returns sample data in the same shape, flagged `demo: true`.
+- `public/`: the frontend, plain JavaScript with Chart.js. Desktop gets a sidebar; phones get a bottom tab bar.
+
+## Security notes
+
+- Changes require the session cookie plus an `x-acc-request` header, which blocks cross-site requests.
+- The ingest endpoint takes only its own bearer token, compared by hash.
+- Content Security Policy allows scripts only from the app itself. All reported text is escaped before display.
+- The server listens on localhost by default. Before exposing it beyond your machine, put it behind HTTPS.

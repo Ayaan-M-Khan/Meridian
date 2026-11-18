@@ -1,0 +1,140 @@
+import { adapters } from './adapters/index.js';
+import { DEFAULT_SETTINGS } from './db.js';
+import { lastNDays, startOfUtcMonth, utcDay } from './util.js';
+
+/** Sample data in the same shape as buildState(). Every payload carries demo: true and the UI labels it. */
+export function demoState(now = new Date()) {
+  const ago = (min) => new Date(now.getTime() - min * 60_000).toISOString();
+  const ahead = (min) => new Date(now.getTime() + min * 60_000).toISOString();
+  const days = lastNDays(30, now);
+  const monthStart = utcDay(startOfUtcMonth(now));
+  const wave = (base, amp, i, seed) => Math.max(0, base + amp * Math.sin(i / 2.3 + seed) + ((i * 7 + seed * 13) % 5) * amp * 0.15);
+
+  const claudeCost = days.map((_, i) => +wave(3.1, 1.4, i, 1).toFixed(2));
+  const openaiCost = days.map((_, i) => +wave(2.2, 0.9, i, 2).toFixed(2));
+  const agentCost = days.map((_, i) => +wave(0.6, 0.3, i, 3).toFixed(2));
+  claudeCost[29] = null; // today is not reported yet by the provider
+  const tokensOf = (costs, perDollar) => costs.map((c) => (c == null ? null : Math.round(c * perDollar)));
+  const mtd = (arr) => arr.reduce((a, v, i) => (days[i] >= monthStart && v != null ? a + v : a), 0);
+
+  const base = (id, adapter, name, extra) => ({
+    id, adapter, name,
+    adapter_name: adapters[adapter].name,
+    vendor: adapters[adapter].vendor,
+    kind: adapters[adapter].kind,
+    can_sync: Boolean(adapters[adapter].sync),
+    enabled: true,
+    capabilities: adapters[adapter].capabilities,
+    notes: adapters[adapter].notes,
+    has_ingest: true,
+    last_error: null, data_refreshed_at: null, secret_hint: null, last_sync_at: null,
+    active: false, current_activity: null, last_activity_at: null, last_usage_day: null,
+    cost_mtd: null, cost_today: null, tokens_mtd: null, tokens_today: null,
+    input_tokens_mtd: null, output_tokens_mtd: null, requests_mtd: null, budget_usd: null, budget_pct: null,
+    ...extra,
+  });
+
+  const claudeMtd = mtd(claudeCost), openaiMtd = mtd(openaiCost), agentMtd = mtd(agentCost);
+  const tools = [
+    base(1, 'anthropic', 'Claude API', {
+      status: 'ok', secret_hint: 'sk-ant-…8f2c', last_sync_at: ago(12), data_refreshed_at: ago(190),
+      active: true, current_activity: 'Summarize support tickets', last_activity_at: ago(2), last_usage_day: days[28],
+      cost_mtd: claudeMtd, cost_today: null, tokens_mtd: Math.round(claudeMtd * 210_000), tokens_today: null,
+      input_tokens_mtd: Math.round(claudeMtd * 170_000), output_tokens_mtd: Math.round(claudeMtd * 40_000), requests_mtd: Math.round(claudeMtd * 260),
+      budget_usd: 150, budget_pct: (claudeMtd / 150) * 100,
+    }),
+    base(2, 'openai', 'OpenAI API', {
+      status: 'ok', secret_hint: 'sk-admi…41aa', last_sync_at: ago(9),
+      active: true, current_activity: 'Classify inbound leads', last_activity_at: ago(4), last_usage_day: days[29],
+      cost_mtd: openaiMtd, cost_today: openaiCost[29], tokens_mtd: Math.round(openaiMtd * 380_000), tokens_today: Math.round(openaiCost[29] * 380_000),
+      input_tokens_mtd: Math.round(openaiMtd * 300_000), output_tokens_mtd: Math.round(openaiMtd * 80_000), requests_mtd: Math.round(openaiMtd * 410),
+      budget_usd: Math.max(10, Math.round(openaiMtd / 0.82)), budget_pct: 82,
+    }),
+    base(3, 'custom-agent', 'Nightly research agent', {
+      status: 'tracked', active: true, current_activity: 'Weekly competitor digest', last_activity_at: ago(1), last_usage_day: days[29],
+      cost_mtd: agentMtd, cost_today: agentCost[29], tokens_mtd: Math.round(agentMtd * 250_000), tokens_today: Math.round(agentCost[29] * 250_000),
+      requests_mtd: Math.round(agentMtd * 90),
+    }),
+    base(4, 'cursor', 'Cursor', { status: 'tracked', cost_mtd: 20, last_usage_day: monthStart, budget_usd: 20, budget_pct: 100 }),
+    base(5, 'github-copilot', 'GitHub Copilot', { status: 'tracked' }),
+    base(6, 'anthropic', 'Claude API (side project)', {
+      status: 'error', secret_hint: 'sk-ant-…09bd', last_sync_at: ago(31),
+      last_error: 'Anthropic rejected the key. Use an Admin API key (sk-ant-admin…); regular API keys cannot read usage.',
+    }),
+  ];
+
+  const T = (id, tool, name, status, extra = {}) => ({
+    id, integration_id: tool, tool_name: tools.find((t) => t.id === tool).name, external_id: `demo-${id}`, name, status,
+    description: null, progress: null, started_at: null, eta: null, scheduled_for: null, finished_at: null, error: null,
+    updated_at: ago(5), controls: [], ...extra,
+  });
+  const tasks = [
+    T(1, 3, 'Weekly competitor digest', 'running', { description: 'Collect pricing pages from 14 competitors and summarize changes since last week.', progress: 64, started_at: ago(18), eta: ahead(9), updated_at: ago(1) }),
+    T(2, 1, 'Summarize support tickets', 'running', { description: 'Group yesterday’s 212 tickets by theme and draft a summary for the support lead.', progress: 30, started_at: ago(6), updated_at: ago(2) }),
+    T(3, 2, 'Classify inbound leads', 'running', { description: 'Score new sign-ups by company size and intent.', started_at: ago(25), updated_at: ago(4) }),
+    T(4, 3, 'Draft monthly usage report', 'scheduled', { scheduled_for: ahead(48), description: 'Compile this month’s numbers into a shareable doc.', updated_at: ago(300) }),
+    T(5, 1, 'Re-index product docs', 'queued', { description: 'Waiting for the digest run to finish.', updated_at: ago(20) }),
+    T(6, 3, 'Backfill CRM notes', 'scheduled', { scheduled_for: ahead(60 * 9), updated_at: ago(600) }),
+    T(7, 1, 'Release notes draft', 'completed', { started_at: ago(140), finished_at: ago(122), progress: 100, updated_at: ago(122) }),
+    T(8, 2, 'Tag last week’s feedback', 'completed', { started_at: ago(260), finished_at: ago(231), progress: 100, updated_at: ago(231) }),
+    T(9, 3, 'Scrape partner directory', 'failed', { started_at: ago(95), finished_at: ago(88), error: 'Target site returned HTTP 429 after 40 pages.', updated_at: ago(88) }),
+  ];
+
+  const series = [
+    { id: 1, name: 'Claude API', cost: claudeCost, tokens: tokensOf(claudeCost, 210_000) },
+    { id: 2, name: 'OpenAI API', cost: openaiCost, tokens: tokensOf(openaiCost, 380_000) },
+    { id: 3, name: 'Nightly research agent', cost: agentCost, tokens: tokensOf(agentCost, 250_000) },
+  ];
+
+  const notifications = [
+    { id: 1, kind: 'usage_warning', severity: 'warn', title: 'OpenAI API is at 82% of its monthly budget', body: 'Spending so far is close to the budget you set for this month.', read: 0, created_at: ago(40) },
+    { id: 2, kind: 'connection', severity: 'err', title: 'Claude API (side project) could not sync', body: tools[5].last_error, read: 0, created_at: ago(31) },
+    { id: 3, kind: 'task_failed', severity: 'err', title: 'Task failed: Scrape partner directory', body: 'Nightly research agent: Target site returned HTTP 429 after 40 pages.', read: 0, created_at: ago(88) },
+    { id: 4, kind: 'limit_reached', severity: 'err', title: 'Cursor reached its monthly budget', body: '$20.00 spent of the $20.00 budget you set.', read: 1, created_at: ago(60 * 26) },
+    { id: 5, kind: 'scheduled', severity: 'info', title: 'Starting soon: Draft monthly usage report', body: 'Nightly research agent is scheduled to run it within the hour.', read: 1, created_at: ago(10) },
+  ];
+
+  const feed = [
+    { id: 9, kind: 'task_running', message: 'Nightly research agent started “Weekly competitor digest”', created_at: ago(18), tool_name: 'Nightly research agent' },
+    { id: 8, kind: 'task_running', message: 'Claude API started “Summarize support tickets”', created_at: ago(6), tool_name: 'Claude API' },
+    { id: 7, kind: 'connection', message: 'Claude API (side project) sync failed: Anthropic rejected the key.', created_at: ago(31), tool_name: 'Claude API (side project)' },
+    { id: 6, kind: 'task_failed', message: 'Nightly research agent failed “Scrape partner directory”: Target site returned HTTP 429 after 40 pages.', created_at: ago(88), tool_name: 'Nightly research agent' },
+    { id: 5, kind: 'task_completed', message: 'Claude API completed “Release notes draft”', created_at: ago(122), tool_name: 'Claude API' },
+    { id: 4, kind: 'task_completed', message: 'OpenAI API completed “Tag last week’s feedback”', created_at: ago(231), tool_name: 'OpenAI API' },
+  ].sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  const enabled = tools;
+  const sum = (k) => enabled.reduce((a, t) => (t[k] == null ? a : a + t[k]), 0);
+  return {
+    demo: true,
+    generated_at: now.toISOString(),
+    stats: {
+      connected: tools.length, active: tools.filter((t) => t.active).length, needs_attention: 1,
+      running: 3, queued: 1, scheduled: 2, completed_today: 2, failed_today: 1,
+      cost_today: sum('cost_today'), cost_mtd: sum('cost_mtd'), tokens_today: sum('tokens_today'), tokens_mtd: sum('tokens_mtd'),
+      requests_mtd: sum('requests_mtd'), tools_reporting_cost: 4, ceiling_usd: 300,
+    },
+    tools,
+    usage: {
+      days,
+      series,
+      by_model: [
+        { model: 'claude-opus-5-5', tokens: Math.round(claudeMtd * 150_000), cost_usd: claudeMtd * 0.7, requests: Math.round(claudeMtd * 160) },
+        { model: 'gpt-5-mini', tokens: Math.round(openaiMtd * 380_000), cost_usd: null, requests: Math.round(openaiMtd * 410) },
+        { model: 'claude-haiku-5-5', tokens: Math.round(claudeMtd * 60_000), cost_usd: claudeMtd * 0.3, requests: Math.round(claudeMtd * 100) },
+      ],
+    },
+    tasks,
+    upcoming: tasks.filter((t) => t.status === 'scheduled' || t.status === 'queued')
+      .sort((a, b) => (a.scheduled_for ?? '9999').localeCompare(b.scheduled_for ?? '9999')),
+    feed,
+    notifications,
+    unread: notifications.filter((n) => !n.read).length,
+    summary: {
+      source: 'demo',
+      generated_at: ago(7),
+      text: 'Three tasks are running: the competitor digest is about two-thirds done and should finish in under ten minutes. Two tasks finished today and the partner directory scrape failed after the site rate-limited it. The OpenAI API is at 82% of its monthly budget, and the side-project Claude key was rejected, so that account is not syncing. Today’s Claude spending is not reported yet, which is normal for a few hours.',
+    },
+    settings: { ...DEFAULT_SETTINGS, monthly_ceiling_usd: 300, summary_key_set: false, summary_key_hint: null },
+  };
+}

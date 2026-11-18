@@ -1,0 +1,156 @@
+import { db, getSettings, getRaw } from './db.js';
+import { adapters } from './adapters/index.js';
+import { lastNDays, nowIso, rowTokens, startOfUtcMonth, sumField, sumNullable, utcDay } from './util.js';
+
+const ACTIVE_WINDOW_MS = 15 * 60_000;
+
+const sumTokens = (rows) => sumNullable(rows.map(rowTokens));
+
+export function publicSettings() {
+  const enc = getRaw('summary_key_enc');
+  return { ...getSettings(), summary_key_set: Boolean(enc), summary_key_hint: getRaw('summary_key_hint') ?? null };
+}
+
+/** Everything the UI renders, in one payload. The demo payload (demo.js) has the same shape. */
+export function buildState(now = new Date()) {
+  const settings = getSettings();
+  const today = utcDay(now);
+  const monthStart = utcDay(startOfUtcMonth(now));
+  const days = lastNDays(30, now);
+  const from = days[0] < monthStart ? days[0] : monthStart;
+
+  const ints = db.prepare('SELECT * FROM integrations ORDER BY id').all();
+  const usage = db.prepare('SELECT * FROM usage_daily WHERE day >= ?').all(from);
+  const tasks = db
+    .prepare(`SELECT t.*, i.name AS tool_name FROM tasks t JOIN integrations i ON i.id = t.integration_id ORDER BY t.updated_at DESC LIMIT 500`)
+    .all();
+  const feed = db
+    .prepare(`SELECT e.id, e.kind, e.message, e.created_at, i.name AS tool_name FROM events e LEFT JOIN integrations i ON i.id = e.integration_id ORDER BY e.id DESC LIMIT 40`)
+    .all();
+  const notifications = db.prepare('SELECT id, kind, severity, title, body, read, created_at FROM notifications ORDER BY id DESC LIMIT 100').all();
+
+  const tools = ints.map((i) => {
+    const a = adapters[i.adapter];
+    const rows = usage.filter((r) => r.integration_id === i.id);
+    const mtd = rows.filter((r) => r.day >= monthStart);
+    const td = rows.filter((r) => r.day === today);
+    const own = tasks.filter((t) => t.integration_id === i.id);
+    const running = own.find((t) => t.status === 'running');
+    const lastTask = own[0];
+    const lastUsageDay = rows.filter((r) => (rowTokens(r) ?? 0) > 0 || (r.requests ?? 0) > 0).map((r) => r.day).sort().pop() ?? null;
+    const costMtd = sumField(mtd, 'cost_usd');
+    return {
+      id: i.id,
+      name: i.name,
+      adapter: i.adapter,
+      adapter_name: a?.name ?? i.adapter,
+      vendor: a?.vendor ?? 'Unknown',
+      kind: a?.kind ?? 'manual',
+      can_sync: Boolean(a?.sync),
+      enabled: Boolean(i.enabled),
+      status: !i.enabled ? 'disabled' : a?.sync ? i.status : 'tracked',
+      last_sync_at: i.last_sync_at,
+      last_error: i.last_error,
+      data_refreshed_at: i.data_refreshed_at,
+      secret_hint: i.secret_hint,
+      has_ingest: Boolean(i.ingest_hash),
+      capabilities: a?.capabilities ?? {},
+      notes: a?.notes ?? [],
+      active: Boolean(running) || Boolean(lastTask && now - Date.parse(lastTask.updated_at) < ACTIVE_WINDOW_MS),
+      current_activity: running?.name ?? null,
+      last_activity_at: lastTask?.updated_at ?? null,
+      last_usage_day: lastUsageDay,
+      cost_mtd: costMtd,
+      cost_today: sumField(td, 'cost_usd'),
+      tokens_mtd: sumTokens(mtd),
+      tokens_today: sumTokens(td),
+      input_tokens_mtd: sumField(mtd, 'input_tokens'),
+      output_tokens_mtd: sumField(mtd, 'output_tokens'),
+      requests_mtd: sumField(mtd, 'requests'),
+      budget_usd: i.budget_usd,
+      budget_pct: i.budget_usd > 0 && costMtd != null ? (costMtd / i.budget_usd) * 100 : null,
+    };
+  });
+
+  const enabled = tools.filter((t) => t.enabled);
+  const enabledIds = new Set(enabled.map((t) => t.id));
+  const isToday = (iso) => iso?.startsWith(today);
+  const count = (status) => tasks.filter((t) => t.status === status && enabledIds.has(t.integration_id)).length;
+
+  const stats = {
+    connected: enabled.length,
+    active: enabled.filter((t) => t.active).length,
+    needs_attention: enabled.filter((t) => t.status === 'error').length,
+    running: count('running'),
+    queued: count('queued'),
+    scheduled: count('scheduled'),
+    completed_today: tasks.filter((t) => t.status === 'completed' && isToday(t.finished_at)).length,
+    failed_today: tasks.filter((t) => t.status === 'failed' && isToday(t.finished_at)).length,
+    cost_today: sumNullable(enabled.map((t) => t.cost_today)),
+    cost_mtd: sumNullable(enabled.map((t) => t.cost_mtd)),
+    tokens_today: sumNullable(enabled.map((t) => t.tokens_today)),
+    tokens_mtd: sumNullable(enabled.map((t) => t.tokens_mtd)),
+    requests_mtd: sumNullable(enabled.map((t) => t.requests_mtd)),
+    tools_reporting_cost: enabled.filter((t) => t.cost_mtd != null).length,
+    ceiling_usd: settings.monthly_ceiling_usd,
+  };
+
+  const series = enabled
+    .map((t) => {
+      const rows = usage.filter((r) => r.integration_id === t.id);
+      return {
+        id: t.id,
+        name: t.name,
+        cost: days.map((d) => sumField(rows.filter((r) => r.day === d), 'cost_usd')),
+        tokens: days.map((d) => sumTokens(rows.filter((r) => r.day === d))),
+      };
+    })
+    .filter((s) => s.cost.some((v) => v != null) || s.tokens.some((v) => v != null));
+
+  const models = new Map();
+  for (const r of usage) {
+    if (r.day < monthStart || !r.model || !enabledIds.has(r.integration_id)) continue;
+    const m = models.get(r.model) ?? { model: r.model, tokens: null, cost_usd: null, requests: null };
+    m.tokens = sumNullable([m.tokens, rowTokens(r)]);
+    m.cost_usd = sumNullable([m.cost_usd, r.cost_usd]);
+    m.requests = sumNullable([m.requests, r.requests]);
+    models.set(r.model, m);
+  }
+
+  const taskView = tasks.map((t) => ({
+    id: t.id,
+    integration_id: t.integration_id,
+    tool_name: t.tool_name,
+    external_id: t.external_id,
+    name: t.name,
+    description: t.description,
+    status: t.status,
+    progress: t.progress,
+    started_at: t.started_at,
+    eta: t.eta,
+    scheduled_for: t.scheduled_for,
+    finished_at: t.finished_at,
+    error: t.error,
+    updated_at: t.updated_at,
+    controls: [],
+  }));
+
+  const upcoming = taskView
+    .filter((t) => (t.status === 'scheduled' || t.status === 'queued') && enabledIds.has(t.integration_id))
+    .sort((a, b) => (a.scheduled_for ?? '9999').localeCompare(b.scheduled_for ?? '9999'));
+
+  return {
+    demo: false,
+    generated_at: nowIso(),
+    stats,
+    tools,
+    usage: { days, series, by_model: [...models.values()].sort((a, b) => (b.tokens ?? 0) - (a.tokens ?? 0)) },
+    tasks: taskView,
+    upcoming,
+    feed,
+    notifications,
+    unread: notifications.filter((n) => !n.read).length,
+    summary: getRaw('summary_cache') ?? null,
+    settings: publicSettings(),
+  };
+}
