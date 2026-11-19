@@ -607,11 +607,12 @@ function heroCommand(d) {
     <p class="hero-foot">Each AI does the part it’s best at, in the background. Follow it on the Tasks page. <button class="link" type="button" data-action="team-folder">${ICON.folder}Work on files in a folder</button> · <a href="#settings">Change who does what</a></p>`;
 }
 
-function chatItem(it) {
+function chatItem(it, i) {
   if (it.role === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
   if (it.role === 'assistant') {
     const e = S.data?.engine;
-    return `<div class="msg ai">${e ? engineLogo(e, 'xs') : `<span class="logo xs hue-brand">${ICON.spark}</span>`}<div class="bubble md">${it.text ? md(it.text) : '<span class="typing"><i></i><i></i><i></i></span>'}</div></div>`;
+    const copy = it.text && !S.chat.streaming ? `<button class="bubble-copy" data-action="copy-reply" data-index="${i}" aria-label="Copy this reply" title="Copy">${ICON.check}<span>Copy</span></button>` : '';
+    return `<div class="msg ai">${e ? engineLogo(e, 'xs') : `<span class="logo xs hue-brand">${ICON.spark}</span>`}<div class="bubble md">${it.text ? md(it.text) : '<span class="typing"><i></i><i></i><i></i></span>'}</div>${copy}</div>`;
   }
   if (it.role === 'action') {
     const icon = it.pending ? '<span class="spin"></span>' : it.ok ? ICON.check : ICON.x;
@@ -1062,24 +1063,15 @@ const VIEWS = {
 
   tasks() {
     const d = S.data;
-    const groups = {
-      all: d.tasks,
-      running: d.tasks.filter((t) => t.status === 'running'),
-      upcoming: d.tasks.filter((t) => t.status === 'queued' || t.status === 'scheduled'),
-      completed: d.tasks.filter((t) => t.status === 'completed' && t.kind !== 'session'),
-      failed: d.tasks.filter((t) => t.status === 'failed'),
-      sessions: d.tasks.filter((t) => t.kind === 'session'),
-    };
-    const labels = { all: 'All', running: 'Running', upcoming: 'Upcoming', completed: 'Completed', failed: 'Failed', sessions: 'Sessions' };
-    if (!groups.sessions.length) delete groups.sessions;
-    const list = groups[S.taskFilter] ?? groups.all;
+    const { groups, labels } = taskGroups(d);
     const canRun = !d.demo && d.engine;
     return `<div class="page-head"><div><h2>Tasks</h2><p>What your agents and apps report, live sessions from AI apps on this computer, and work the assistant and the AI team do here.</p></div>
       ${canRun ? `<div class="form-actions"><button class="btn" data-action="new-claude-task">${ICON.spark}New assistant task</button><button class="btn primary" data-action="new-team-task">${ICON.team}New AI team task</button></div>` : ''}</div>
-      <div class="chips" role="group" aria-label="Filter tasks">${Object.keys(groups).map((k) => `<button class="chip" data-action="task-filter" data-filter="${k}" aria-pressed="${S.taskFilter === k}">${labels[k]} <span class="n num">${groups[k].length}</span></button>`).join('')}</div>
-      <section class="card">${list.length ? `<div class="rows">${list.map((t) => taskRow(t)).join('')}</div>` : d.tasks.length
-        ? emptyBlock(`No ${labels[S.taskFilter]?.toLowerCase() ?? ''} tasks`, 'Try another filter.')
-        : emptyBlock('No tasks yet', 'Connect Claude Code, Codex, Gemini CLI or GitHub Copilot to see their sessions, have your scripts report tasks, or start an assistant task.')}</section>`;
+      <div class="task-tools">
+        <div class="chips" role="group" aria-label="Filter tasks">${Object.keys(groups).map((k) => `<button class="chip" data-action="task-filter" data-filter="${k}" aria-pressed="${S.taskFilter === k}">${labels[k]} <span class="n num">${groups[k].length}</span></button>`).join('')}</div>
+        <input class="input task-search" id="task-search" type="search" placeholder="Search tasks" value="${esc(S.taskQuery ?? '')}" aria-label="Search tasks" autocomplete="off">
+      </div>
+      <section class="card" id="task-list">${taskListHtml(groups, labels)}</section>`;
   },
 
   notifications() {
@@ -1109,6 +1101,7 @@ const VIEWS = {
               ${engineLogo(e, 'sm')}<span class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(e.ready ? `Ready · ${e.via}` : e.reason)}</span></span>
               ${!e.ready && e.kind === 'cli' && !d.demo ? (e.integration_id ? `<a class="btn small" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small" type="button" data-action="connect-local" data-id="${e.id}">Connect</button>`) : ''}</label>`).join('')}
           </div>
+          <label class="switch summary-switch"><span><span class="switch-label">Write the daily summary with AI</span><span class="faint small">One short request to the AI above every ${esc(st.summary_interval_hours)} hours. Off: the summary is built from your data by fixed rules, with no AI use.</span></span><input type="checkbox" data-summary-mode ${st.summary_mode !== 'rules' ? 'checked' : ''} ${dis}></label>
         </section>
 
         <section class="card span-2"><div class="card-head">${ICON.team}<h3>AI team</h3></div>
@@ -1182,6 +1175,34 @@ const VIEWS = {
       </div>`;
   },
 };
+
+function taskGroups(d) {
+  const groups = {
+    all: d.tasks,
+    running: d.tasks.filter((t) => t.status === 'running'),
+    upcoming: d.tasks.filter((t) => t.status === 'queued' || t.status === 'scheduled'),
+    completed: d.tasks.filter((t) => t.status === 'completed' && t.kind !== 'session'),
+    failed: d.tasks.filter((t) => t.status === 'failed'),
+    team: d.tasks.filter((t) => t.kind === 'team'),
+    sessions: d.tasks.filter((t) => t.kind === 'session'),
+  };
+  const labels = { all: 'All', running: 'Running', upcoming: 'Upcoming', completed: 'Completed', failed: 'Failed', team: 'AI team', sessions: 'Sessions' };
+  for (const k of ['team', 'sessions']) if (!groups[k].length) delete groups[k];
+  return { groups, labels };
+}
+
+/** The task list for the current filter and search, so typing in the search box only redraws the list. */
+function taskListHtml(groups, labels) {
+  const d = S.data;
+  const q = (S.taskQuery ?? '').trim().toLowerCase();
+  let list = groups[S.taskFilter] ?? groups.all;
+  if (q) list = list.filter((t) => [t.name, t.tool_name, t.description, t.step, t.error, t.runner_label].some((v) => v && String(v).toLowerCase().includes(q)));
+  if (list.length) return `<div class="rows">${list.map((t) => taskRow(t)).join('')}</div>`;
+  if (q) return emptyBlock('No matching tasks', `Nothing ${S.taskFilter === 'all' ? '' : `in ${labels[S.taskFilter]?.toLowerCase()} `}matches “${S.taskQuery.trim()}”.`);
+  return d.tasks.length
+    ? emptyBlock(`No ${labels[S.taskFilter]?.toLowerCase() ?? ''} tasks`, 'Try another filter.')
+    : emptyBlock('No tasks yet', 'Connect Claude Code, Codex, Gemini or GitHub Copilot to see their sessions, have your scripts report tasks, or start an assistant or AI team task.');
+}
 
 function welcome() {
   const local = S.local;
@@ -1436,7 +1457,8 @@ async function openTask(id, { refresh = false } = {}) {
       box.insertAdjacentHTML('beforebegin', `<div class="section"><h4>Result</h4>
         <div class="result md" id="task-result">${md(detail.result)}</div>
         <pre id="task-result-raw" hidden>${esc(detail.result)}</pre>
-        <div class="form-actions"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button></div></div>`);
+        <div class="form-actions"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button>
+          <button class="btn small" data-action="save-result" data-name="${esc(t.name)}">${ICON.download}Save as file</button></div></div>`);
     }
     restore();
   } catch (err) {
@@ -1889,6 +1911,22 @@ const ACTIONS = {
   async 'stop-chat'() {
     if (S.chat.thread) await api(`/api/assistant/threads/${S.chat.thread.id}/stop`, { method: 'POST' });
   },
+  'save-result'(el) {
+    const text = $('#task-result-raw')?.textContent ?? '';
+    const slug = el.dataset.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'result';
+    saveFile(`${slug}.md`, text, 'text/markdown');
+  },
+  async 'copy-reply'(el) {
+    const it = S.chat.thread?.items?.[Number(el.dataset.index)];
+    if (!it?.text) return;
+    try {
+      await navigator.clipboard.writeText(it.text);
+      el.classList.add('done');
+      setTimeout(() => el.isConnected && el.classList.remove('done'), 1500);
+    } catch {
+      toast('Couldn’t copy. Select the text and press Ctrl+C.', true);
+    }
+  },
   async 'backup-download'(el) {
     el.disabled = true;
     try {
@@ -2089,6 +2127,17 @@ async function onChange(e) {
     }
     return;
   }
+  if ('summaryMode' in el.dataset) {
+    try {
+      await api('/api/settings', { method: 'PUT', body: { summary_mode: el.checked ? 'ai' : 'rules' } });
+      toast(el.checked ? 'The summary is written by AI' : 'The summary is built from rules, without AI');
+      await load({ force: true });
+    } catch (err) {
+      el.checked = !el.checked;
+      toast(err.message, true);
+    }
+    return;
+  }
   if (el.dataset.desktop) {
     try {
       await api('/api/settings', { method: 'PUT', body: { desktop: { [el.dataset.desktop]: el.checked } } });
@@ -2153,6 +2202,11 @@ async function boot() {
     document.addEventListener('input', (e) => {
       if (e.target.id === 'chat-input') autosize(e.target);
       else if (e.target.id === 'tt-folder') refreshLineup();
+      else if (e.target.id === 'task-search') {
+        S.taskQuery = e.target.value;
+        const { groups, labels } = taskGroups(S.data);
+        $('#task-list').innerHTML = taskListHtml(groups, labels);
+      }
     });
     document.addEventListener('keydown', (e) => {
       if (e.target.id === 'chat-input' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -2161,6 +2215,19 @@ async function boot() {
         return;
       }
       if (e.key === 'Escape') closeModal();
+      // Ctrl+K (or / outside a text box) jumps to the command bar on the overview.
+      const typingNow = /INPUT|SELECT|TEXTAREA/.test(e.target.tagName ?? '') || e.target.isContentEditable;
+      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') || (e.key === '/' && !typingNow && !e.ctrlKey && !e.metaKey)) {
+        if (!S.user || !S.data) return;
+        e.preventDefault();
+        closeModal();
+        const focusBar = () => $('.command-input')?.focus();
+        if (S.page === 'dashboard') focusBar();
+        else {
+          location.hash = '#dashboard';
+          setTimeout(focusBar, 60);
+        }
+      }
     });
     document.addEventListener('visibilitychange', () => !document.hidden && S.user && load());
     matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => S.data && renderPage());

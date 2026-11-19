@@ -87,13 +87,16 @@ async function aiSummary(facts, engine) {
   return text;
 }
 
+/** The AI that writes the summary, or null to build it from rules (switched off in Settings, or nothing ready). */
+const summaryEngine = () => (getSettings().summary_mode === 'rules' ? null : currentEngine());
+
 let refreshing = null;
 
 /** Rebuilds the summary: written by the assistant's AI when one is ready, otherwise from fixed rules. */
 export function refreshSummary() {
   refreshing ??= (async () => {
     const facts = buildFacts(buildState());
-    const engine = currentEngine();
+    const engine = summaryEngine();
     let result;
     if (engine && facts.tools.length) {
       setRaw('summary_ai_attempt', { at: nowIso(), engine: engine.id });
@@ -125,7 +128,7 @@ export function getSummary() {
 export async function maybeRefreshSummary() {
   const cached = getSummary();
   const intervalMs = getSettings().summary_interval_hours * 3_600_000;
-  const engine = currentEngine();
+  const engine = summaryEngine();
   const last = getRaw('summary_ai_attempt');
   if (engine && (!last || last.engine !== engine.id || Date.now() - Date.parse(last.at) >= intervalMs)) {
     await refreshSummary();

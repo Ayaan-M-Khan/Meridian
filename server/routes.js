@@ -253,6 +253,10 @@ export function apiRoutes(app) {
       if (!ENGINE_CHOICES.includes(body.assistant_engine)) throw new HttpError(400, 'Choose one of the listed assistants.');
       s.assistant_engine = body.assistant_engine;
     }
+    if ('summary_mode' in body) {
+      if (!['ai', 'rules'].includes(body.summary_mode)) throw new HttpError(400, 'The summary is written by AI or built from rules.');
+      s.summary_mode = body.summary_mode;
+    }
     if (body.desktop && typeof body.desktop === 'object') {
       for (const k of Object.keys(s.desktop)) if (k in body.desktop) s.desktop[k] = Boolean(body.desktop[k]);
     }

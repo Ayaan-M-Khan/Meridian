@@ -380,3 +380,19 @@ test('a finished task you started raises one alert, which reaches the desktop no
     delete globalThis.accDesktopNotify;
   }
 });
+
+test('with the summary set to rules, no AI is asked to write it', async () => {
+  const { setRaw, getSettings } = await import('../server/db.js');
+  const { refreshSummary } = await import('../server/summary.js');
+  const log = path.join(tmp, 'summary.log');
+  process.env.FAKE_CLAUDE_LOG = log;
+  setRaw('settings', { ...getSettings(), summary_mode: 'rules', assistant_engine: 'auto' });
+  try {
+    const r = await refreshSummary();
+    assert.equal(r.source, 'rules');
+    assert.ok(!fs.existsSync(log), 'Claude Code was not run');
+  } finally {
+    setRaw('settings', { ...getSettings(), summary_mode: 'ai' });
+    delete process.env.FAKE_CLAUDE_LOG;
+  }
+});

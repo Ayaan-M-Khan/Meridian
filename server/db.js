@@ -155,6 +155,8 @@ export const DEFAULT_SETTINGS = {
   spike_multiplier: 2,
   assistant_web_search: false,
   assistant_engine: 'auto',
+  summary_mode: 'ai', // 'ai': written by the assistant's AI when one is ready; 'rules': built from your data, no AI
+
   // Who does each part of an AI team task. 'auto' picks the best-suited AI that's ready.
   team_roles: { planner: 'auto', builder: 'auto', reviewer: 'auto', debugger: 'auto' },
   // Desktop app only: keep running in the tray when the window closes, start at sign-in, show Windows notifications.
