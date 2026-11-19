@@ -361,3 +361,22 @@ test('when an AI can’t do its part of a team task, the next one takes over', a
     setClaudeClientForTests(null);
   }
 });
+
+test('a finished task you started raises one alert, which reaches the desktop notification hook', async () => {
+  const seen = [];
+  globalThis.accDesktopNotify = (n) => seen.push(n);
+  teamDir('team-notify');
+  process.env.FAKE_CLAUDE_TEAM = JSON.stringify({ Planner: ['1. Go'], Builder: ['All done'], Reviewer: ['VERDICT: APPROVE'] });
+  try {
+    const t = startTeamTask({ goal: 'Say hello' });
+    const done = await finished(t.id);
+    assert.equal(done.status, 'completed', done.error ?? '');
+    const rows = db.prepare("SELECT title, body FROM notifications WHERE kind = 'my_task_done' AND title LIKE ?").all('%Say hello%');
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].title, /^AI team finished: Say hello/);
+    assert.match(rows[0].body, /All done/);
+    assert.ok(seen.some((n) => n.kind === 'my_task_done' && /Say hello/.test(n.title)));
+  } finally {
+    delete globalThis.accDesktopNotify;
+  }
+});

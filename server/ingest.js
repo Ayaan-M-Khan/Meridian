@@ -95,6 +95,20 @@ export function announce(integration, taskId, t, { quiet = false } = {}) {
   }
 }
 
+/** The alert for a background or AI team task you started, when it finishes or fails. */
+export function notifyMine(taskId, t, label) {
+  if (t.status !== 'completed' && t.status !== 'failed') return;
+  const ok = t.status === 'completed';
+  const preview = String((ok ? t.result : t.error) ?? '').replace(/[#*`>_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  notify({
+    kind: 'my_task_done',
+    severity: ok ? 'ok' : 'err',
+    title: `${label} ${ok ? 'finished' : 'failed'}: ${t.name}`,
+    body: (preview || (ok ? 'The result is on the task.' : 'No error message was reported.')).slice(0, 180),
+    dedupe: `mine:${taskId}:${t.finished_at}`,
+  });
+}
+
 export function upsertUsage(integrationId, u, source) {
   db.prepare(
     `INSERT INTO usage_daily(integration_id, day, model, source, input_tokens, output_tokens, requests, cost_usd)

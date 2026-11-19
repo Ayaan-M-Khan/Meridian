@@ -5,7 +5,7 @@
  * The AI reports its own progress with the report_progress tool; the ETA watcher works from those reports.
  */
 import { db, getSettings } from './db.js';
-import { announce } from './ingest.js';
+import { announce, notifyMine } from './ingest.js';
 import { recordProgress } from './eta.js';
 import { evaluateAlerts } from './alerts.js';
 import { READ_TOOLS, ToolInputError, definition, runTool } from './assistant-tools.js';
@@ -68,7 +68,9 @@ function setStatus(id, status, fields = {}) {
   db.prepare(`UPDATE tasks SET ${Object.keys(cols).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...Object.values(cols), id);
   const t = taskRow(id);
   if (!t) return null; // the tool was removed while the task ran
-  announce({ id: t.integration_id, name: t.tool_name }, id, t, { quiet: fields.error === CANCELLED });
+  // Tasks you started get their own "finished" or "failed" alert instead of the general task alerts.
+  announce({ id: t.integration_id, name: t.tool_name }, id, t, { quiet: true });
+  if (fields.error !== CANCELLED) notifyMine(id, t, 'Task');
   evaluateAlerts();
   return t;
 }

@@ -157,7 +157,10 @@ export const DEFAULT_SETTINGS = {
   assistant_engine: 'auto',
   // Who does each part of an AI team task. 'auto' picks the best-suited AI that's ready.
   team_roles: { planner: 'auto', builder: 'auto', reviewer: 'auto', debugger: 'auto' },
+  // Desktop app only: keep running in the tray when the window closes, start at sign-in, show Windows notifications.
+  desktop: { keep_running: false, open_at_login: false, notifications: true },
   notify: {
+    my_task_done: true,
     task_failed: true,
     task_completed: false,
     task_stalled: true,
@@ -192,6 +195,7 @@ export function getSettings() {
     ...saved,
     notify: { ...DEFAULT_SETTINGS.notify, ...(saved.notify ?? {}) },
     team_roles: { ...DEFAULT_SETTINGS.team_roles, ...(saved.team_roles ?? {}) },
+    desktop: { ...DEFAULT_SETTINGS.desktop, ...(saved.desktop ?? {}) },
   };
 }
 
@@ -205,7 +209,10 @@ export function addEvent(integrationId, kind, message) {
   db.prepare('DELETE FROM events WHERE id <= (SELECT MAX(id) - 1000 FROM events)').run();
 }
 
-/** Creates a notification once per dedupe key, if that kind is switched on. Returns true when created. */
+/**
+ * Creates a notification once per dedupe key, if that kind is switched on. Returns true when created.
+ * In the desktop app, a new one also becomes a Windows notification (see electron/main.js).
+ */
 export function notify({ kind, severity, title, body, dedupe }) {
   if (getSettings().notify[kind] === false) return false;
   const res = db
@@ -213,5 +220,12 @@ export function notify({ kind, severity, title, body, dedupe }) {
       'INSERT OR IGNORE INTO notifications(kind, severity, title, body, dedupe_key, created_at) VALUES(?, ?, ?, ?, ?, ?)',
     )
     .run(kind, severity, title, body, dedupe ?? null, nowIso());
+  if (res.changes > 0 && typeof globalThis.accDesktopNotify === 'function') {
+    try {
+      globalThis.accDesktopNotify({ kind, severity, title, body });
+    } catch (err) {
+      console.error('[acc] desktop notification:', err.message);
+    }
+  }
   return res.changes > 0;
 }

@@ -182,6 +182,7 @@ export function demoState(now = new Date()) {
       text: 'Three tasks are running: the competitor digest is about two-thirds done and should finish in under ten minutes. Two tasks finished today and the partner directory scrape failed after the site rate-limited it. The OpenAI API is at 82% of its monthly budget, and the side-project Claude key was rejected, so that account is not syncing. Today’s Claude spending is not reported yet, which is normal for a few hours.',
     },
     settings: { ...DEFAULT_SETTINGS, monthly_ceiling_usd: 300, summary_key_set: false, summary_key_hint: null },
+    desktop_app: Boolean(globalThis.accDesktop),
     engines: [
       { id: 'claude-code', label: 'Claude Code', via: 'your Claude account', vendor: 'Anthropic', kind: 'cli', integration_id: 7, ready: true, reason: null },
       { id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', integration_id: null, ready: false, reason: 'Add a Claude API key in Settings.' },

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, nativeTheme, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,12 +12,59 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   let win = null;
   let server = null;
+  let tray = null;
+  let trayTimer = null;
+  let quitting = false;
+  let busyCount = () => 0;
+  let desktopSettings = () => ({});
+  // Started by Windows at sign-in: stay in the tray until opened.
+  const startHidden = process.argv.includes('--hidden');
 
-  app.on('second-instance', () => {
+  function showWindow(hash) {
     if (!win) return;
     if (win.isMinimized()) win.restore();
+    win.show();
     win.focus();
-  });
+    if (hash) win.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)}`).catch(() => {});
+  }
+
+  function updateTrayMenu() {
+    if (!tray) return;
+    const busy = busyCount();
+    tray.setToolTip(busy ? `AI Command Center · ${busy} task${busy === 1 ? '' : 's'} running` : 'AI Command Center');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open AI Command Center', click: () => showWindow() },
+      { label: busy ? `${busy} task${busy === 1 ? '' : 's'} running` : 'Nothing running', enabled: false },
+      { label: 'Tasks', click: () => showWindow('#tasks') },
+      { type: 'separator' },
+      { label: 'Quit', click: () => { quitting = true; app.quit(); } },
+    ]));
+  }
+
+  /** The tray icon that keeps the app reachable while its window is hidden. */
+  function ensureTray() {
+    if (tray) return;
+    tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
+    tray.on('click', () => showWindow());
+    updateTrayMenu();
+    trayTimer = setInterval(updateTrayMenu, 15_000);
+  }
+
+  function removeTray() {
+    clearInterval(trayTimer);
+    tray?.destroy();
+    tray = null;
+  }
+
+  function hideToTray(firstTime) {
+    ensureTray();
+    win.hide();
+    if (firstTime && Notification.isSupported()) {
+      new Notification({ title: 'AI Command Center is still running', body: 'Tasks, syncs and alerts keep going. Open it again from the icon in the system tray.', icon: ICON, silent: true }).show();
+    }
+  }
+
+  app.on('second-instance', () => showWindow());
 
   async function boot() {
     // The desktop app keeps its own database in the user's app-data folder.
@@ -29,6 +76,11 @@ if (!app.requestSingleInstanceLock()) {
       if (err.code !== 'EADDRINUSE') throw err;
       server = await startServer({ host: '127.0.0.1', port: 0 });
     }
+    const { getSettings } = await import('../server/db.js');
+    const { runningCount } = await import('../server/runner.js');
+    const { teamRunningCount } = await import('../server/team.js');
+    busyCount = () => runningCount() + teamRunningCount();
+    desktopSettings = () => getSettings().desktop ?? {};
 
     const origin = `http://127.0.0.1:${server.port}`;
     Menu.setApplicationMenu(null);
@@ -43,14 +95,62 @@ if (!app.requestSingleInstanceLock()) {
       show: false,
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
     });
-    win.once('ready-to-show', () => win.show());
+    win.once('ready-to-show', () => {
+      if (startHidden) ensureTray();
+      else win.show();
+    });
     win.on('closed', () => (win = null));
 
-    // The server asks for this when you choose a folder for an AI team task.
+    // Closing the window: hide to the tray when that's switched on; otherwise warn before stopping running tasks.
+    let hiddenBefore = false;
+    win.on('close', (event) => {
+      if (quitting) return;
+      if (desktopSettings().keep_running) {
+        event.preventDefault();
+        hideToTray(!hiddenBefore);
+        hiddenBefore = true;
+        return;
+      }
+      const busy = busyCount();
+      if (!busy) return;
+      const choice = dialog.showMessageBoxSync(win, {
+        type: 'question',
+        title: 'AI Command Center',
+        message: `${busy} task${busy === 1 ? ' is' : 's are'} still running`,
+        detail: 'If you quit, they stop. In the background they keep going, and the app stays in the system tray until you quit it there.',
+        buttons: ['Keep running in the background', 'Quit anyway', 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+      });
+      if (choice === 1) return;
+      event.preventDefault();
+      if (choice === 0) {
+        hideToTray(!hiddenBefore);
+        hiddenBefore = true;
+      }
+    });
+
+    // Hooks the server calls. Only the desktop app sets them, so server mode works without them.
+    globalThis.accDesktop = { version: app.getVersion() };
     globalThis.accPickFolder = async () => {
       const r = await dialog.showOpenDialog(win, { title: 'Choose a folder for the AI team', properties: ['openDirectory'] });
       return r.canceled ? null : r.filePaths[0] ?? null;
     };
+    /** New alerts become Windows notifications while the window isn't in front. Clicking one opens it. */
+    globalThis.accDesktopNotify = (n) => {
+      if (!Notification.isSupported() || desktopSettings().notifications === false) return;
+      if (win && win.isVisible() && win.isFocused()) return;
+      const note = new Notification({ title: n.title, body: n.body ?? '', icon: ICON, silent: n.severity === 'info' });
+      note.on('click', () => showWindow(n.kind === 'my_task_done' ? '#tasks' : '#notifications'));
+      note.show();
+    };
+    globalThis.accApplyDesktopSettings = (d = desktopSettings()) => {
+      if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: Boolean(d.open_at_login), args: ['--hidden'] });
+      if (d.keep_running) ensureTray();
+      else if (win?.isVisible()) removeTray();
+    };
+    globalThis.accApplyDesktopSettings();
 
     // Links to other sites open in the default browser, never inside the app window.
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -72,7 +172,13 @@ if (!app.requestSingleInstanceLock()) {
     app.quit();
   });
 
-  // Closing the window quits the app, like any other desktop application.
-  app.on('window-all-closed', () => app.quit());
-  app.on('before-quit', () => server?.close());
+  // Without the tray, closing the window quits the app, like any other desktop application.
+  app.on('window-all-closed', () => {
+    if (!tray) app.quit();
+  });
+  app.on('before-quit', () => {
+    quitting = true;
+    removeTray();
+    server?.close();
+  });
 }

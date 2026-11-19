@@ -206,6 +206,7 @@ export function buildState(now = new Date()) {
     unread: notifications.filter((n) => !n.read).length,
     summary: getRaw('summary_cache') ?? null,
     settings: publicSettings(),
+    desktop_app: Boolean(globalThis.accDesktop),
     ...engineState(settings),
     team: { lineup: lineupView({ settings }), roles: Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, { title: r.title, does: r.does }])) },
   };

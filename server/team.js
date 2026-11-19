@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { db, getSettings, DATA_DIR } from './db.js';
-import { announce } from './ingest.js';
+import { announce, notifyMine } from './ingest.js';
 import { recordProgress } from './eta.js';
 import { evaluateAlerts } from './alerts.js';
 import { listEngines } from './engine-list.js';
@@ -120,10 +120,13 @@ function setStatus(id, status, fields = {}) {
   save(id, { status, ...fields });
   const t = taskRow(id);
   if (!t) return null;
-  announce({ id: t.integration_id, name: t.tool_name }, id, t, { quiet: fields.error === CANCELLED });
+  announce({ id: t.integration_id, name: t.tool_name }, id, t, { quiet: true });
+  if (fields.error !== CANCELLED) notifyMine(id, t, 'AI team');
   evaluateAlerts();
   return t;
 }
+
+export const teamRunningCount = () => active.size + queue.length;
 
 const CANCELLED = 'Cancelled from AI Command Center.';
 

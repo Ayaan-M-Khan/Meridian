@@ -90,6 +90,7 @@ const CAP_LONG = {
   none: 'Not available for this service',
 };
 const NOTIFY_LABELS = {
+  my_task_done: ['Your tasks', 'When an assistant or AI team task you started finishes or fails'],
   task_failed: ['Failed tasks', 'When a reported task fails'],
   task_completed: ['Completed tasks', 'When a reported task finishes'],
   task_stalled: ['Stalled tasks', 'When a task that reports progress stops updating'],
@@ -1157,6 +1158,14 @@ const VIEWS = {
           ${Object.entries(NOTIFY_LABELS).map(([k, [label, help]]) => `<label class="switch"><span><span class="switch-label">${esc(label)}</span><span class="faint small">${esc(help)}</span></span><input type="checkbox" id="n-${k}" data-notify="${k}" ${st.notify[k] ? 'checked' : ''} ${dis}></label>`).join('')}
         </section>
 
+        ${d.desktop_app ? `<section class="card"><div class="card-head">${ICON.grid}<h3>Desktop app</h3></div>
+          ${[
+            ['keep_running', 'Keep running when the window is closed', 'Tasks, the AI team, syncs and alerts keep going. Open it again from the icon in the system tray, and quit it there.'],
+            ['open_at_login', 'Start when you sign in to Windows', 'Starts in the system tray, so syncs and alerts run from the moment you sign in.'],
+            ['notifications', 'Windows notifications', 'Show new alerts, such as a finished AI team task, as Windows notifications while the app isn’t in front.'],
+          ].map(([k, label, help]) => `<label class="switch"><span><span class="switch-label">${esc(label)}</span><span class="faint small">${esc(help)}</span></span><input type="checkbox" data-desktop="${k}" ${st.desktop?.[k] ? 'checked' : ''} ${dis}></label>`).join('')}
+        </section>` : ''}
+
         <section class="card"><div class="card-head">${ICON.sun}<h3>Appearance, demo and account</h3></div>
           <div class="switch"><span><span class="switch-label">Theme</span><span class="faint small">Saved on this device</span></span>
             <div class="seg" role="group" aria-label="Theme">${['system', 'dark', 'light'].map((v) => `<button type="button" class="seg-btn" data-action="set-theme" data-theme="${v}" aria-pressed="${theme === v}">${cap1(v)}</button>`).join('')}</div></div>
@@ -2013,6 +2022,17 @@ async function onChange(e) {
     } catch (err) {
       toast(err.message, true);
       renderPage();
+    }
+    return;
+  }
+  if (el.dataset.desktop) {
+    try {
+      await api('/api/settings', { method: 'PUT', body: { desktop: { [el.dataset.desktop]: el.checked } } });
+      toast('Setting saved');
+      await load({ force: true });
+    } catch (err) {
+      el.checked = !el.checked;
+      toast(err.message, true);
     }
     return;
   }

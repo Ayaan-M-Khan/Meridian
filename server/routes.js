@@ -242,6 +242,9 @@ export function apiRoutes(app) {
       if (!ENGINE_CHOICES.includes(body.assistant_engine)) throw new HttpError(400, 'Choose one of the listed assistants.');
       s.assistant_engine = body.assistant_engine;
     }
+    if (body.desktop && typeof body.desktop === 'object') {
+      for (const k of Object.keys(s.desktop)) if (k in body.desktop) s.desktop[k] = Boolean(body.desktop[k]);
+    }
     if (body.team_roles && typeof body.team_roles === 'object') {
       for (const [role, v] of Object.entries(body.team_roles)) {
         if (!ROLES[role] || !ENGINE_CHOICES.includes(v)) throw new HttpError(400, 'Choose one of the listed AIs for each role.');
@@ -252,6 +255,7 @@ export function apiRoutes(app) {
       for (const k of Object.keys(s.notify)) if (k in body.notify) s.notify[k] = Boolean(body.notify[k]);
     }
     setRaw('settings', s);
+    if (body.desktop && typeof globalThis.accApplyDesktopSettings === 'function') globalThis.accApplyDesktopSettings(s.desktop);
     if ('summary_key' in body) {
       if (body.summary_key) {
         const key = cleanSecret(body.summary_key);
