@@ -130,27 +130,48 @@ export const teamRunningCount = () => active.size + queue.length;
 
 const CANCELLED = 'Cancelled from AI Command Center.';
 
-/** Creates an AI team task and starts it, or queues it behind the one that's running. */
-export function startTeamTask({ goal, folder }) {
+const MAX_COMPARE = 6;
+
+/**
+ * Creates an AI team task and starts it, or queues it behind the one that's running.
+ * mode 'team' splits the work by role; mode 'compare' ("Ask all") has every ready AI answer the same request on its
+ * own, then the builder combines the answers into one.
+ */
+export function startTeamTask({ goal, folder, mode = 'team' }) {
   if (typeof goal !== 'string' || !goal.trim()) throw new HttpError(400, 'Describe what the team should do.');
   if (goal.length > 4000) throw new HttpError(400, 'Keep the goal under 4,000 characters.');
+  if (!['team', 'compare'].includes(mode)) throw new HttpError(400, 'Choose how the AIs work together.');
   const dir = cleanFolder(folder);
+  if (dir && mode === 'compare') throw new HttpError(400, 'Asking all AIs works with text only. Leave the folder empty, or split the work instead.');
   const lineup = teamLineup({ folder: Boolean(dir) });
   if (!lineup) {
     throw new HttpError(400, dir
-      ? 'Working in a folder needs an AI app on this computer: connect and sign in to Claude Code, Codex, Gemini CLI, GitHub Copilot or Cursor.'
+      ? 'Working in a folder needs an AI app on this computer: connect and sign in to Claude Code, Codex, Gemini, GitHub Copilot or Cursor.'
       : 'Connect at least one AI first: an app signed in with your account, or a Claude API key.');
   }
   const integ = assistantIntegration();
   if (!integ.enabled) throw new HttpError(409, 'The built-in assistant tool is turned off on the AI Tools page.');
   const text = goal.trim();
   const name = text.split('\n')[0].replace(/\s+/g, ' ').slice(0, 80);
-  const detail = {
-    goal: text,
-    folder: dir,
-    lineup: Object.fromEntries(Object.entries(lineup).map(([r, e]) => [r, e.id])),
-    stages: STAGES.map((s) => ({ key: s.key, label: s.label, role: s.role, engine: lineup[s.role].id, engine_label: lineup[s.role].label, status: 'pending' })),
-  };
+  const answering = listEngines().filter((e) => e.ready).slice(0, MAX_COMPARE);
+  const detail = mode === 'compare'
+    ? {
+        goal: text,
+        folder: null,
+        mode,
+        lineup: { builder: lineup.builder.id, answering: answering.map((e) => e.id) },
+        stages: [
+          ...answering.map((e) => ({ key: `answer-${e.id}`, label: 'Answer', role: 'answerer', engine: e.id, engine_label: e.label, status: 'pending' })),
+          { key: 'merge', label: 'Combine', role: 'builder', engine: lineup.builder.id, engine_label: lineup.builder.label, status: 'pending' },
+        ],
+      }
+    : {
+        goal: text,
+        folder: dir,
+        mode,
+        lineup: Object.fromEntries(Object.entries(lineup).map(([r, e]) => [r, e.id])),
+        stages: STAGES.map((s) => ({ key: s.key, label: s.label, role: s.role, engine: lineup[s.role].id, engine_label: lineup[s.role].label, status: 'pending' })),
+      };
   const now = nowIso();
   const { lastInsertRowid } = db
     .prepare(
@@ -162,7 +183,7 @@ export function startTeamTask({ goal, folder }) {
   announce(integ, id, taskRow(id));
   queue.push(id);
   pump();
-  return { ...taskRow(id), lineup: detail.lineup };
+  return { ...taskRow(id), lineup: detail.lineup, mode };
 }
 
 function pump() {
@@ -228,6 +249,7 @@ async function execute(id) {
   const stage = (key) => d.stages.find((s) => s.key === key);
   setStatus(id, 'running', { started_at: nowIso(), progress: 0, step: 'Starting', detail: d });
   recordProgress(id, 0);
+  if (d.mode === 'compare') return executeCompare(id, d, ctrl);
 
   const run = async (key, prompt) => {
     const def = STAGES.find((s) => s.key === key);
@@ -297,6 +319,74 @@ async function execute(id) {
   }
 }
 
+const ANSWER_SYSTEM = `You are one of several AIs answering the same request for one person through AI Command Center. Each answers on its own, then one of you combines the answers. Give your best complete answer in plain text with simple Markdown. Nobody is watching live, so don't ask questions: make sensible assumptions and say what you assumed. There is no folder to work in: everything happens in your reply.`;
+const MERGE_SYSTEM = `Several AIs answered the same request for one person, each on its own. Combine their answers into the single best answer: keep what is correct and useful from each, drop what is wrong or repeated, and where they disagree on something that matters, say which view you took and why in a sentence. Reply with the combined answer itself, ready to use, in plain text with simple Markdown. Don't describe the process beyond that.`;
+
+/** "Ask all": every answer runs at the same time, then the builder combines them. */
+async function executeCompare(id, d, ctrl) {
+  const answers = d.stages.filter((s) => s.key.startsWith('answer-'));
+  const merge = d.stages.find((s) => s.key === 'merge');
+  let finishedCount = 0;
+  try {
+    save(id, { step: `Asking ${answers.length} AI${answers.length === 1 ? '' : 's'}`, detail: d });
+    await Promise.all(answers.map(async (s) => {
+      Object.assign(s, { status: 'running', started_at: nowIso() });
+      save(id, { detail: d });
+      try {
+        const out = await runStage(s.engine, { system: ANSWER_SYSTEM, prompt: `Request from the person:\n\n${d.goal}`, access: 'none', folder: null, signal: ctrl.signal });
+        if (!out) throw new Error(`${s.engine_label} returned nothing.`);
+        Object.assign(s, { status: 'done', finished_at: nowIso(), output: out.slice(0, OUTPUT_LIMIT) });
+      } catch (err) {
+        Object.assign(s, { status: 'failed', finished_at: nowIso(), error: isAbort(err) ? 'Cancelled.' : claudeErrorMessage(err) });
+      }
+      finishedCount += 1;
+      const p = Math.round(2 + (78 * finishedCount) / answers.length);
+      save(id, { progress: p, step: `${finishedCount} of ${answers.length} answered`, detail: d });
+      recordProgress(id, p);
+    }));
+    if (ctrl.signal.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
+    const ok = answers.filter((s) => s.status === 'done');
+    if (!ok.length) throw new Error('None of the AIs could answer. See each one’s error on the task.');
+    if (ok.length === 1) {
+      Object.assign(merge, { status: 'skipped', note: 'Only one AI answered, so there was nothing to combine.' });
+    } else {
+      Object.assign(merge, { status: 'running', started_at: nowIso() });
+      save(id, { progress: 82, step: `Combining · ${merge.engine_label}`, detail: d });
+      recordProgress(id, 82);
+      const prompt = `Request from the person:\n\n${d.goal}\n\n${ok.map((s) => `---\n\n## Answer from ${s.engine_label}\n\n${s.output}`).join('\n\n')}`;
+      try {
+        const out = await runStage(merge.engine, { system: MERGE_SYSTEM, prompt, access: 'none', folder: null, signal: ctrl.signal });
+        if (!out) throw new Error(`${merge.engine_label} returned nothing.`);
+        Object.assign(merge, { status: 'done', finished_at: nowIso(), output: out.slice(0, OUTPUT_LIMIT) });
+      } catch (err) {
+        if (isAbort(err)) throw err;
+        // The separate answers are still worth having.
+        Object.assign(merge, { status: 'failed', finished_at: nowIso(), error: claudeErrorMessage(err) });
+      }
+    }
+    if (!taskRow(id)) return;
+    setStatus(id, 'completed', { progress: 100, step: null, result: compareResult(d).slice(0, 100_000), finished_at: nowIso(), error: null, detail: d });
+  } catch (err) {
+    for (const s of d.stages) if (s.status === 'pending' || s.status === 'running') Object.assign(s, { status: 'skipped', note: isAbort(err) ? 'Cancelled.' : 'Not reached.' });
+    if (taskRow(id)) setStatus(id, 'failed', { step: null, finished_at: nowIso(), error: isAbort(err) ? CANCELLED : claudeErrorMessage(err), detail: d });
+  } finally {
+    active.delete(id);
+    pump();
+  }
+}
+
+function compareResult(d) {
+  const answers = d.stages.filter((s) => s.key.startsWith('answer-'));
+  const merge = d.stages.find((s) => s.key === 'merge');
+  const ok = answers.filter((s) => s.status === 'done');
+  const top = merge.status === 'done' ? merge.output : ok[0].output;
+  const each = answers.map((s) => `#### ${s.engine_label}\n\n${s.status === 'done' ? s.output : `_Couldn’t answer: ${s.error ?? 'no reply'}_`}`).join('\n\n');
+  const how = merge.status === 'done'
+    ? `Combined by ${merge.engine_label} from ${ok.length} answers.`
+    : merge.status === 'failed' ? `Combining failed (${merge.error}), so the first answer is shown above.` : merge.note ?? '';
+  return `${top}\n\n---\n\n### Each AI’s answer\n\n${each}\n\n---\n\n${how}`;
+}
+
 /** The saved result: the finished work first, then who did what. */
 function teamResult(d) {
   const s = Object.fromEntries(d.stages.map((x) => [x.key, x]));
@@ -319,6 +409,7 @@ export function teamView(t) {
   if (!d) return null;
   return {
     folder: d.folder ?? null,
+    mode: d.mode ?? 'team',
     stages: d.stages.map(({ key, label, role, engine, engine_label, status, started_at, finished_at, verdict, note, error }) => ({ key, label, role, engine, engine_label, status, started_at, finished_at, verdict, note, error })),
   };
 }
@@ -345,6 +436,6 @@ export function retryTeamTask(id) {
   const d = readDetail(t);
   if (!d) throw new HttpError(404, 'That team task no longer exists.');
   if (t.status === 'running' || t.status === 'queued') throw new HttpError(400, `“${t.name}” is still ${t.status}.`);
-  const next = startTeamTask({ goal: d.goal, folder: d.folder });
+  const next = startTeamTask({ goal: d.goal, folder: d.folder, mode: d.mode ?? 'team' });
   return { ok: true, task_id: next.id, status: next.status };
 }

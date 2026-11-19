@@ -120,7 +120,7 @@ const S = {
   waiting: {}, // adapter id -> 'signin' | 'install' while the app waits for you to finish
   flashTool: null,
   confirmRemove: null,
-  heroMode: readStore('acc-hero-mode') === 'team' ? 'team' : 'ask',
+  heroMode: ['team', 'compare'].includes(readStore('acc-hero-mode')) ? readStore('acc-hero-mode') : 'ask',
   chat: { loaded: false, threads: [], thread: null, streaming: false, pending: null, draft: '' },
 };
 
@@ -586,9 +586,21 @@ function lineupStrip(l) {
 function heroCommand(d) {
   const e = d.engine;
   const team = S.heroMode === 'team';
+  const all = S.heroMode === 'compare';
+  const ready = d.engines.filter((x) => x.ready);
   const toggle = `<div class="mode-switch" role="group" aria-label="How to run it">
-    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="ask" aria-pressed="${!team}">${ICON.chat}Ask ${esc(e.label)}</button>
-    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="team" aria-pressed="${team}">${ICON.team}AI team</button></div>`;
+    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="ask" aria-pressed="${!team && !all}">${ICON.chat}Ask ${esc(e.label)}</button>
+    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="team" aria-pressed="${team}">${ICON.team}AI team</button>
+    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="compare" aria-pressed="${all}">${ICON.grid}Ask all</button></div>`;
+  if (all) {
+    return `${toggle}<form class="command" data-form="team-quick" data-mode="compare">
+        <span class="command-engine team-mark">${ICON.grid}</span>
+        <input class="command-input" name="goal" placeholder="Ask every connected AI the same thing…" autocomplete="off" maxlength="4000" aria-label="Question for every AI">
+        <button class="btn primary" type="submit">${ICON.send}<span class="hide-sm">Ask all</span></button>
+      </form>
+      <div class="lineup">${ready.map((x) => `<span class="lineup-step">${engineLogo(x, 'xs')}<span>${esc(x.label)}</span></span>`).join('')}<span class="lineup-arrow" aria-hidden="true">→</span><span class="lineup-step">${d.team?.lineup ? engineById(d.team.lineup.builder.id, d.team.lineup.builder.label) : ''}<span><b>Combine</b> ${esc(d.team?.lineup?.builder.label ?? '')}</span></span></div>
+      <p class="hero-foot">${ready.length > 1 ? `Each of your ${ready.length} AIs answers on its own, then the answers are combined into one. You can read every answer on the task.` : 'Connect more AIs to compare their answers. With one, you get its answer.'}</p>`;
+  }
   if (!team) {
     return `${toggle}<form class="command" data-form="ask">
         <span class="command-engine" title="${esc(`${e.label}, ${e.via}`)}">${engineLogo(e, 'sm')}</span>
@@ -1481,7 +1493,7 @@ const STAGE_STATE = {
 
 /** The stages of an AI team task: who did each one, and how it went. */
 function teamTimeline(t) {
-  return `<div class="section"><h4>${ICON.team} The team${t.team.folder ? ` · working in <code>${esc(t.team.folder)}</code>` : ''}</h4>
+  return `<div class="section"><h4>${ICON.team} ${t.team.mode === 'compare' ? 'Every AI’s answer' : 'The team'}${t.team.folder ? ` · working in <code>${esc(t.team.folder)}</code>` : ''}</h4>
     <ol class="timeline">${t.team.stages.map((s) => {
       const st = STAGE_STATE[s.status] ?? STAGE_STATE.pending;
       const took = s.started_at && s.finished_at ? ` · ${dur(Date.parse(s.finished_at) - Date.parse(s.started_at))}` : '';
@@ -1532,7 +1544,9 @@ function refreshLineup() {
 async function startedTeam(r) {
   const l = r.lineup ?? {};
   const name = (id) => S.data.engines.find((e) => e.id === id)?.label ?? id;
-  toast(`Team started: ${name(l.planner)} plans, ${name(l.builder)} builds, ${name(l.reviewer)} reviews`);
+  toast(r.mode === 'compare'
+    ? `Asking ${l.answering?.length ?? 0} AIs: ${(l.answering ?? []).map(name).join(', ')}`
+    : `Team started: ${name(l.planner)} plans, ${name(l.builder)} builds, ${name(l.reviewer)} reviews`);
   S.taskFilter = 'all';
   await load({ force: true });
   openTask(r.id);
@@ -1745,7 +1759,7 @@ async function onSubmit(e) {
     const btn = form.querySelector('button[type="submit"]');
     btn.disabled = true;
     try {
-      const r = await api('/api/team-tasks', { method: 'POST', body: { goal } });
+      const r = await api('/api/team-tasks', { method: 'POST', body: { goal, mode: form.dataset.mode === 'compare' ? 'compare' : 'team' } });
       form.reset();
       await startedTeam(r);
     } catch (err) {
@@ -1979,7 +1993,7 @@ const ACTIONS = {
   'new-claude-task': () => openNewTask(),
   'new-team-task': () => openTeamTask(),
   'hero-mode'(el) {
-    S.heroMode = el.dataset.mode === 'team' ? 'team' : 'ask';
+    S.heroMode = ['team', 'compare'].includes(el.dataset.mode) ? el.dataset.mode : 'ask';
     writeStore('acc-hero-mode', S.heroMode);
     renderPage();
     $('.command-input')?.focus();

@@ -329,8 +329,8 @@ export function apiRoutes(app) {
   // ── AI team ──
   app.get('/api/team', (req, res) => res.json({ lineup: lineupView({ folder: req.query.folder === '1' }) }));
   app.post('/api/team-tasks', (req, res) => {
-    const t = startTeamTask({ goal: req.body?.goal, folder: req.body?.folder });
-    res.status(201).json({ id: t.id, status: t.status, lineup: t.lineup });
+    const t = startTeamTask({ goal: req.body?.goal, folder: req.body?.folder, mode: req.body?.mode ?? 'team' });
+    res.status(201).json({ id: t.id, status: t.status, lineup: t.lineup, mode: t.mode });
   });
   /** The desktop app sets globalThis.accPickFolder to show a native folder picker. */
   app.post('/api/pick-folder', async (req, res) => {

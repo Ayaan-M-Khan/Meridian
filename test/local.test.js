@@ -419,3 +419,24 @@ test('a model chosen for an AI app is passed to it, in the right place', async (
     delete process.env.FAKE_CLAUDE_LOG;
   }
 });
+
+test('Ask all: every ready AI answers, then the builder combines the answers', async () => {
+  setClaudeClientForTests(fakeApi(['The API’s answer']));
+  delete process.env.FAKE_CLAUDE_TEAM;
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Claude Code’s answer' });
+  try {
+    const t = startTeamTask({ goal: 'Name three uses for a dashboard', mode: 'compare' });
+    assert.deepEqual(t.lineup.answering.sort(), ['claude-api', 'claude-code']);
+    const done = await finished(t.id);
+    assert.equal(done.status, 'completed', done.error ?? '');
+    const d = JSON.parse(done.detail);
+    assert.deepEqual(d.stages.map((s) => `${s.key}:${s.status}`).sort(), ['answer-claude-api:done', 'answer-claude-code:done', 'merge:done']);
+    assert.match(done.result, /Each AI’s answer/);
+    assert.match(done.result, /#### Claude API\n\nThe API’s answer/);
+    assert.match(done.result, /Combined by Claude Code from 2 answers/);
+    assert.equal(buildState().tasks.find((x) => x.id === t.id).runner_label, 'Ask all');
+    assert.throws(() => startTeamTask({ goal: 'x', mode: 'compare', folder: path.join(tmp, 'project') }), /text only/);
+  } finally {
+    setClaudeClientForTests(null);
+  }
+});

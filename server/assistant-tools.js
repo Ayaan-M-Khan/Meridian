@@ -226,12 +226,15 @@ export const ACTION_TOOLS = [
   {
     name: 'start_team_task',
     description: 'Start an AI team task: the connected AIs split the work by role. One plans (Codex first), one builds (Claude Code first), another reviews it, and if the review finds problems one debugs (Gemini CLI first) and the builder fixes them. Use it when the person asks for the team, for several AIs to work together, or for substantial work that benefits from a second opinion. It shows on the Tasks page with each stage and who did it. From the chat it produces text only; to have the team work on files in a folder, the person starts it from the Tasks page.',
-    input_schema: obj({ goal: { type: 'string', description: 'What the team should produce, complete and self-contained. The team cannot see this chat.' } }, ['goal']),
-    label: (i) => `Started an AI team task: “${String(i.goal ?? '').split('\n')[0].slice(0, 70)}”`,
+    input_schema: obj({
+      goal: { type: 'string', description: 'What the team should produce, complete and self-contained. The team cannot see this chat.' },
+      mode: { type: 'string', enum: ['team', 'compare'], description: '"team" (default) splits the work by role. "compare" asks every connected AI the same thing and combines their answers: use it when the person wants to compare AIs or get several opinions.' },
+    }, ['goal']),
+    label: (i) => `${i.mode === 'compare' ? 'Asked all AIs' : 'Started an AI team task'}: “${String(i.goal ?? '').split('\n')[0].slice(0, 70)}”`,
     run(input) {
       let t;
       try {
-        t = startTeamTask({ goal: text(input.goal, 'goal', 4000) });
+        t = startTeamTask({ goal: text(input.goal, 'goal', 4000), mode: input.mode === 'compare' ? 'compare' : 'team' });
       } catch (err) {
         throw new ToolInputError(err.message);
       }
