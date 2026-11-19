@@ -4,11 +4,17 @@ One dashboard for your AI tools: what's running, what's next, what you've spent,
 
 ## Desktop app (Windows)
 
-Download `AI-Command-Center-Setup-<version>.exe` from the Releases page, or build it yourself (below), and run it. It installs AI Command Center with a Start Menu entry and a desktop shortcut. Open it like any other app; closing the window quits it. On first launch, choose a username and password.
+Download `AI-Command-Center-Setup-<version>.exe` from the Releases page, or build it yourself (below), and run it. It installs AI Command Center with a Start Menu entry and a desktop shortcut. Open it like any other app. On first launch, choose a username and password.
 
 The app isn't code-signed yet, so Windows SmartScreen may warn you the first time. Choose **More info → Run anyway**.
 
-The desktop app keeps its data in `%APPDATA%\AI Command Center\data`. It syncs, raises alerts and accepts task reports only while it's open. Its local server listens on port 4317, or a free port if 4317 is taken.
+The desktop app keeps its data in `%APPDATA%\AI Command Center\data`. It syncs, raises alerts, runs tasks and accepts task reports only while it's running. Its local server listens on port 4317, or a free port if 4317 is taken.
+
+- **Closing the window** quits the app, unless tasks are running: then it asks whether to keep them going in the background. **Settings → Desktop app** can keep it running in the system tray every time, and start it in the tray when you sign in to Windows.
+- **Windows notifications** show new alerts while the app isn't in front, including "AI team finished" and "Task failed" for tasks you started. Click one to open it.
+- **Backups:** **Settings → Backup** saves your tools, tasks and results, conversations, alerts and settings to a JSON file, and restores from one. Backups never include your password, API keys or ingest tokens, so the file is safe to keep; you add keys again after restoring. The code is on GitHub; your data stays on your computer and in the backups you save.
+- **Exports:** **Usage & Costs** downloads the last 30 days as CSV, and each task's result saves as a Markdown file.
+- **Shortcuts:** Ctrl+K (or **/**) jumps to the overview's command bar. The Tasks page has a search box.
 
 Build the installer:
 
@@ -45,9 +51,15 @@ Notes:
 
 Signing in to claude.ai, chatgpt.com or gemini.google.com directly from this app isn't possible: none of them offers sign-in for other apps. Going through their own command-line apps is the supported way to use your account here. These run on your computer with your own account, for your own use.
 
-## The AI team
+## Several AIs at once
 
-Give one goal to several AIs at once. Switch the overview's command bar to **AI team**, or choose **New AI team task** on the Tasks page. Your connected AIs split the work, each doing the part it's best suited to:
+The overview's command bar has three modes: **Ask** (the assistant), **AI team** (split the work) and **Ask all** (compare answers).
+
+**Ask all** sends one request to every connected AI (up to six) at the same time. Each answers on its own, then the builder (Claude Code first) combines the answers into one, saying where they disagreed. The task keeps every AI's answer, so you can compare them. If combining fails, the separate answers are still saved.
+
+### The AI team
+
+Give one goal to several AIs that split the work. Switch the command bar to **AI team**, or choose **New AI team task** on the Tasks page. Your connected AIs split the work, each doing the part it's best suited to:
 
 | Stage | Role | First choice, then |
 | --- | --- | --- |
@@ -73,6 +85,8 @@ The **Assistant** page, the command bar on the overview, and **Ask** on each too
 - **The daily summary** on the overview.
 
 When it runs through a command-line app, the app's functions are offered to it as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off or limited: no shell commands, and no file changes outside AI team tasks with a folder. It runs in its own folder inside the app's data folder, so its sessions stay apart from yours, and its usage is counted under that tool from its logs. Runs the app starts also turn off the CLI's auto-update for that run, so a run never stops to update.
+
+Each AI app's page has **Model for runs from this app** (for example `sonnet` in Claude Code), used for everything the app runs through it; a lighter model uses less of your plan. **Settings → Assistant** can also build the daily summary from fixed rules only, so it never uses an AI.
 
 With a Claude API key instead (**Settings → Claude API key**, a regular key, not the Admin key), it uses Claude Opus 5.5 and each response's tokens are recorded under the built-in **Assistant** tool. If you also connect the Claude API (Admin key) integration, your real spend appears there, and the assistant's tokens are left out of the totals so they aren't counted twice. Web search is available with an API key only, is off by default, and is billed on top of tokens.
 
@@ -175,7 +189,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/assistant.js`: the chat. It runs the tool-use loop (API key) or a CLI run, and streams replies to the browser as newline-delimited JSON.
 - `server/assistant-tools.js`: the app functions the assistant can call. Read-only tools are available everywhere; actions are available only in the chat.
 - `server/runner.js`: background tasks the assistant carries out, with a queue and cancel/retry.
-- `server/team.js`: AI team tasks: who does each role, the plan → build → review → debug → fix → final check stages, and hand-overs when an AI fails.
+- `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
+- `server/backup.js`: backups as a JSON file, without secrets, and restoring them.
 - `server/eta.js`: progress history, finish estimates, and stall and overdue detection.
 - `server/claude.js`: the shared Claude API client, the built-in assistant tool, and token recording.
 - `scripts/dev-fake-claude.js`: development only. It runs the server against a scripted stand-in for Claude, so you can click through the chat without an API key.
