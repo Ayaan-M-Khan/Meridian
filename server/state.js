@@ -108,7 +108,7 @@ export function buildState(now = new Date()) {
       account_kind: a?.account ?? null,
       version: meta?.version ?? null,
       limits: meta?.limits ?? null,
-      engine: a?.engine ? { id: a.id, label: a.engine.label, via: a.engine.via } : null,
+      engine: a?.engine ? { id: a.id, label: a.engine.label, via: a.engine.via, model: settings.engine_models?.[a.id] ?? null, model_hint: a.engine.modelHint ?? null } : null,
       replaced_by: a?.replacedBy ? { id: a.replacedBy, name: adapters[a.replacedBy]?.name ?? a.replacedBy } : null,
       cli: a?.cli ? { install: a.cli.install.text, install_url: a.cli.install.url, login: a.cli.login.text, login_help: a.cli.login.help } : null,
       sessions_running: sessionsRunning,

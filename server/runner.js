@@ -222,10 +222,28 @@ export function retryClaudeTask(id) {
 
 /** Background tasks stop when the app closes; on the next start, mark any left over as failed. */
 export function recoverRuns() {
-  db.prepare(
-    `UPDATE tasks SET status = 'failed', error = 'Stopped because AI Command Center was closed while it ran.', finished_at = ?, step = NULL
-     WHERE status IN ('running', 'queued') AND integration_id IN (SELECT id FROM integrations WHERE adapter = 'claude-assistant')`,
-  ).run(nowIso());
+  const now = nowIso();
+  const left = db
+    .prepare(`SELECT id, detail FROM tasks WHERE status IN ('running', 'queued') AND integration_id IN (SELECT id FROM integrations WHERE adapter = 'claude-assistant')`)
+    .all();
+  const upd = db.prepare(`UPDATE tasks SET status = 'failed', error = 'Stopped because AI Command Center was closed while it ran.', finished_at = ?, step = NULL, detail = ? WHERE id = ?`);
+  for (const t of left) {
+    // An AI team task's timeline would otherwise still show a stage as working.
+    let detail = t.detail;
+    try {
+      const d = JSON.parse(t.detail ?? 'null');
+      if (d?.stages) {
+        for (const s of d.stages) {
+          if (s.status === 'running') Object.assign(s, { status: 'failed', finished_at: now, error: 'The app was closed.' });
+          else if (s.status === 'pending') Object.assign(s, { status: 'skipped', note: 'Not reached.' });
+        }
+        detail = JSON.stringify(d);
+      }
+    } catch {
+      /* leave the detail as it was */
+    }
+    upd.run(now, detail, t.id);
+  }
 }
 
 export const runningCount = () => active.size + queue.length;

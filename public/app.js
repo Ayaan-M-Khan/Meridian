@@ -1038,7 +1038,8 @@ const VIEWS = {
     const hasSeries = d.usage.series.length > 0;
     const hasCost = d.usage.series.some((x) => x.cost.some((v) => v != null));
 
-    return `<div class="page-head"><div><h2>Usage & Costs</h2><p>This month so far. Days are in UTC, the same as the providers report.</p></div></div>
+    return `<div class="page-head"><div><h2>Usage & Costs</h2><p>This month so far. Days are in UTC, the same as the providers report.</p></div>
+      ${hasSeries ? `<button class="btn" data-action="usage-csv">${ICON.download}Download CSV</button>` : ''}</div>
       <div class="tiles tiles-4">
         ${tile('Spend this month', fmtUsd(s.cost_mtd), reportingCost(s.tools_reporting_cost), { na: 'No cost data' })}
         ${tile('Tokens this month', fmtNum(s.tokens_mtd), 'Input, output and cache', { trend: dailyTotal(d, 'tokens', 30) })}
@@ -1235,6 +1236,10 @@ function manageSection(t) {
   return `<section class="card manage">
     <div class="card-head">${ICON.gear}<h3>Manage</h3></div>
     <div class="manage-grid">
+      ${t.engine ? `<form class="form" data-form="engine-model" data-adapter="${esc(t.adapter)}">
+        <div class="field"><label for="t-model">Model for runs from this app</label><input class="input" id="t-model" name="model" maxlength="80" autocomplete="off" value="${esc(t.engine.model ?? '')}" placeholder="${esc(t.adapter_name)}’s default">
+          <span class="help">Used for the chat, background tasks, the AI team and the summary. For example: ${esc(t.engine.model_hint ?? 'a model name')}. A lighter model uses less of your plan.</span></div>
+        <div class="form-actions"><button class="btn" type="submit">Save model</button></div><div class="error-text" data-error></div></form>` : ''}
       ${t.kind === 'builtin' ? '' : `<form class="form" data-form="budget" data-id="${t.id}">
         <div class="field"><label for="t-budget">Monthly budget ($)</label><input class="input" id="t-budget" name="budget_usd" type="number" min="0" step="0.01" value="${esc(t.budget_usd ?? '')}" placeholder="None"><span class="help">${t.kind === 'local' ? 'Plan usage has no per-token price, so a budget only applies if you log costs.' : 'Drives the limit bar and budget alerts.'}</span></div>
         <div class="form-actions"><button class="btn" type="submit">Save budget</button></div><div class="error-text" data-error></div></form>`}
@@ -1693,6 +1698,11 @@ const FORMS = {
     toast('Usage saved');
     await load({ force: true });
   },
+  async 'engine-model'(fd, form) {
+    await api('/api/settings', { method: 'PUT', body: { engine_models: { [form.dataset.adapter]: fd.model ?? '' } } });
+    toast(fd.model?.trim() ? `Runs from this app now use ${fd.model.trim()}` : 'Runs from this app use the default model');
+    await load({ force: true });
+  },
   async 'team-task'(fd) {
     const r = await api('/api/team-tasks', { method: 'POST', body: { goal: fd.goal, folder: fd.folder?.trim() || null } });
     closeModal();
@@ -1910,6 +1920,19 @@ const ACTIONS = {
   },
   async 'stop-chat'() {
     if (S.chat.thread) await api(`/api/assistant/threads/${S.chat.thread.id}/stop`, { method: 'POST' });
+  },
+  'usage-csv'() {
+    // One row per tool per day for the last 30 days. Empty cells mean the tool didn't report that figure.
+    const d = S.data;
+    const cell = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    const lines = [['day_utc', 'tool', 'tokens', 'cost_usd'].join(',')];
+    d.usage.days.forEach((day, i) => {
+      for (const s of d.usage.series) {
+        if (s.tokens[i] == null && s.cost[i] == null) continue;
+        lines.push([day, s.name, s.tokens[i], s.cost[i] == null ? null : s.cost[i].toFixed(4)].map(cell).join(','));
+      }
+    });
+    saveFile(`ai-usage-${utcToday()}${d.demo ? '-demo' : ''}.csv`, `${lines.join('\r\n')}\r\n`, 'text/csv');
   },
   'save-result'(el) {
     const text = $('#task-result-raw')?.textContent ?? '';

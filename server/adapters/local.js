@@ -125,6 +125,8 @@ export const claudeCode = local({
   engine: {
     label: 'Claude Code',
     via: 'your Claude account',
+    modelArgs: (m) => ['--model', m],
+    modelHint: 'opus, sonnet or haiku, or a full model name',
     invocation({ system, prompt, mcp, access = 'none' }) {
       // Built-in tools: none, read-only ones, or file edits too (accepted without asking). Never shell commands.
       const tools = { none: '', read: 'Read,Glob,Grep', edit: 'Read,Glob,Grep,Edit,Write' }[access] ?? '';
@@ -215,6 +217,9 @@ export const codex = local({
   engine: {
     label: 'Codex',
     via: 'your ChatGPT account',
+    modelArgs: (m) => ['-m', m],
+    modelAt: 1, // after the exec subcommand
+    modelHint: 'a model Codex lists for your plan',
     invocation({ system, prompt, mcp, access = 'none' }) {
       const args = ['exec', '--json', '--skip-git-repo-check', '--sandbox', access === 'edit' ? 'workspace-write' : 'read-only', '-c', 'approval_policy="never"'];
       if (mcp) {
@@ -317,6 +322,8 @@ export const geminiCli = local({
   engine: {
     label: 'Gemini CLI',
     via: 'your Google account',
+    modelArgs: (m) => ['-m', m],
+    modelHint: 'auto, pro, flash or a full model name',
     invocation({ system, prompt, mcp, access = 'none' }) {
       // --skip-trust trusts only the folder of this run, for this run, so project settings and tools load.
       const args = ['--output-format', 'json', '--skip-trust'];
@@ -393,6 +400,8 @@ export const antigravityCli = local({
   engine: {
     label: 'Gemini (Antigravity)',
     via: 'your Google account',
+    modelArgs: (m) => ['--model', m],
+    modelHint: 'a model from agy models',
     // Its MCP permissions can only be set in your global Antigravity settings, which the app doesn't change.
     mcp: false,
     invocation({ system, prompt, access = 'none' }) {
@@ -495,6 +504,8 @@ export const copilotCli = local({
   engine: {
     label: 'GitHub Copilot',
     via: 'your GitHub account',
+    modelArgs: (m) => [`--model=${m}`],
+    modelHint: 'a model your Copilot plan offers',
     invocation({ system, prompt, mcp, access = 'none' }) {
       const args = ['-p', clip(`${system}\n\n---\n\n${prompt}`), '-s', '--no-ask-user', '--deny-tool', 'shell'];
       args.push(access === 'edit' ? '--allow-tool' : '--deny-tool', 'write');
@@ -550,6 +561,8 @@ export const cursorCli = local({
   engine: {
     label: 'Cursor',
     via: 'your Cursor account',
+    modelArgs: (m) => ['--model', m],
+    modelHint: 'a model from agent models',
     invocation({ system, prompt, mcp, access = 'none', cwd }) {
       const runIn = mcp?.runDir ?? cwd;
       const args = ['-p', clip(`${system}\n\n---\n\n${prompt}`), '--output-format', 'json', '--trust'];

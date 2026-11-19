@@ -160,3 +160,17 @@ test('a failed first reply leaves the conversation valid and returns the text to
   assert.equal(err.unsent, 'hello');
   assert.equal(JSON.parse(db.prepare('SELECT messages FROM assistant_threads WHERE id = ?').get(thread.id).messages).length, 0);
 });
+
+test('after a restart, an AI team task left running shows where it stopped', async () => {
+  const { recoverRuns } = await import('../server/runner.js');
+  const { assistantIntegration } = await import('../server/claude.js');
+  const integ = assistantIntegration();
+  const now = new Date().toISOString();
+  const detail = { goal: 'x', stages: [{ key: 'plan', status: 'done' }, { key: 'build', status: 'running' }, { key: 'review', status: 'pending' }] };
+  const id = Number(db.prepare("INSERT INTO tasks(integration_id, external_id, name, status, kind, runner, detail, created_at, updated_at) VALUES(?, 'team-x', 'Left running', 'running', 'team', 'team', ?, ?, ?)")
+    .run(integ.id, JSON.stringify(detail), now, now).lastInsertRowid);
+  recoverRuns();
+  const row = db.prepare('SELECT status, detail FROM tasks WHERE id = ?').get(id);
+  assert.equal(row.status, 'failed');
+  assert.deepEqual(JSON.parse(row.detail).stages.map((s) => s.status), ['done', 'failed', 'skipped']);
+});

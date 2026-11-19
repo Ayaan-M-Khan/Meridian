@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DATA_DIR } from './db.js';
+import { DATA_DIR, getSettings } from './db.js';
 import { adapters } from './adapters/index.js';
 import { FAKE_CALLS, workspaceDir } from './adapters/local.js';
 import { nodeRuntime, runCli } from './local/cli.js';
@@ -125,7 +125,9 @@ export async function runCliEngine(engineId, { system, prompt, tools = [], emit 
   const bridge = tools.length && adapter.engine.mcp !== false ? openBridge(tools, emit) : null;
   const parser = adapter.engine.parser(emit);
   try {
+    const model = getSettings().engine_models?.[engineId] || null;
     const inv = adapter.engine.invocation({ system, prompt, mcp: bridge, access: folder ? access : 'none', cwd });
+    if (model) inv.args.splice(adapter.engine.modelAt ?? 0, 0, ...adapter.engine.modelArgs(model));
     let run;
     try {
       run = await runCli(cli, inv.args, { input: inv.input, env: inv.env, cwd: inv.cwd ?? cwd, timeoutMs, signal, onLine: parser.onLine });

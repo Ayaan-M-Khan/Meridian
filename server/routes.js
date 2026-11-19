@@ -253,6 +253,15 @@ export function apiRoutes(app) {
       if (!ENGINE_CHOICES.includes(body.assistant_engine)) throw new HttpError(400, 'Choose one of the listed assistants.');
       s.assistant_engine = body.assistant_engine;
     }
+    if (body.engine_models && typeof body.engine_models === 'object') {
+      for (const [id, v] of Object.entries(body.engine_models)) {
+        if (!LOCAL_ADAPTERS.some((a) => a.id === id)) throw new HttpError(400, 'Unknown AI app.');
+        const m = typeof v === 'string' ? v.trim() : '';
+        if (m && !/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,79}$/.test(m)) throw new HttpError(400, 'A model name has only letters, numbers, dots, dashes, slashes and colons.');
+        if (m) s.engine_models[id] = m;
+        else delete s.engine_models[id];
+      }
+    }
     if ('summary_mode' in body) {
       if (!['ai', 'rules'].includes(body.summary_mode)) throw new HttpError(400, 'The summary is written by AI or built from rules.');
       s.summary_mode = body.summary_mode;

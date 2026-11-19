@@ -26,7 +26,7 @@ export function demoState(now = new Date()) {
     account_kind: adapters[adapter].account ?? null,
     version: null,
     limits: null,
-    engine: adapters[adapter].engine ? { id: adapter, label: adapters[adapter].engine.label, via: adapters[adapter].engine.via } : null,
+    engine: adapters[adapter].engine ? { id: adapter, label: adapters[adapter].engine.label, via: adapters[adapter].engine.via, model: null, model_hint: adapters[adapter].engine.modelHint ?? null } : null,
     replaced_by: null,
     cli: adapters[adapter].cli
       ? { install: adapters[adapter].cli.install.text, install_url: adapters[adapter].cli.install.url, login: adapters[adapter].cli.login.text, login_help: adapters[adapter].cli.login.help }

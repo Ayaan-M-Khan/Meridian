@@ -396,3 +396,26 @@ test('with the summary set to rules, no AI is asked to write it', async () => {
     delete process.env.FAKE_CLAUDE_LOG;
   }
 });
+
+test('a model chosen for an AI app is passed to it, in the right place', async () => {
+  const { setRaw, getSettings } = await import('../server/db.js');
+  const { runCliEngine } = await import('../server/engines.js');
+  const { codex: codexAdapter } = await import('../server/adapters/local.js');
+  const log = path.join(tmp, 'model.log');
+  process.env.FAKE_CLAUDE_LOG = log;
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'ok' });
+  setRaw('settings', { ...getSettings(), engine_models: { 'claude-code': 'sonnet' } });
+  try {
+    await runCliEngine('claude-code', { system: 'S', prompt: 'P' });
+    const args = JSON.parse(fs.readFileSync(log, 'utf8').trim().split('\n')[0]).args;
+    assert.equal(args[args.indexOf('--model') + 1], 'sonnet');
+    assert.ok(args.includes('-p'), 'the run still has its print-mode flag');
+    // Codex takes the model after its exec subcommand.
+    const inv = codexAdapter.engine.invocation({ system: 'S', prompt: 'P' });
+    inv.args.splice(codexAdapter.engine.modelAt, 0, ...codexAdapter.engine.modelArgs('gpt-5-codex'));
+    assert.deepEqual(inv.args.slice(0, 3), ['exec', '-m', 'gpt-5-codex']);
+  } finally {
+    setRaw('settings', { ...getSettings(), engine_models: {} });
+    delete process.env.FAKE_CLAUDE_LOG;
+  }
+});
