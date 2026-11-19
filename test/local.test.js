@@ -25,6 +25,11 @@ const { buildState } = await import('../server/state.js');
 const { startServer } = await import('../server/app.js');
 const { createThread, sendMessage, threadView } = await import('../server/assistant.js');
 const { startClaudeTask } = await import('../server/runner.js');
+const { startTeamTask, teamLineup, verdictOf } = await import('../server/team.js');
+const { setClaudeClientForTests } = await import('../server/claude.js');
+const { copilotCli, cursorCli, geminiCli, antigravityCli } = await import('../server/adapters/local.js');
+const { readCopilot } = await import('../server/local/logs.js');
+process.env.COPILOT_HOME = path.join(tmp, 'copilot');
 
 claudeCode.resolve = () => ({ command: process.execPath, prefix: [FAKE], env: {}, path: FAKE });
 const srv = await startServer({ port: 0 });
@@ -200,4 +205,159 @@ test('a background task runs through Claude Code with live progress', async () =
   assert.deepEqual(pts, [0, 50]);
   const view = buildState().tasks.find((x) => x.id === t.id);
   assert.equal(view.runner_label, 'Claude Code');
+});
+
+test('Copilot and Cursor runs: no shell, file writes only when editing, the app’s functions over MCP', () => {
+  const mcp = { command: 'node', args: ['bridge.cjs', 'http://x', 'tok'], env: {}, runDir: path.join(tmp, 'cur') };
+  const read = copilotCli.engine.invocation({ system: 'S', prompt: 'P', mcp: null, access: 'read' }).args;
+  assert.deepEqual(read.slice(0, 2), ['-p', 'S\n\n---\n\nP']);
+  assert.ok(read.includes('--deny-tool') && read[read.indexOf('--deny-tool') + 1] === 'shell');
+  assert.ok(read.join(' ').includes('--deny-tool write'));
+  const edit = copilotCli.engine.invocation({ system: 'S', prompt: 'P', mcp, access: 'edit' }).args;
+  assert.ok(edit.join(' ').includes('--allow-tool write'));
+  const cfg = JSON.parse(edit[edit.indexOf('--additional-mcp-config') + 1]);
+  assert.equal(cfg.mcpServers.acc.command, 'node');
+  assert.ok(edit.join(' ').includes('--allow-tool acc'));
+  const long = copilotCli.engine.invocation({ system: 'S', prompt: 'x'.repeat(60_000), access: 'none' }).args[1];
+  assert.ok(long.length < 27_000 && long.includes('characters left out'), 'long prompts fit on a Windows command line');
+
+  const cur = cursorCli.engine.invocation({ system: 'S', prompt: 'P', mcp, access: 'none', cwd: tmp });
+  assert.equal(cur.cwd, mcp.runDir, 'Cursor runs where its per-run .cursor/mcp.json is');
+  assert.ok(cur.args.includes('--approve-mcps'));
+  assert.ok(cursorCli.engine.invocation({ system: 'S', prompt: 'P', access: 'read', cwd: tmp }).args.join(' ').includes('--mode ask'));
+  const ok = cursorCli.engine.parser().finish({ code: 0, stdout: '{"type":"result","subtype":"success","is_error":false,"result":"Hello"}\n', stderr: '' });
+  assert.equal(ok.text, 'Hello');
+  const signedOut = cursorCli.engine.parser().finish({ code: 1, stdout: '', stderr: 'Error: Not authenticated. Run agent login.' });
+  assert.match(signedOut.error, /isn’t signed in/);
+  const cp = copilotCli.engine.parser().finish({ code: 1, stdout: '', stderr: 'Error: No authentication information found.' });
+  assert.match(cp.error, /isn’t signed in/);
+});
+
+test('Copilot sessions are read defensively from its session folder', () => {
+  const day = new Date().toISOString().slice(0, 10);
+  write(path.join(tmp, 'copilot', 'session-state', 'abc-123', 'events.jsonl'), [
+    { type: 'session.start', timestamp: `${day}T07:00:00.000Z`, data: { cwd: '/work/site' } },
+    { type: 'user.message', timestamp: `${day}T07:00:01.000Z`, data: { content: 'Add a dark mode toggle' } },
+    { type: 'assistant.usage', timestamp: `${day}T07:00:09.000Z`, data: { model: 'gpt-5', usage: { inputTokens: 1200, outputTokens: 300 } } },
+    'not json',
+  ]);
+  const r = readCopilot({ since: new Date(Date.now() - 86_400_000) });
+  assert.equal(r.sessions[0].name, 'Add a dark mode toggle');
+  assert.equal(r.sessions[0].where, 'site');
+  assert.equal(r.rows[0].input_tokens, 1200);
+  assert.equal(r.rows[0].output_tokens, 300);
+});
+
+test('review verdicts', () => {
+  assert.equal(verdictOf('VERDICT: APPROVE\nLooks good.'), 'approve');
+  assert.equal(verdictOf('**VERDICT: CHANGES**\n1. The FAQ is missing.'), 'changes');
+  assert.equal(verdictOf('1. The headline is wrong.'), 'changes', 'a numbered list of problems without a verdict line counts as changes');
+  assert.equal(verdictOf('All good, ship it.'), 'approve');
+});
+
+const fakeApi = (replies) => ({
+  messages: {
+    stream() {
+      const text = replies.shift() ?? '(none)';
+      if (text instanceof Error) return { on() { return this; }, finalMessage: async () => { throw text; } };
+      return { on() { return this; }, finalMessage: async () => ({ model: 'claude-opus-5-5', stop_reason: 'end_turn', usage: { input_tokens: 50, output_tokens: 10 }, content: [{ type: 'text', text }] }) };
+    },
+  },
+});
+const teamDir = (name) => {
+  const dir = path.join(tmp, name);
+  fs.mkdirSync(dir, { recursive: true });
+  process.env.FAKE_CLAUDE_TEAM_DIR = dir;
+  return dir;
+};
+const finished = (id) => waitFor(() => {
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+  return row.status === 'completed' || row.status === 'failed' ? row : null;
+}, 30_000);
+
+test('an AI team task splits the work: plan, build, review, debug, fix, final check', async () => {
+  const api = fakeApi(['VERDICT: CHANGES\n1. The prices are missing.', 'Cause: the plan never asked for prices. Fix: add a price to each service.', 'VERDICT: APPROVE']);
+  setClaudeClientForTests(api);
+  teamDir('team-text');
+  process.env.FAKE_CLAUDE_TEAM = JSON.stringify({ Planner: ['1. Headline\n2. Three services'], Builder: ['Draft one', 'Draft two, with prices'] });
+  try {
+    const lineup = teamLineup();
+    assert.equal(lineup.builder.id, 'claude-code');
+    assert.equal(lineup.planner.id, 'claude-code', 'Codex plans first; without it, the next in line');
+    assert.equal(lineup.reviewer.id, 'claude-api', 'the reviewer is a different AI from the builder when one is ready');
+    assert.equal(lineup.debugger.id, 'claude-api');
+
+    const t = startTeamTask({ goal: 'Write a page for a dog-walking business' });
+    const done = await finished(t.id);
+    assert.equal(done.status, 'completed', done.error ?? '');
+    assert.ok(done.result.startsWith('Draft two, with prices'), done.result);
+    assert.match(done.result, /How the team worked/);
+    const d = JSON.parse(done.detail);
+    assert.deepEqual(d.stages.map((s) => `${s.key}:${s.status}`), ['plan:done', 'build:done', 'review:done', 'debug:done', 'fix:done', 'check:done']);
+    assert.equal(d.stages.find((s) => s.key === 'review').verdict, 'changes');
+    assert.equal(d.stages.find((s) => s.key === 'check').verdict, 'approve');
+    const pts = db.prepare('SELECT progress FROM task_progress WHERE task_id = ? ORDER BY at, rowid').all(t.id).map((r) => r.progress);
+    assert.ok(pts.length >= 6 && pts.every((p, i) => i === 0 || p >= pts[i - 1]), `progress only goes up: ${pts}`);
+    const view = buildState().tasks.find((x) => x.id === t.id);
+    assert.equal(view.runner_label, 'AI team');
+    assert.equal(view.team.stages.length, 6);
+    assert.equal(view.team.stages[0].engine_label, 'Claude Code');
+  } finally {
+    setClaudeClientForTests(null);
+  }
+});
+
+test('in a folder, only the builder may change files, and an approved review ends the run', async () => {
+  const dir = teamDir('team-folder');
+  const project = path.join(tmp, 'project');
+  fs.mkdirSync(project, { recursive: true });
+  process.env.FAKE_CLAUDE_TEAM = JSON.stringify({ Planner: ['1. Edit index.html'], Builder: ['Changed index.html'], Reviewer: ['VERDICT: APPROVE'] });
+  const t = startTeamTask({ goal: 'Add a footer', folder: project });
+  const done = await finished(t.id);
+  assert.equal(done.status, 'completed', done.error ?? '');
+  const calls = fs.readFileSync(path.join(dir, 'calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(calls.map((c) => c.role), ['Planner', 'Builder', 'Reviewer']);
+  for (const c of calls) assert.equal(path.resolve(c.cwd), path.resolve(project), 'every member works in the folder');
+  assert.equal(calls[0].tools, 'Read,Glob,Grep');
+  assert.equal(calls[0].acceptEdits, false);
+  assert.equal(calls[1].tools, 'Read,Glob,Grep,Edit,Write');
+  assert.equal(calls[1].acceptEdits, true);
+  assert.equal(calls[2].acceptEdits, false);
+  const d = JSON.parse(done.detail);
+  assert.deepEqual(d.stages.filter((s) => s.status === 'skipped').map((s) => s.key), ['debug', 'fix', 'check']);
+  assert.throws(() => startTeamTask({ goal: 'x', folder: os.homedir() }), /not a whole drive or your home folder/);
+  assert.throws(() => startTeamTask({ goal: 'x', folder: 'relative/path' }), /full path/);
+});
+
+test('Gemini CLI explains Google’s move to Antigravity, and Antigravity replies are read from its JSON', () => {
+  const moved = geminiCli.engine.parser().finish({ code: 1, stdout: '', stderr: 'Warning: 256-color support not detected.\nAn unexpected critical error occurred: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google' });
+  assert.match(moved.error, /Connect “Gemini \(Antigravity\)”/);
+  const other = geminiCli.engine.parser().finish({ code: 1, stdout: '', stderr: 'Warning: 256-color support not detected.\nRipgrep is not available.\nError: quota exceeded' });
+  assert.equal(other.error, 'Error: quota exceeded', 'start-up warnings are skipped when reporting an error');
+  const inv = geminiCli.engine.invocation({ system: 'S', prompt: 'P', mcp: { runDir: path.join(tmp, 'r') } });
+  assert.equal(inv.cwd, path.join(tmp, 'r'), 'Gemini runs where its per-run .gemini/settings.json is');
+  assert.ok(inv.args.includes('--skip-trust') && inv.args.includes('--allowed-mcp-server-names'));
+
+  const ag = antigravityCli.engine.parser().finish({ code: 0, stderr: '', stdout: '{"conversation_id":"c1","status":"SUCCESS","response":"Hi there","usage":{"input_tokens":10,"output_tokens":3}}' });
+  assert.equal(ag.text, 'Hi there');
+  const agErr = antigravityCli.engine.parser().finish({ code: 1, stdout: '', stderr: 'authentication required' });
+  assert.match(agErr.error, /isn’t signed in/);
+  assert.deepEqual(antigravityCli.engine.invocation({ system: 'S', prompt: 'P', access: 'read' }).args.slice(-2), ['--mode', 'plan']);
+  assert.deepEqual(antigravityCli.engine.invocation({ system: 'S', prompt: 'P', access: 'edit' }).args.slice(-2), ['--mode', 'accept-edits']);
+});
+
+test('when an AI can’t do its part of a team task, the next one takes over', async () => {
+  setClaudeClientForTests(fakeApi([new Error('Claude API is down')]));
+  teamDir('team-handoff');
+  process.env.FAKE_CLAUDE_TEAM = JSON.stringify({ Planner: ['1. Do it'], Builder: ['Done it'], Reviewer: ['VERDICT: APPROVE'] });
+  try {
+    const t = startTeamTask({ goal: 'Write a haiku about dashboards' });
+    const done = await finished(t.id);
+    assert.equal(done.status, 'completed', done.error ?? '');
+    const review = JSON.parse(done.detail).stages.find((s) => s.key === 'review');
+    assert.equal(review.engine, 'claude-code');
+    assert.match(review.note, /Claude API couldn’t do it \(Claude API is down\), so Claude Code took over/);
+  } finally {
+    setClaudeClientForTests(null);
+  }
 });

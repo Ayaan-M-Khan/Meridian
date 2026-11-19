@@ -14,8 +14,9 @@ import { chooseEngine, listEngines } from './engine-list.js';
 import { LOCAL_ADAPTERS } from './adapters/local.js';
 import { openConsole, forgetResolved } from './local/cli.js';
 import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
+import { ROLES, lineupView, startTeamTask } from './team.js';
 
-const ENGINE_CHOICES = ['auto', 'claude-code', 'codex', 'gemini-cli', 'claude-api'];
+const ENGINE_CHOICES = ['auto', 'claude-code', 'codex', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli', 'claude-api'];
 
 function localAdapter(id) {
   const a = LOCAL_ADAPTERS.find((x) => x.id === id);
@@ -241,6 +242,12 @@ export function apiRoutes(app) {
       if (!ENGINE_CHOICES.includes(body.assistant_engine)) throw new HttpError(400, 'Choose one of the listed assistants.');
       s.assistant_engine = body.assistant_engine;
     }
+    if (body.team_roles && typeof body.team_roles === 'object') {
+      for (const [role, v] of Object.entries(body.team_roles)) {
+        if (!ROLES[role] || !ENGINE_CHOICES.includes(v)) throw new HttpError(400, 'Choose one of the listed AIs for each role.');
+        s.team_roles[role] = v;
+      }
+    }
     if (body.notify && typeof body.notify === 'object') {
       for (const k of Object.keys(s.notify)) if (k in body.notify) s.notify[k] = Boolean(body.notify[k]);
     }
@@ -263,10 +270,28 @@ export function apiRoutes(app) {
 
   // ── Tasks ──
   app.get('/api/tasks/:id', (req, res) => {
-    const t = db.prepare('SELECT id, description, result FROM tasks WHERE id = ?').get(Number(req.params.id));
+    const t = db.prepare('SELECT id, description, result, detail FROM tasks WHERE id = ?').get(Number(req.params.id));
     if (!t) throw new HttpError(404, 'That task no longer exists.');
     const progress = db.prepare('SELECT at, progress FROM task_progress WHERE task_id = ? ORDER BY at').all(t.id);
-    res.json({ ...t, progress });
+    let detail = null;
+    try {
+      detail = t.detail ? JSON.parse(t.detail) : null;
+    } catch {
+      detail = null;
+    }
+    res.json({ id: t.id, description: t.description, result: t.result, detail, progress });
+  });
+
+  // ── AI team ──
+  app.get('/api/team', (req, res) => res.json({ lineup: lineupView({ folder: req.query.folder === '1' }) }));
+  app.post('/api/team-tasks', (req, res) => {
+    const t = startTeamTask({ goal: req.body?.goal, folder: req.body?.folder });
+    res.status(201).json({ id: t.id, status: t.status, lineup: t.lineup });
+  });
+  /** The desktop app sets globalThis.accPickFolder to show a native folder picker. */
+  app.post('/api/pick-folder', async (req, res) => {
+    if (typeof globalThis.accPickFolder !== 'function') throw new HttpError(501, 'Type or paste the folder’s full path.');
+    res.json({ path: (await globalThis.accPickFolder()) ?? null });
   });
 
   app.post('/api/claude-tasks', (req, res) => {

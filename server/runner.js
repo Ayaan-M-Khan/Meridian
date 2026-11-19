@@ -11,8 +11,10 @@ import { evaluateAlerts } from './alerts.js';
 import { READ_TOOLS, ToolInputError, definition, runTool } from './assistant-tools.js';
 import { assistantIntegration, claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
 import { chooseEngine } from './engine-list.js';
-import { runCliEngine } from './engines.js';
+import { engineHasTools, runCliEngine } from './engines.js';
+import { dashboardSnapshot } from './assistant.js';
 import { randomToken } from './crypto.js';
+import { cancelTeamTask, retryTeamTask } from './team.js';
 import { HttpError, nowIso } from './util.js';
 
 const MAX_PARALLEL = 2;
@@ -113,9 +115,11 @@ async function execute(id) {
 
   if (task.runner && task.runner !== 'claude-api') {
     try {
+      // An engine without the app's functions gets a snapshot of the dashboard and can't report progress itself.
+      const hasTools = engineHasTools(task.runner);
       const out = await runCliEngine(task.runner, {
-        system: `${SYSTEM}\n\n${CLI_NOTE}\n\nThe current time is ${nowIso().slice(0, 16)} UTC.`,
-        prompt: brief,
+        system: `${SYSTEM}\n\n${hasTools ? CLI_NOTE : 'You can’t call this app’s functions here; a snapshot of the dashboard comes with the task. Don’t run commands or touch files.'}\n\nThe current time is ${nowIso().slice(0, 16)} UTC.`,
+        prompt: hasTools ? brief : `Dashboard snapshot (read-only):\n${dashboardSnapshot()}\n\n---\n\n${brief}`,
         tools,
         signal: ctrl.signal,
         timeoutMs: CLI_TIMEOUT_MS,
@@ -176,8 +180,18 @@ function ownTask(id) {
   return t;
 }
 
+/** AI team tasks (team.js) have their own queue; errors become ToolInputError so the chat and routes show them. */
+const viaTeam = (fn, id) => {
+  try {
+    return fn(id);
+  } catch (err) {
+    throw new ToolInputError(err.message);
+  }
+};
+
 export function cancelClaudeTask(id) {
   const t = ownTask(id);
+  if (t.runner === 'team') return viaTeam(cancelTeamTask, id);
   if (active.has(id)) {
     active.get(id).abort();
     return { ok: true, task_id: id, note: 'Stopping.' };
@@ -193,6 +207,7 @@ export function cancelClaudeTask(id) {
 
 export function retryClaudeTask(id) {
   const t = ownTask(id);
+  if (t.runner === 'team') return viaTeam(retryTeamTask, id);
   if (t.status === 'running' || t.status === 'queued') throw new ToolInputError(`“${t.name}” is still ${t.status}.`);
   let next;
   try {

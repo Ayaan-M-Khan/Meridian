@@ -129,7 +129,8 @@ function addColumns(table, cols) {
   const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
   for (const [col, type] of cols) if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 }
-addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT']]);
+//   tasks.detail   JSON for AI team tasks: the folder, who did each stage, and each stage's output
+addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT'], ['detail', 'TEXT']]);
 addColumns('integrations', [['meta', 'TEXT']]);
 addColumns('assistant_threads', [['engine', 'TEXT']]);
 db.prepare("UPDATE integrations SET name = 'Assistant (built in)' WHERE adapter = 'claude-assistant' AND name = 'Claude assistant'").run();
@@ -154,6 +155,8 @@ export const DEFAULT_SETTINGS = {
   spike_multiplier: 2,
   assistant_web_search: false,
   assistant_engine: 'auto',
+  // Who does each part of an AI team task. 'auto' picks the best-suited AI that's ready.
+  team_roles: { planner: 'auto', builder: 'auto', reviewer: 'auto', debugger: 'auto' },
   notify: {
     task_failed: true,
     task_completed: false,
@@ -184,7 +187,12 @@ export function setRaw(key, value) {
 
 export function getSettings() {
   const saved = getRaw('settings') ?? {};
-  return { ...DEFAULT_SETTINGS, ...saved, notify: { ...DEFAULT_SETTINGS.notify, ...(saved.notify ?? {}) } };
+  return {
+    ...DEFAULT_SETTINGS,
+    ...saved,
+    notify: { ...DEFAULT_SETTINGS.notify, ...(saved.notify ?? {}) },
+    team_roles: { ...DEFAULT_SETTINGS.team_roles, ...(saved.team_roles ?? {}) },
+  };
 }
 
 export function addEvent(integrationId, kind, message) {

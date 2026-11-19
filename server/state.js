@@ -2,6 +2,7 @@ import { db, getSettings, getRaw } from './db.js';
 import { adapters } from './adapters/index.js';
 import { estimate, pastDurations, progressHistory } from './eta.js';
 import { listEngines } from './engine-list.js';
+import { ROLES, lineupView, teamView } from './team.js';
 import { lastNDays, nowIso, rowTokens, startOfUtcMonth, sumField, sumNullable, utcDay } from './util.js';
 
 const ACTIVE_WINDOW_MS = 15 * 60_000;
@@ -54,9 +55,10 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
     error: t.error,
     has_result: Boolean(t.result),
     updated_at: t.updated_at,
-    kind: session ? 'session' : 'task',
+    kind: session ? 'session' : t.kind === 'team' ? 'team' : 'task',
     runner: builtin ? t.runner ?? 'claude-api' : null,
-    runner_label: builtin ? adapters[t.runner]?.engine?.label ?? 'Claude API' : null,
+    runner_label: !builtin ? null : t.runner === 'team' ? 'AI team' : adapters[t.runner]?.engine?.label ?? 'Claude API',
+    team: t.kind === 'team' ? teamView(t) : null,
     controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry'],
   };
 }
@@ -107,6 +109,7 @@ export function buildState(now = new Date()) {
       version: meta?.version ?? null,
       limits: meta?.limits ?? null,
       engine: a?.engine ? { id: a.id, label: a.engine.label, via: a.engine.via } : null,
+      replaced_by: a?.replacedBy ? { id: a.replacedBy, name: adapters[a.replacedBy]?.name ?? a.replacedBy } : null,
       cli: a?.cli ? { install: a.cli.install.text, install_url: a.cli.install.url, login: a.cli.login.text, login_help: a.cli.login.help } : null,
       sessions_running: sessionsRunning,
       can_sync: Boolean(a?.sync),
@@ -204,5 +207,6 @@ export function buildState(now = new Date()) {
     summary: getRaw('summary_cache') ?? null,
     settings: publicSettings(),
     ...engineState(settings),
+    team: { lineup: lineupView({ settings }), roles: Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, { title: r.title, does: r.does }])) },
   };
 }

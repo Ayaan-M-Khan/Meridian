@@ -21,7 +21,19 @@ if (args[0] === 'auth' && args[1] === 'status') {
 
 const prompt = fs.readFileSync(0, 'utf8');
 if (process.env.FAKE_CLAUDE_LOG) fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ args, prompt })}\n`);
-const plan = JSON.parse(process.env.FAKE_CLAUDE_PLAN || '{"calls":[],"text":"ok"}');
+let plan = JSON.parse(process.env.FAKE_CLAUDE_PLAN || '{"calls":[],"text":"ok"}');
+
+// AI team runs: FAKE_CLAUDE_TEAM = {"Planner": ["…"], "Builder": ["first reply", "second reply"]}, answered in order per role.
+const system = args[args.indexOf('--system-prompt') + 1] ?? '';
+const role = system.match(/You are the (\w+) in an AI team/)?.[1];
+if (role && process.env.FAKE_CLAUDE_TEAM) {
+  const replies = JSON.parse(process.env.FAKE_CLAUDE_TEAM)[role] ?? ['(no reply scripted)'];
+  const counter = `${process.env.FAKE_CLAUDE_TEAM_DIR}/${role}.count`;
+  const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
+  fs.writeFileSync(counter, String(n + 1));
+  plan = { calls: [], text: replies[Math.min(n, replies.length - 1)], access: args.includes('acceptEdits') ? 'edit' : args[args.indexOf('--tools') + 1] };
+  fs.appendFileSync(`${process.env.FAKE_CLAUDE_TEAM_DIR}/calls.log`, `${JSON.stringify({ role, cwd: process.cwd(), tools: args[args.indexOf('--tools') + 1], acceptEdits: args.includes('acceptEdits') })}\n`);
+}
 
 let server = null;
 const pending = new Map();

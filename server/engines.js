@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR } from './db.js';
 import { adapters } from './adapters/index.js';
-import { workspaceDir } from './adapters/local.js';
+import { FAKE_CALLS, workspaceDir } from './adapters/local.js';
 import { nodeRuntime, runCli } from './local/cli.js';
 import { runTool } from './assistant-tools.js';
 import { HttpError } from './util.js';
@@ -50,17 +50,22 @@ function openBridge(tools, emit) {
   const rt = nodeRuntime();
   const server = { command: rt.command, args: [script, `${bridgeBase}/api/bridge/${id}`, token], env: rt.env };
   const claudeConfigPath = path.join(dir, `run-${id}.claude.json`);
-  const geminiSettingsPath = path.join(dir, `run-${id}.gemini.json`);
   fs.writeFileSync(claudeConfigPath, JSON.stringify({ mcpServers: { acc: { type: 'stdio', ...server } } }));
-  fs.writeFileSync(geminiSettingsPath, JSON.stringify({ mcpServers: { acc: { ...server, trust: true, timeout: 180_000 } } }));
+  // Cursor and Gemini CLI read MCP servers from project files in the folder they run in, so each run gets a folder
+  // of its own: .cursor/mcp.json and .gemini/settings.json (trust: true lets Gemini call the app's functions unasked).
+  const runDir = path.join(dir, `run-${id}`);
+  fs.mkdirSync(path.join(runDir, '.cursor'), { recursive: true });
+  fs.mkdirSync(path.join(runDir, '.gemini'), { recursive: true });
+  fs.writeFileSync(path.join(runDir, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { acc: server } }));
+  fs.writeFileSync(path.join(runDir, '.gemini', 'settings.json'), JSON.stringify({ mcpServers: { acc: { ...server, trust: true, timeout: 180_000 } } }));
   runs.set(id, { token, tools, emit });
   return {
     ...server,
     claudeConfigPath,
-    geminiSettingsPath,
+    runDir,
     close() {
       runs.delete(id);
-      for (const f of [claudeConfigPath, geminiSettingsPath]) fs.rm(f, { force: true }, () => {});
+      for (const f of [claudeConfigPath, runDir]) fs.rm(f, { force: true, recursive: true }, () => {});
     },
   };
 }
@@ -70,6 +75,9 @@ const sameToken = (a, b) => {
   const y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
+
+/** True when the engine can call the app's functions; otherwise it reads a snapshot (see assistant.js). */
+export const engineHasTools = (engineId) => engineId === 'claude-api' || adapters[engineId]?.engine?.mcp !== false;
 
 /** POST /api/bridge/:run — called only by the MCP bridge of a run that is in progress. */
 export async function bridgeHandler(req, res) {
@@ -104,21 +112,23 @@ export async function bridgeHandler(req, res) {
  * Runs one prompt to completion through a CLI engine. Resolves { text }: the final reply.
  * emit receives {type:'text', delta} {type:'turn'} {type:'notice', text} and, for app functions it calls,
  * {type:'tool', label, call} and {type:'tool_done', label, ok, error, call, result}.
+ * `folder` runs the CLI in a folder of yours instead of the app's own, with `access` 'read' or 'edit' there.
  */
-export async function runCliEngine(engineId, { system, prompt, tools = [], emit = () => {}, signal, timeoutMs = 10 * 60_000 }) {
+export async function runCliEngine(engineId, { system, prompt, tools = [], emit = () => {}, signal, timeoutMs = 10 * 60_000, access = 'none', folder = null }) {
   const adapter = adapters[engineId];
   if (!adapter?.engine) throw new EngineError('That assistant isn’t available.');
   const cli = adapter.resolve();
   if (!cli) throw new EngineError(`${adapter.name} isn’t installed on this computer.`);
-  const cwd = workspaceDir(DATA_DIR);
+  const cwd = folder ?? workspaceDir(DATA_DIR);
   fs.mkdirSync(cwd, { recursive: true });
-  const bridge = tools.length ? openBridge(tools, emit) : null;
+  // Engines without MCP support (engine.mcp === false) get no functions; callers give them a snapshot instead.
+  const bridge = tools.length && adapter.engine.mcp !== false ? openBridge(tools, emit) : null;
   const parser = adapter.engine.parser(emit);
   try {
-    const inv = adapter.engine.invocation({ system, prompt, mcp: bridge });
+    const inv = adapter.engine.invocation({ system, prompt, mcp: bridge, access: folder ? access : 'none', cwd });
     let run;
     try {
-      run = await runCli(cli, inv.args, { input: inv.input, env: inv.env, cwd, timeoutMs, signal, onLine: parser.onLine });
+      run = await runCli(cli, inv.args, { input: inv.input, env: inv.env, cwd: inv.cwd ?? cwd, timeoutMs, signal, onLine: parser.onLine });
     } catch (err) {
       throw new EngineError(`Couldn’t start ${adapter.name}: ${err.message}`);
     }
@@ -126,6 +136,8 @@ export async function runCliEngine(engineId, { system, prompt, tools = [], emit 
     if (run.timedOut) throw new EngineError(`${adapter.name} took longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`);
     const out = parser.finish(run);
     if (out.error) throw new EngineError(out.error);
+    // If the app's functions never reached the model, it may write imitation tool calls as text. That's not a reply.
+    if (FAKE_CALLS.test(out.text ?? '')) throw new EngineError(`${adapter.name} couldn’t reach this app’s functions for that reply. Try again.`);
     if (out.emitAll && out.text) emit({ type: 'text', delta: out.text });
     return { text: out.text ?? '' };
   } finally {

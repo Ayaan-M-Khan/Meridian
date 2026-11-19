@@ -46,6 +46,12 @@ if (!app.requestSingleInstanceLock()) {
     win.once('ready-to-show', () => win.show());
     win.on('closed', () => (win = null));
 
+    // The server asks for this when you choose a folder for an AI team task.
+    globalThis.accPickFolder = async () => {
+      const r = await dialog.showOpenDialog(win, { title: 'Choose a folder for the AI team', properties: ['openDirectory'] });
+      return r.canceled ? null : r.filePaths[0] ?? null;
+    };
+
     // Links to other sites open in the default browser, never inside the app window.
     win.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:\/\//.test(url)) shell.openExternal(url);

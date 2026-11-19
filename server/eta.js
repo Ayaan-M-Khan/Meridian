@@ -68,7 +68,9 @@ export function estimate(task, points = [], durations = [], now = Date.now()) {
   if (started && (!pts.length || (pts[0].t > started && pts[0].p > 0))) pts = [{ t: started, p: 0 }, ...pts];
   const recent = pts.slice(-8);
   let trendEta = null;
-  if (recent.length >= 2) {
+  // Two reports a moment apart (or a task that has barely started) don't make a trend worth extending.
+  const enough = recent.length >= 2 && recent.at(-1).t - recent[0].t >= 30_000 && recent.at(-1).p >= 5;
+  if (enough) {
     const n = recent.length;
     const mt = recent.reduce((a, x) => a + x.t, 0) / n;
     const mp = recent.reduce((a, x) => a + x.p, 0) / n;

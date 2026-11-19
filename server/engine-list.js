@@ -7,7 +7,7 @@ import { LOCAL_ADAPTERS } from './adapters/local.js';
 import { hasClaudeApi } from './claude.js';
 import { HttpError } from './util.js';
 
-const ORDER = ['claude-code', 'claude-api', 'codex', 'gemini-cli'];
+const ORDER = ['claude-code', 'claude-api', 'codex', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli'];
 
 const NOT_READY = {
   missing: (n) => `${n} isn’t installed on this computer.`,
@@ -27,13 +27,14 @@ export function listEngines() {
       via: a.engine.via,
       vendor: a.vendor,
       kind: 'cli',
+      tools: a.engine.mcp !== false,
       integration_id: i?.id ?? null,
       ready,
       reason: ready ? null : !i ? `Connect ${a.name} first.` : !i.enabled ? `${a.name} is turned off.` : (NOT_READY[i.status] ?? NOT_READY.error)(a.name),
     };
   });
   const api = hasClaudeApi();
-  out.push({ id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', integration_id: null, ready: api, reason: api ? null : 'Add a Claude API key in Settings.' });
+  out.push({ id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', tools: true, integration_id: null, ready: api, reason: api ? null : 'Add a Claude API key in Settings.' });
   return out.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 }
 
@@ -48,7 +49,7 @@ export function chooseEngine(id) {
     return e;
   }
   const e = list.find((x) => x.ready);
-  if (!e) throw new HttpError(400, 'To use the assistant, connect Claude Code, Codex or Gemini CLI with your account, or add a Claude API key in Settings.');
+  if (!e) throw new HttpError(400, 'To use the assistant, connect Claude Code, Codex, Gemini, GitHub Copilot or Cursor with your account, or add a Claude API key in Settings.');
   return e;
 }
 

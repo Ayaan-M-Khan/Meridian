@@ -23,17 +23,21 @@ function pathDirs() {
   return (process.env.PATH ?? process.env.Path ?? '').split(path.delimiter).filter(Boolean);
 }
 
-/** Like `which`. On Windows only real programs and .cmd launchers count, not the extensionless sh scripts npm also writes. */
-export function findOnPath(name) {
+/** Every match on PATH, in order. On Windows only real programs and .cmd launchers count, not npm's sh scripts. */
+export function findAllOnPath(name) {
   const exts = IS_WIN ? ['.exe', '.cmd', '.bat'] : [''];
+  const out = [];
   for (const dir of pathDirs()) {
     for (const ext of exts) {
       const p = path.join(dir, name + ext);
-      if (exists(p)) return p;
+      if (exists(p) && !out.includes(p)) out.push(p);
     }
   }
-  return null;
+  return out;
 }
+
+/** Like `which`. */
+export const findOnPath = (name) => findAllOnPath(name)[0] ?? null;
 
 /** The node.exe to run JavaScript programs with: the system one if there is one, otherwise this app's own runtime. */
 export function nodeRuntime() {
@@ -47,7 +51,7 @@ export function nodeRuntime() {
  * program it points to: `"%dp0%\node_modules\@scope\pkg\cli.js" %*` becomes `node <that file>`.
  */
 export function unwrapShim(file, text = fs.readFileSync(file, 'utf8')) {
-  const targets = [...text.matchAll(/"%~?dp0%?\\([^"]+)"/gi)].map((m) => m[1]).filter((t) => !/^node(\.exe)?$/i.test(t));
+  const targets = [...text.matchAll(/"?%~?dp0%?\\([^"%\r\n]+\.(?:js|mjs|cjs|exe))"?/gi)].map((m) => m[1].trim()).filter((t) => !/^node(\.exe)?$/i.test(t));
   const target = targets.at(-1);
   if (!target) return null;
   const abs = path.resolve(path.dirname(file), target);
@@ -60,12 +64,18 @@ export function unwrapShim(file, text = fs.readFileSync(file, 'utf8')) {
 
 const resolved = new Map();
 
-/** Locates a CLI. Returns { command, prefix, env, path } or null when it isn't installed. Cached for a minute. */
-export function resolveCli(bin, candidates = []) {
-  const hit = resolved.get(bin);
+/**
+ * Locates a CLI. Returns { command, prefix, env, path } or null when it isn't installed. Cached for a minute.
+ * `bin` may list several names. `skip` rejects launchers that aren't the real program, such as VS Code's copilot
+ * launcher, which installs GitHub Copilot CLI when it runs.
+ */
+export function resolveCli(bin, candidates = [], skip = () => false) {
+  const key = [].concat(bin).join('|');
+  const hit = resolved.get(key);
   if (hit && Date.now() - hit.at < 60_000) return hit.cli;
   let cli = null;
-  const found = findOnPath(bin) ?? candidates.map(expandHome).find(exists) ?? null;
+  const onPath = [].concat(bin).flatMap(findAllOnPath);
+  const found = [...onPath, ...candidates.map(expandHome)].find((p) => exists(p) && !skip(p)) ?? null;
   if (found) {
     if (IS_WIN && /\.(cmd|bat)$/i.test(found)) {
       try {
@@ -78,7 +88,7 @@ export function resolveCli(bin, candidates = []) {
       cli = { command: found, prefix: [], env: {}, path: found };
     }
   }
-  resolved.set(bin, { at: Date.now(), cli });
+  resolved.set(key, { at: Date.now(), cli });
   return cli;
 }
 
@@ -97,6 +107,9 @@ export function childEnv(extra = {}) {
     if (['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'MCP_CONNECTION_NONBLOCKING'].includes(k)) delete env[k];
     else if (nested && (/^CLAUDE_CODE_|^CLAUDE_AGENT_SDK_|^CLAUDE_PREVIEW_|^MCP_SERVER_/.test(k) || ['CLAUDECODE', 'CLAUDE_PID', 'ANTHROPIC_BASE_URL'].includes(k))) delete env[k];
   }
+  // A run the app starts shouldn't stop to update the CLI; your own use of it still updates as usual.
+  env.DISABLE_AUTOUPDATER = '1';
+  env.COPILOT_AUTO_UPDATE = 'false';
   return { ...env, ...extra };
 }
 

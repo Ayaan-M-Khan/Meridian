@@ -77,6 +77,9 @@ function addRow(rows, day, model, u) {
   rows.set(key, r);
 }
 
+/** Runs started by AI Command Center itself (any copy of it), which aren't your sessions. */
+const appRun = (cwd) => typeof cwd === 'string' && /[\\/](assistant-workspace|bridge[\\/]run-[^\\/]+)[\\/]?$/i.test(cwd);
+
 const under = (child, parent) => {
   if (!child || !parent) return false;
   const rel = path.relative(path.resolve(parent), path.resolve(child));
@@ -141,7 +144,7 @@ export function readClaudeCode({ since, workspace } = {}) {
       if (u.day >= sinceDay) addRow(rows, u.day, u.model, u);
     }
     const s = p.session;
-    if (s && !sessions.has(s.id) && !under(s.cwd, workspace)) {
+    if (s && !sessions.has(s.id) && !under(s.cwd, workspace) && !appRun(s.cwd)) {
       sessions.set(s.id, {
         id: s.id,
         name: s.title ?? s.prompt ?? 'Claude Code session',
@@ -241,7 +244,7 @@ export function readCodex({ since, workspace } = {}) {
     if (p.limits && (!limits || (p.limitsAt ?? '') > (limits.observed_at ?? ''))) limits = p.limits;
     const s = p.session;
     const id = s.id ?? path.basename(f.path, '.jsonl');
-    if (!sessions.has(id) && !under(s.cwd, workspace)) {
+    if (!sessions.has(id) && !under(s.cwd, workspace) && !appRun(s.cwd)) {
       sessions.set(id, {
         id,
         name: s.prompt ?? 'Codex session',
@@ -254,6 +257,81 @@ export function readCodex({ since, workspace } = {}) {
     }
   }
   return { rows: [...rows.values()], sessions: [...sessions.values()], limits };
+}
+
+// ── GitHub Copilot CLI: <COPILOT_HOME>/session-state/<session>/events.jsonl ──
+// The event format isn't documented, so only clearly named fields are read: a timestamp, the first user prompt,
+// and token counts where an event reports them. Anything else is left out rather than guessed.
+export const copilotHome = () => process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot');
+
+const pick = (o, keys) => {
+  for (const k of keys) if (Number.isFinite(o?.[k])) return o[k];
+  return null;
+};
+
+function usageIn(o) {
+  for (const u of [o.usage, o.data?.usage, o.payload?.usage, o.data?.tokenUsage, o.tokenUsage]) {
+    if (!u || typeof u !== 'object') continue;
+    const input = pick(u, ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens']);
+    const output = pick(u, ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens']);
+    if (input == null && output == null) continue;
+    const cached = pick(u, ['cache_read_input_tokens', 'cacheReadTokens', 'cached_tokens', 'cachedTokens']) ?? 0;
+    return { input: input ?? 0, output: output ?? 0, cacheRead: cached };
+  }
+  return null;
+}
+
+function parseCopilot(text, file) {
+  const usage = [];
+  const s = { id: path.basename(path.dirname(file.path)), first: null, last: null, prompt: null, model: null, cwd: null };
+  if (path.basename(file.path) !== 'events.jsonl') s.id = path.basename(file.path, '.jsonl');
+  let i = 0;
+  for (const o of jsonLines(text)) {
+    const at = o.timestamp ?? o.time ?? o.data?.timestamp ?? null;
+    const cwd = o.cwd ?? o.data?.cwd ?? o.data?.workingDirectory ?? o.data?.context?.cwd ?? null;
+    if (typeof cwd === 'string') s.cwd ??= cwd;
+    if (typeof at === 'string') {
+      s.first ??= at;
+      s.last = at;
+    }
+    const type = String(o.type ?? o.kind ?? '');
+    s.model = o.model ?? o.data?.model ?? s.model;
+    if (!s.prompt && /user/i.test(type)) s.prompt = titleFrom(o.data?.content ?? o.content ?? o.data?.text ?? o.text ?? o.data?.prompt ?? null);
+    const u = usageIn(o);
+    const day = dayOf(at);
+    if (u && day) usage.push({ key: `${i++}`, day, model: s.model ?? 'copilot', ...u, cacheWrite: 0 });
+  }
+  return { usage, session: s };
+}
+
+export function readCopilot({ since, workspace } = {}) {
+  const root = path.join(copilotHome(), 'session-state');
+  const files = walkFiles(root, '.jsonl', { since: since?.getTime?.() ?? 0, maxDepth: 2 });
+  const rows = new Map();
+  const sessions = new Map();
+  const sinceDay = since ? since.toISOString().slice(0, 10) : '';
+  for (const f of files) {
+    const p = parseFile(f, parseCopilot);
+    if (!p) continue;
+    let tokens = 0;
+    for (const u of p.usage) {
+      tokens += n(u.input) + n(u.output) + n(u.cacheRead);
+      if (u.day >= sinceDay) addRow(rows, u.day, u.model, u);
+    }
+    const s = p.session;
+    if (!sessions.has(s.id) && s.first && !under(s.cwd, workspace) && !appRun(s.cwd)) {
+      sessions.set(s.id, {
+        id: s.id,
+        name: s.prompt ?? 'GitHub Copilot session',
+        where: s.cwd ? path.basename(s.cwd) : null,
+        started_at: isoOf(s.first),
+        last_at: isoOf(s.last) ?? new Date(f.mtimeMs).toISOString(),
+        tokens: tokens || null,
+        model: s.model,
+      });
+    }
+  }
+  return { rows: [...rows.values()], sessions: [...sessions.values()] };
 }
 
 // ── Gemini CLI: <home>/.gemini/tmp/<project>/chats/session-*.jsonl ────────

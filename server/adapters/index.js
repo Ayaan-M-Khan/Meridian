@@ -62,23 +62,25 @@ const list = [
   tracked('custom-agent', 'Custom agent or automation', 'Your own', [
     'Your agent or workflow reports tasks and usage to this app with its ingest token.',
   ], { usage: 'webhook', cost: 'webhook', limits: 'manual', tasks: 'webhook', control: 'none' }),
-  tracked('claude-plan', 'Claude (Pro / Max plan)', 'Anthropic', [
-    'Plan usage limits on claude.ai are not available through an API. To track Claude Code usage from your account automatically, add “Claude Code” instead.',
-  ]),
-  tracked('chatgpt-plan', 'ChatGPT (Plus / Pro / Team)', 'OpenAI', [
-    'Plan message limits are not available through an API. To use and track your ChatGPT account through Codex, add “Codex” instead.',
-  ]),
-  tracked('gemini', 'Gemini', 'Google', [
-    'Not connected to an API. To use and track your Google account through Gemini CLI, add “Gemini CLI” instead.',
-  ]),
-  tracked('perplexity', 'Perplexity', 'Perplexity AI', ['Not connected to an API yet. Log usage here or report it from your scripts.']),
-  tracked('cursor', 'Cursor', 'Anysphere', ['Not connected to an API yet. Log usage here or report it from your scripts.']),
-  tracked('github-copilot', 'GitHub Copilot', 'GitHub', [
-    'Not connected to an API yet. Copilot plans have no remaining-quota figure this app can read.',
+  tracked('perplexity', 'Perplexity', 'Perplexity AI', [
+    'Perplexity has no sign-in that other apps can use and no command-line app, and its API doesn’t report usage, so it can only be tracked by hand here.',
   ]),
 ];
 
-export const adapters = Object.fromEntries([...list, CLAUDE_ASSISTANT].map((a) => [a.id, a]));
+/**
+ * Tracked-by-hand entries from earlier versions. Each now has a sign-in connection, so they're no longer offered,
+ * but tools added with them keep working and their page points to the sign-in version.
+ */
+const replaced = (id, name, vendor, by, why) => ({ ...tracked(id, name, vendor, [why]), replacedBy: by });
+const legacy = [
+  replaced('claude-plan', 'Claude (Pro / Max plan)', 'Anthropic', 'claude-code', 'Your Claude plan can now be connected by signing in through Claude Code, which also reads its usage automatically.'),
+  replaced('chatgpt-plan', 'ChatGPT (Plus / Pro / Team)', 'OpenAI', 'codex', 'Your ChatGPT plan can now be connected by signing in through Codex, which also reads its usage and plan limits.'),
+  replaced('gemini', 'Gemini', 'Google', 'gemini-cli', 'Your Google account can now be connected by signing in through Gemini CLI, which also reads its usage.'),
+  replaced('cursor', 'Cursor', 'Anysphere', 'cursor-cli', 'Your Cursor account can now be connected by signing in through the Cursor CLI.'),
+  replaced('github-copilot', 'GitHub Copilot', 'GitHub', 'copilot-cli', 'Your GitHub account can now be connected by signing in through GitHub Copilot CLI.'),
+];
+
+export const adapters = Object.fromEntries([...list, ...legacy, CLAUDE_ASSISTANT].map((a) => [a.id, a]));
 
 export const catalog = () =>
   list.map(({ id, name, vendor, kind, description, credential, capabilities, notes, account, cli }) => ({

@@ -21,29 +21,58 @@ The installer is written to `dist/`. Use `npm run app` to open the desktop app w
 
 ## Sign in with your account (no API key)
 
-Claude Code, Codex and Gemini CLI connect through the app on your computer and the account it's signed in with, so you don't need an API key:
+These connect through the provider's own command-line app on your computer and the account it's signed in with, so you don't need an API key:
 
-| App | Account | What the app reads from its logs |
-| --- | --- | --- |
-| Claude Code | Claude (Pro or Max) | Tokens by day and model, sessions (including the Claude desktop app's) |
-| Codex | ChatGPT (Plus, Pro or Team) | Tokens by day and model, sessions, and your plan's usage limits |
-| Gemini CLI | Google | Tokens by day and model, sessions |
+| Connection | Account | Command-line app | What the app reads from its logs |
+| --- | --- | --- | --- |
+| Claude Code | Claude (Pro or Max) | `claude` | Tokens by day and model, sessions (including the Claude desktop app's) |
+| Codex | ChatGPT (Plus, Pro or Team) | `codex` | Tokens by day and model, sessions, and your plan's usage limits |
+| Gemini (Antigravity) | Google (personal and Google One) | `agy` | Nothing: Antigravity doesn't save usage on disk |
+| Gemini CLI | Google (Workspace and paid) | `gemini` | Tokens by day and model, sessions |
+| GitHub Copilot | GitHub (Copilot plan) | `copilot` | Sessions, and tokens where its logs record them |
+| Cursor | Cursor | `agent` | Nothing: the Cursor CLI doesn't save usage on disk |
 
-Choose **Connect a tool** (the **+** beside Connected in the sidebar). The app looks for each one on this computer and shows whether it's installed and signed in. Once you connect one, it appears in the sidebar with a status dot, and its own page opens. If it still needs installing or signing in, that page walks you through it: **Install** and **Sign in with your account** open a console window that runs the app's own installer or sign-in (`npm install -g …`, `claude auth login`, `codex login`, or `gemini`). Signing in happens in your browser, on the provider's own page. The app never sees your password.
+Choose **Connect a tool** (the **+** beside Connected in the sidebar). The app looks for each one on this computer and shows whether it's installed and signed in. Once you connect one, it appears in the sidebar with a status dot, and its own page opens. If it still needs installing or signing in, that page walks you through it: **Install** and **Sign in with your account** open a console window that runs the provider's own installer or sign-in (`npm install -g …`, the official install script, `claude auth login`, `codex login`, `copilot login`, `agent login`, or a first run of `gemini` or `agy`). Signing in happens in your browser, on the provider's own page. The app never sees your password.
 
 Usage figures come from each app's own session logs, so token counts are exact. Cost isn't shown because plan usage isn't priced per token. Local apps are re-read every 2 minutes. Sessions active in the last 3 minutes show as running tasks. Codex's plan limits are as of its last session.
 
-Signing in to claude.ai or chatgpt.com directly from this app isn't possible: neither offers sign-in for other apps. Going through their own command-line apps is the supported way to use your account here. These run on your computer with your own account, for your own use.
+Notes:
+
+- **Gemini:** since June 2026, Google serves free and Google One accounts through Antigravity CLI, not Gemini CLI. Gemini CLI now refuses those accounts with a message saying to move to Antigravity, and the app passes that on. Workspace and paid accounts can still use Gemini CLI.
+- **GitHub Copilot:** VS Code's `copilot` command installs Copilot CLI when it first runs, so the app skips it and only uses a real install (from npm or WinGet). It treats you as signed in if Copilot CLI has a stored sign-in, a GitHub token is set, or the GitHub CLI (`gh`) is signed in, which Copilot CLI also uses.
+- **Antigravity** changes MCP permissions only in your global settings, which the app leaves alone. So in the chat it gets a read-only snapshot of your dashboard instead of the app's functions: it answers questions but can't change anything. It takes part in the AI team fully.
+- **Perplexity** has no sign-in other apps can use and no command-line app, so it stays tracked by hand. The old "track by hand" entries for Claude, ChatGPT, Gemini, Cursor and Copilot still work for tools you added before; their pages offer the sign-in version.
+
+Signing in to claude.ai, chatgpt.com or gemini.google.com directly from this app isn't possible: none of them offers sign-in for other apps. Going through their own command-line apps is the supported way to use your account here. These run on your computer with your own account, for your own use.
+
+## The AI team
+
+Give one goal to several AIs at once. Switch the overview's command bar to **AI team**, or choose **New AI team task** on the Tasks page. Your connected AIs split the work, each doing the part it's best suited to:
+
+| Stage | Role | First choice, then |
+| --- | --- | --- |
+| Plan | Planner | Codex, Claude Code, Gemini, Copilot, Cursor |
+| Build | Builder | Claude Code, Claude API, Cursor, Copilot, Codex |
+| Review | Reviewer | Codex, Claude Code, Gemini, Copilot (a different AI from the builder when one is ready) |
+| Debug | Debugger | Gemini CLI, Gemini (Antigravity), Claude Code, Codex, Copilot |
+| Fix | Builder | The builder applies the reviewer's and debugger's fixes |
+| Final check | Reviewer | One more look |
+
+If the review approves the work, the debug and fix stages are skipped. If an AI can't do its part (signed out, blocked, timed out), the next one suited to that role takes over, and the task shows who did. Change who does what in **Settings → AI team**.
+
+Without a folder, the result is text (a draft, a plan, code to copy), saved on the task. With a folder (**Choose…** opens a folder picker), the builder creates and changes files in it, while the planner, reviewer and debugger can only read them. None of them run shell commands, except Codex inside its own sandbox. Use a folder you have a copy of, such as a git project. Working in a folder needs AI apps on this computer; the Claude API can't read or change files.
+
+Each team task shows on the Tasks page with live progress, an expected finish, and a timeline of the stages, including what each AI wrote. One team task runs at a time; others wait in the queue. The assistant can also start one when you ask it to have the team do something.
 
 ## The assistant
 
-The **Assistant** page, the command bar on the overview, and **Ask** on each tool's page all go to one assistant. It runs through the first one ready of Claude Code, a Claude API key, Codex and Gemini CLI, or the one you pick in **Settings → Assistant** or in the chat. The same choice runs:
+The **Assistant** page, the command bar on the overview, and **Ask** on each tool's page all go to one assistant. It runs through the first one ready of Claude Code, a Claude API key, Codex, Gemini CLI, Gemini (Antigravity), GitHub Copilot and Cursor, or the one you pick in **Settings → Assistant** or in the chat. The same choice runs:
 
 - **The chat.** It reads your tools, tasks, spending and alerts through the app's own functions and answers from what they return. It can also set budgets and the monthly ceiling, mark alerts read, sync tools, and start, cancel or rerun background tasks, but only when you ask. It can't add or remove tools, change keys, or control tasks or sessions that other tools run.
 - **Background tasks.** Choose **New assistant task** on the Tasks page, or ask for one in the chat. It works through the task on its own and reports its progress, so the Tasks page shows a live progress bar, the current step and an expected finish. The result is saved on the task. Two run at a time; others wait in the queue. They stop if you close the app.
 - **The daily summary** on the overview.
 
-When it runs through Claude Code, Codex or Gemini CLI, the app's functions are offered to that app as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off (Claude Code) or limited to read-only (Codex), and the CLI runs in its own folder inside the app's data folder, so its sessions stay apart from yours. Its usage is counted under that tool from its logs.
+When it runs through a command-line app, the app's functions are offered to it as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off or limited: no shell commands, and no file changes outside AI team tasks with a folder. It runs in its own folder inside the app's data folder, so its sessions stay apart from yours, and its usage is counted under that tool from its logs. Runs the app starts also turn off the CLI's auto-update for that run, so a run never stops to update.
 
 With a Claude API key instead (**Settings → Claude API key**, a regular key, not the Admin key), it uses Claude Opus 5.5 and each response's tokens are recorded under the built-in **Assistant** tool. If you also connect the Claude API (Admin key) integration, your real spend appears there, and the assistant's tokens are left out of the totals so they aren't counted twice. Web search is available with an API key only, is off by default, and is billed on top of tokens.
 
@@ -88,10 +117,13 @@ Run the tests with `npm test`. They are offline; provider APIs are mocked.
 | Claude Code (your Claude account) | Its logs, by model | Not shown (plan) | Not available | Its sessions |
 | Codex (your ChatGPT account) | Its logs, by model | Not shown (plan) | Plan limits from its logs | Its sessions |
 | Gemini CLI (your Google account) | Its logs, by model | Not shown (plan) | Not available | Its sessions |
+| Gemini (Antigravity) (your Google account) | Not available | Not shown (plan) | Not available | Not available |
+| GitHub Copilot (your GitHub account) | Its logs, where recorded | Not shown (plan) | Not available | Its sessions |
+| Cursor (your Cursor account) | Not available | Not shown (plan) | Not available | Not available |
 | Claude API (Admin key) | API, by model | API, by model | Your budget | Your scripts |
 | OpenAI API (Admin key) | API, by model | API, daily total | Your budget | Your scripts |
 | Custom agent / automation | Your scripts | Your scripts | Your budget | Your scripts |
-| Claude Pro/Max, ChatGPT plans, Gemini, Perplexity, Cursor, Copilot | You log it | You log it | Your budget | Your scripts |
+| Perplexity, and tools added by hand in earlier versions | You log it | You log it | Your budget | Your scripts |
 
 - **Plan limits** (ChatGPT, Claude.ai, Cursor, Copilot) are not available through these providers' APIs, so they are not shown. The exception is Codex, which writes your ChatGPT plan's usage limits to its own logs.
 - **Anthropic** data comes from the Usage and Cost Analytics API. It usually arrives within 4 hours and can take up to 24, so today's figures often look low. The app shows how recent the data is.
@@ -143,6 +175,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/assistant.js`: the chat. It runs the tool-use loop (API key) or a CLI run, and streams replies to the browser as newline-delimited JSON.
 - `server/assistant-tools.js`: the app functions the assistant can call. Read-only tools are available everywhere; actions are available only in the chat.
 - `server/runner.js`: background tasks the assistant carries out, with a queue and cancel/retry.
+- `server/team.js`: AI team tasks: who does each role, the plan → build → review → debug → fix → final check stages, and hand-overs when an AI fails.
 - `server/eta.js`: progress history, finish estimates, and stall and overdue detection.
 - `server/claude.js`: the shared Claude API client, the built-in assistant tool, and token recording.
 - `scripts/dev-fake-claude.js`: development only. It runs the server against a scripted stand-in for Claude, so you can click through the chat without an API key.

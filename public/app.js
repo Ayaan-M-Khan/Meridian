@@ -55,6 +55,8 @@ const ICON = {
   chat: svg('<path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11h0A1.5 1.5 0 0 1 2.5 9.5z"/>'),
   sun: svg('<circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1"/>'),
   bolt: svg('<path d="M9 1.5L3.5 9h4L7 14.5 12.5 7h-4z"/>'),
+  team: svg('<circle cx="8" cy="3.6" r="2"/><circle cx="3.4" cy="11.6" r="2"/><circle cx="12.6" cy="11.6" r="2"/><path d="M7 5.4L4.4 9.8M9 5.4l2.6 4.4M5.4 11.6h5.2"/>'),
+  folder: svg('<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>'),
 };
 ICON.claude = ICON.spark;
 
@@ -117,6 +119,7 @@ const S = {
   waiting: {}, // adapter id -> 'signin' | 'install' while the app waits for you to finish
   flashTool: null,
   confirmRemove: null,
+  heroMode: readStore('acc-hero-mode') === 'team' ? 'team' : 'ask',
   chat: { loaded: false, threads: [], thread: null, streaming: false, pending: null, draft: '' },
 };
 
@@ -172,6 +175,7 @@ function toast(msg, isErr = false) {
 }
 
 // ── Logos ────────────────────────────────────────────────────────────────
+const MONO = { 'claude-code': 'CC', codex: 'Cx', 'gemini-cli': 'Ge', 'antigravity-cli': 'Ag', 'copilot-cli': 'GH', 'cursor-cli': 'Cu', anthropic: 'An', openai: 'OA', 'claude-api': 'An' };
 function monogram(name) {
   const words = String(name ?? '').replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(Boolean);
   if (!words.length) return '?';
@@ -181,10 +185,12 @@ function monogram(name) {
 /** A vendor-tinted monogram tile. It is a label, not the vendor's logo. */
 function logo(item, size = '') {
   const hue = HUE[item.vendor] ?? 'slate';
-  const inner = item.kind === 'builtin' ? ICON.spark : monogram(item.adapter_name ?? item.name);
+  const inner = item.kind === 'builtin' ? ICON.spark : MONO[item.adapter] ?? monogram(item.adapter_name ?? item.name);
   return `<span class="logo ${size} hue-${hue}" aria-hidden="true">${inner}</span>`;
 }
-const engineLogo = (e, size = '') => logo({ vendor: e.vendor, name: e.label }, size);
+const engineLogo = (e, size = '') => logo({ vendor: e.vendor, name: e.label, adapter: e.id }, size);
+const ENGINE_VENDOR = { 'claude-code': 'Anthropic', 'claude-api': 'Anthropic', codex: 'OpenAI', 'gemini-cli': 'Google', 'antigravity-cli': 'Google', 'copilot-cli': 'GitHub', 'cursor-cli': 'Anysphere' };
+const engineById = (id, label) => engineLogo({ id, label, vendor: ENGINE_VENDOR[id] }, 'xs');
 
 // ── Auth ─────────────────────────────────────────────────────────────────
 async function showAuth() {
@@ -306,6 +312,7 @@ async function load({ force = false } = {}) {
   // Settings and the chat keep their own state on screen, so background refreshes leave them alone.
   const keep = ['settings', 'assistant'].includes(S.page) && $('#content')?.dataset.page === S.page;
   if (force ? !(S.page === 'assistant' && keep && S.chat.streaming) : !(typing || keep)) renderPage();
+  refreshOpenTask();
 }
 
 /** Refresh every 30 seconds, or every 10 while tasks are running so their ETAs stay current. */
@@ -358,7 +365,7 @@ function accountLine(t) {
   if (t.kind !== 'local') return null;
   if (t.status === 'missing') return `${t.adapter_name} isn’t installed on this computer`;
   if (!a) return t.status === 'signin' ? `Not signed in to your ${t.account_kind ?? 'account'}` : null;
-  const who = a.email ? `Signed in as ${a.email}` : `Signed in${a.method ? ` with ${a.method}` : ''}`;
+  const who = a.email || a.user ? `Signed in as ${a.email ?? a.user}` : `Signed in${a.method ? ` with ${a.method}` : ''}`;
   return `${who}${a.plan ? ` · ${cap1(a.plan)} plan` : ''}`;
 }
 
@@ -376,8 +383,9 @@ function taskWhen(t) {
   return t.finished_at ? `${TASK_STATUS[t.status].label} ${rel(t.finished_at)}` : TASK_STATUS[t.status].label;
 }
 
-/** A duration in words: "8 min", "2 h 5 min". */
+/** A duration in words: "40 s", "8 min", "2 h 5 min". */
 function dur(ms) {
+  if (ms < 59_500) return `${Math.max(1, Math.round(ms / 1000))} s`;
   const m = Math.max(1, Math.round(ms / 60_000));
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
@@ -533,12 +541,12 @@ function connectPrompt(d) {
   const found = (local ?? []).filter((l) => l.installed && !l.connected_id);
   const buttons = [
     ...pending.map((e) => `<a class="btn primary" href="#tool-${e.integration_id}">${engineLogo(e, 'xs')}Finish setting up ${esc(e.label)}</a>`),
-    ...found.map((l) => `<button class="btn" data-action="connect-local" data-id="${esc(l.id)}">${logo({ vendor: l.vendor, name: l.name }, 'xs')}Connect ${esc(l.name)}</button>`),
+    ...found.map((l) => `<button class="btn" data-action="connect-local" data-id="${esc(l.id)}">${logo({ vendor: l.vendor, name: l.name, adapter: l.id }, 'xs')}Connect ${esc(l.name)}</button>`),
   ];
   if (!buttons.length) buttons.push('<button class="btn" data-action="add-tool">Connect an AI app</button>');
   const why = pending.length ? ` ${pending.map((e) => e.reason).join(' ')}` : '';
   return `<div class="hero-connect">
-    <p>Sign in to Claude Code, Codex or Gemini CLI with your own account to ask questions and run tasks from here. No API key needed.${esc(why)}</p>
+    <p>Sign in to Claude Code, Codex, Gemini CLI, GitHub Copilot or Cursor with your own account to ask questions and run tasks from here. No API key needed.${esc(why)}</p>
     <div class="form-actions">${buttons.join('')}<a class="btn ghost" href="#settings">Use an API key instead</a></div></div>`;
 }
 
@@ -553,22 +561,49 @@ function hero(d) {
     d.unread ? `${plural(d.unread, 'unread alert')}` : null,
   ].filter(Boolean);
   const ask = d.demo
-    ? '<p class="hero-note">The assistant works with your real data. Exit demo to ask it something.</p>'
+    ? `<p class="hero-note">The assistant works with your real data. Exit demo to ask it something.</p>${d.team?.lineup ? `<div class="lineup-label">AI team lineup</div>${lineupStrip(d.team.lineup)}` : ''}`
     : !e
       ? connectPrompt(d)
-      : `<form class="command" data-form="ask">
-          <span class="command-engine" title="${esc(`${e.label}, ${e.via}`)}">${engineLogo(e, 'sm')}</span>
-          <input class="command-input" name="text" placeholder="Ask ${esc(e.label)} about your tools, or tell it what to do…" autocomplete="off" maxlength="8000" aria-label="Ask the assistant">
-          <button class="btn primary" type="submit">${ICON.send}<span class="hide-sm">Ask</span></button>
-        </form>
-        <div class="chips">${suggestions(d).map((p) => `<button class="chip" data-action="ask" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div>
-        <p class="hero-foot">Runs through <b>${esc(e.label)}</b> with ${esc(e.via)} · <a href="#assistant">Open chat</a> · <a href="#settings">Change</a></p>`;
+      : heroCommand(d);
   return `<section class="hero a-hero">
     <div class="hero-top"><div><div class="eyebrow">${esc(new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</div>
       <h2>${esc(greet)}, ${esc(S.user.username)}</h2></div>
       <div class="hero-pulse">${pulse.map((p, i) => `<span class="${i === 0 && s.running ? 'live' : ''}">${esc(p)}</span>`).join('')}</div></div>
     ${ask}
   </section>`;
+}
+
+const TEAM_ORDER = [['planner', 'Plan'], ['builder', 'Build'], ['reviewer', 'Review'], ['debugger', 'Debug']];
+
+/** Who does each part of an AI team task, as a row of steps. */
+function lineupStrip(l) {
+  if (!l) return '<p class="fine">Connect an AI to use the team.</p>';
+  return `<div class="lineup">${TEAM_ORDER.map(([r, label], i) => `${i ? '<span class="lineup-arrow" aria-hidden="true">→</span>' : ''}<span class="lineup-step">${engineById(l[r].id, l[r].label)}<span><b>${label}</b> ${esc(l[r].label)}</span></span>`).join('')}</div>`;
+}
+
+/** The overview's command bar: ask the assistant, or hand the goal to the AI team. */
+function heroCommand(d) {
+  const e = d.engine;
+  const team = S.heroMode === 'team';
+  const toggle = `<div class="mode-switch" role="group" aria-label="How to run it">
+    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="ask" aria-pressed="${!team}">${ICON.chat}Ask ${esc(e.label)}</button>
+    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="team" aria-pressed="${team}">${ICON.team}AI team</button></div>`;
+  if (!team) {
+    return `${toggle}<form class="command" data-form="ask">
+        <span class="command-engine" title="${esc(`${e.label}, ${e.via}`)}">${engineLogo(e, 'sm')}</span>
+        <input class="command-input" name="text" placeholder="Ask ${esc(e.label)} about your tools, or tell it what to do…" autocomplete="off" maxlength="8000" aria-label="Ask the assistant">
+        <button class="btn primary" type="submit">${ICON.send}<span class="hide-sm">Ask</span></button>
+      </form>
+      <div class="chips">${suggestions(d).map((p) => `<button class="chip" data-action="ask" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div>
+      <p class="hero-foot">Runs through <b>${esc(e.label)}</b> with ${esc(e.via)} · <a href="#assistant">Open chat</a> · <a href="#settings">Change</a></p>`;
+  }
+  return `${toggle}<form class="command" data-form="team-quick">
+      <span class="command-engine team-mark">${ICON.team}</span>
+      <input class="command-input" name="goal" placeholder="Describe what the team should make…" autocomplete="off" maxlength="4000" aria-label="Goal for the AI team">
+      <button class="btn primary" type="submit">${ICON.play}<span class="hide-sm">Start</span></button>
+    </form>
+    ${lineupStrip(d.team?.lineup)}
+    <p class="hero-foot">Each AI does the part it’s best at, in the background. Follow it on the Tasks page. <button class="link" type="button" data-action="team-folder">${ICON.folder}Work on files in a folder</button> · <a href="#settings">Change who does what</a></p>`;
 }
 
 function chatItem(it) {
@@ -849,7 +884,7 @@ const VIEWS = {
           <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
         </form>
       </section>
-      <p class="chat-foot">Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}. It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.</p>
+      <p class="chat-foot">Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}. ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`}</p>
     </div>`;
   },
 
@@ -933,6 +968,10 @@ const VIEWS = {
         </div>
         <div class="tool-hero-actions">${actions.join('')}</div>
       </section>
+      ${t.replaced_by && !demo ? (() => {
+        const have = d.tools.find((x) => x.adapter === t.replaced_by.id);
+        return `<div class="callout info upgrade">${ICON.signin}<span class="grow">${esc(t.notes[0] ?? '')} This entry is tracked by hand.</span>${have ? `<a class="btn small primary" href="#tool-${have.id}">Open ${esc(have.name)}</a>` : `<button class="btn small primary" data-action="connect-local" data-id="${esc(t.replaced_by.id)}">Connect ${esc(t.replaced_by.name)}</button>`}</div>`;
+      })() : ''}
       ${t.last_error && !setup ? `<div class="callout err">${esc(t.last_error)}</div>` : ''}
       ${t.status === 'pending' ? '<div class="callout info">The first check hasn’t finished yet.</div>' : ''}
       ${setup}
@@ -1034,12 +1073,12 @@ const VIEWS = {
     if (!groups.sessions.length) delete groups.sessions;
     const list = groups[S.taskFilter] ?? groups.all;
     const canRun = !d.demo && d.engine;
-    return `<div class="page-head"><div><h2>Tasks</h2><p>What your agents and apps report, live sessions from AI apps on this computer, and work the assistant does here.</p></div>
-      ${canRun ? `<button class="btn primary" data-action="new-claude-task">${ICON.spark}New assistant task</button>` : ''}</div>
+    return `<div class="page-head"><div><h2>Tasks</h2><p>What your agents and apps report, live sessions from AI apps on this computer, and work the assistant and the AI team do here.</p></div>
+      ${canRun ? `<div class="form-actions"><button class="btn" data-action="new-claude-task">${ICON.spark}New assistant task</button><button class="btn primary" data-action="new-team-task">${ICON.team}New AI team task</button></div>` : ''}</div>
       <div class="chips" role="group" aria-label="Filter tasks">${Object.keys(groups).map((k) => `<button class="chip" data-action="task-filter" data-filter="${k}" aria-pressed="${S.taskFilter === k}">${labels[k]} <span class="n num">${groups[k].length}</span></button>`).join('')}</div>
       <section class="card">${list.length ? `<div class="rows">${list.map((t) => taskRow(t)).join('')}</div>` : d.tasks.length
         ? emptyBlock(`No ${labels[S.taskFilter]?.toLowerCase() ?? ''} tasks`, 'Try another filter.')
-        : emptyBlock('No tasks yet', 'Connect Claude Code, Codex or Gemini CLI to see their sessions, have your scripts report tasks, or start an assistant task.')}</section>`;
+        : emptyBlock('No tasks yet', 'Connect Claude Code, Codex, Gemini CLI or GitHub Copilot to see their sessions, have your scripts report tasks, or start an assistant task.')}</section>`;
   },
 
   notifications() {
@@ -1064,11 +1103,26 @@ const VIEWS = {
           <p class="muted small">The chat, background tasks and the daily summary run through one AI. Apps signed in with your own account need no API key; their usage counts toward your plan.</p>
           <div class="engine-list" role="radiogroup" aria-label="Which AI the assistant uses">
             <label class="engine-opt ${st.assistant_engine === 'auto' ? 'on' : ''}"><input type="radio" name="engine" value="auto" data-action-change="set-engine" ${st.assistant_engine === 'auto' ? 'checked' : ''} ${dis}>
-              <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic</b><span class="faint small block">The first ready one: Claude Code, then a Claude API key, Codex, Gemini CLI${d.engine ? `. Now: ${esc(d.engine.label)}` : ''}</span></span></label>
+              <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic</b><span class="faint small block">The first ready one: Claude Code, then a Claude API key, Codex, Gemini CLI, GitHub Copilot, Cursor${d.engine ? `. Now: ${esc(d.engine.label)}` : ''}</span></span></label>
             ${d.engines.map((e) => `<label class="engine-opt ${st.assistant_engine === e.id ? 'on' : ''} ${e.ready ? '' : 'off'}"><input type="radio" name="engine" value="${e.id}" data-action-change="set-engine" ${st.assistant_engine === e.id ? 'checked' : ''} ${e.ready ? '' : 'disabled'} ${dis}>
               ${engineLogo(e, 'sm')}<span class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(e.ready ? `Ready · ${e.via}` : e.reason)}</span></span>
               ${!e.ready && e.kind === 'cli' && !d.demo ? (e.integration_id ? `<a class="btn small" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small" type="button" data-action="connect-local" data-id="${e.id}">Connect</button>`) : ''}</label>`).join('')}
           </div>
+        </section>
+
+        <section class="card span-2"><div class="card-head">${ICON.team}<h3>AI team</h3></div>
+          <p class="muted small">For AI team tasks, your connected AIs split the work by role. Automatic gives each role to the best-suited AI that’s ready: Codex plans and reviews, Claude Code builds and fixes, and Gemini CLI debugs, with the others filling in. The reviewer is a different AI from the builder whenever one is available.</p>
+          <div class="role-grid">${TEAM_ORDER.map(([role]) => {
+            const r = d.team.roles[role];
+            const now = d.team.lineup?.[role];
+            const cur = st.team_roles?.[role] ?? 'auto';
+            return `<label class="role-opt"><span class="min0"><b>${esc(r.title)}</b><span class="faint small block">${esc(r.does)}</span></span>
+              <select class="input" data-team-role="${role}" ${dis} aria-label="${esc(r.title)}">
+                <option value="auto" ${cur === 'auto' ? 'selected' : ''}>Automatic${now ? ` (${esc(now.label)})` : ''}</option>
+                ${d.engines.map((e) => `<option value="${e.id}" ${cur === e.id ? 'selected' : ''} ${e.ready ? '' : 'disabled'}>${esc(e.label)}${e.ready ? '' : ` · ${esc(e.reason)}`}</option>`).join('')}
+              </select></label>`;
+          }).join('')}</div>
+          <div class="lineup-label">Right now</div>${lineupStrip(d.team.lineup)}
         </section>
 
         <section class="card"><div class="card-head">${ICON.key}<h3>Claude API key (optional)</h3></div>
@@ -1117,7 +1171,7 @@ function welcome() {
   const local = S.local;
   const item = (l) => {
     const state = !l.installed ? 'Not installed' : l.signed_in ? 'Installed and signed in' : 'Installed, not signed in';
-    return `<div class="welcome-app">${logo({ vendor: l.vendor, name: l.name }, 'sm')}<div class="min0"><b>${esc(l.name)}</b><span class="faint small block">${esc(state)} · ${esc(l.account_kind)}</span></div>
+    return `<div class="welcome-app">${logo({ vendor: l.vendor, name: l.name, adapter: l.id }, 'sm')}<div class="min0"><b>${esc(l.name)}</b><span class="faint small block">${esc(state)} · ${esc(l.account_kind)}</span></div>
       ${l.connected_id ? `<a class="btn small" href="#tool-${l.connected_id}">Open</a>` : `<button class="btn small ${l.installed ? 'primary' : ''}" data-action="connect-local" data-id="${esc(l.id)}">Connect</button>`}</div>`;
   };
   return `<section class="hero welcome">
@@ -1265,16 +1319,27 @@ const AFTER = {
 };
 
 // ── Modals ───────────────────────────────────────────────────────────────
-function openPanel(title, body, { center = false, wide = false } = {}) {
+function openPanel(title, body, { center = false, wide = false, focus = true } = {}) {
   $('#modal-root').innerHTML = `<div class="overlay ${center ? 'center' : ''}" data-action="overlay">
     <div class="panel ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="panel-head"><h2>${esc(title)}</h2><button class="btn icon-btn ghost" data-action="close" aria-label="Close">${ICON.close}</button></div>
       <div class="panel-body">${body}</div></div></div>`;
-  $('#modal-root .panel-body input, #modal-root .panel-body button')?.focus();
+  if (focus) $('#modal-root .panel-body input, #modal-root .panel-body button')?.focus();
 }
 function closeModal() {
   $('#modal-root').innerHTML = '';
   S.add = null;
+  S.openTask = null;
+}
+
+/** Keeps an open task panel current while the task changes, such as an AI team moving to its next stage. */
+function refreshOpenTask() {
+  const o = S.openTask;
+  if (!o || !$('#modal-root .panel')) return;
+  const t = S.data?.tasks.find((x) => x.id === o.id);
+  if (!t) return;
+  const sig = `${t.status}|${t.updated_at}|${t.progress}`;
+  if (sig !== o.sig) openTask(t.id, { refresh: true });
 }
 
 function ingestHelp(t, token) {
@@ -1297,9 +1362,11 @@ function taskPrompt(t) {
   return `Look at task #${t.id} (“${t.name}” on ${t.tool_name}) and tell me ${what}.`;
 }
 
-async function openTask(id) {
+async function openTask(id, { refresh = false } = {}) {
   const t = S.data.tasks.find((x) => x.id === Number(id));
   if (!t) return;
+  const scroll = refresh ? $('#modal-root .panel-body')?.scrollTop ?? 0 : 0;
+  const open = [...document.querySelectorAll('#modal-root .tl-out details[open]')].map((el) => el.closest('.tl-out').id);
   const row = (k, v) => (v ? `<dt>${k}</dt><dd>${v}</dd>` : '');
   const at = (iso) => iso && `${esc(when(iso))} <span class="faint">(${esc(rel(iso))})</span>`;
   const e = etaInfo(t);
@@ -1330,21 +1397,102 @@ async function openTask(id) {
       ${row(session ? 'Length' : 'Took', (session ? t.started_at : t.finished_at && t.started_at) && esc(dur(Date.parse(session ? t.updated_at : t.finished_at) - Date.parse(t.started_at))))}
       ${session ? '' : row('Last update', esc(when(t.updated_at)))}
     </dl>
-    <div class="section" id="task-detail">${t.description ? `<h4>${mine ? 'Instructions' : session ? 'Details' : 'Description'}</h4><p class="pre">${esc(t.description)}</p>` : ''}</div>
+    ${t.team ? teamTimeline(t) : ''}
+    <div class="section" id="task-detail">${t.description ? `<h4>${t.team ? 'Goal' : mine ? 'Instructions' : session ? 'Details' : 'Description'}</h4><p class="pre">${esc(t.description)}</p>` : ''}</div>
     ${canAsk ? `<div class="form-actions"><button class="btn" data-action="ask-task" data-id="${t.id}">${ICON.chat}Ask the assistant about this</button></div>` : ''}
-    <div class="section"><h4>Controls</h4>${controls}</div>`);
-  if (S.data.demo || !t.has_result) return;
+    <div class="section"><h4>Controls</h4>${controls}</div>`, { focus: !refresh });
+  S.openTask = { id: t.id, sig: `${t.status}|${t.updated_at}|${t.progress}` };
+  const restore = () => {
+    for (const id of open) document.querySelector(`#${id} details`)?.setAttribute('open', '');
+    const body = $('#modal-root .panel-body');
+    if (body && refresh) body.scrollTop = scroll;
+  };
+  if (S.data.demo || (!t.has_result && !t.team)) return restore();
   try {
     const detail = await api(`/api/tasks/${t.id}`);
+    if (S.openTask?.id !== t.id) return;
+    for (const s of detail.detail?.stages ?? []) {
+      const box = document.getElementById(`tl-out-${s.key}`);
+      if (box && s.output) box.innerHTML = `<details><summary>What ${esc(s.engine_label)} wrote</summary><div class="md tl-md">${md(s.output)}</div></details>`;
+    }
     const box = $('#task-detail');
-    if (!box || !detail.result) return;
-    box.insertAdjacentHTML('afterend', `<div class="section"><h4>Result</h4>
-      <div class="result md" id="task-result">${md(detail.result)}</div>
-      <pre id="task-result-raw" hidden>${esc(detail.result)}</pre>
-      <div class="form-actions"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button></div></div>`);
+    if (box && detail.result) {
+      box.insertAdjacentHTML('beforebegin', `<div class="section"><h4>Result</h4>
+        <div class="result md" id="task-result">${md(detail.result)}</div>
+        <pre id="task-result-raw" hidden>${esc(detail.result)}</pre>
+        <div class="form-actions"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button></div></div>`);
+    }
+    restore();
   } catch (err) {
-    toast(err.message, true);
+    if (!refresh) toast(err.message, true);
   }
+}
+
+const STAGE_STATE = {
+  pending: { icon: 'clock', text: 'Waiting' },
+  running: { icon: null, text: 'Working…' },
+  done: { icon: 'check', text: 'Done' },
+  failed: { icon: 'x', text: 'Failed' },
+  skipped: { icon: 'chevron', text: 'Skipped' },
+};
+
+/** The stages of an AI team task: who did each one, and how it went. */
+function teamTimeline(t) {
+  return `<div class="section"><h4>${ICON.team} The team${t.team.folder ? ` · working in <code>${esc(t.team.folder)}</code>` : ''}</h4>
+    <ol class="timeline">${t.team.stages.map((s) => {
+      const st = STAGE_STATE[s.status] ?? STAGE_STATE.pending;
+      const took = s.started_at && s.finished_at ? ` · ${dur(Date.parse(s.finished_at) - Date.parse(s.started_at))}` : '';
+      const verdict = s.status === 'done' && s.verdict ? (s.verdict === 'approve' ? 'Approved' : 'Asked for changes') : st.text;
+      return `<li class="tl ${s.status}">
+        <span class="tl-dot">${st.icon ? ICON[st.icon] : '<span class="spin"></span>'}</span>
+        <div class="min0">
+          <div class="tl-head">${engineById(s.engine, s.engine_label)}<b>${esc(s.label)}</b><span class="faint">${esc(s.engine_label)}</span><span class="tl-meta ${s.verdict === 'changes' ? 'warn-text' : ''}">${esc(verdict)}${esc(took)}</span></div>
+          ${s.note ? `<div class="faint small">${esc(s.note)}</div>` : ''}${s.error ? `<div class="err-text small">${esc(s.error)}</div>` : ''}
+          <div class="tl-out" id="tl-out-${esc(s.key)}"></div>
+        </div></li>`;
+    }).join('')}</ol></div>`;
+}
+
+function openTeamTask(preset = {}) {
+  const lineup = S.data.team?.lineup;
+  openPanel('New AI team task', `
+    <form class="form" data-form="team-task">
+      <p class="muted small">Your connected AIs split the work: one plans, one builds, another reviews, and if the review finds problems one debugs and the builder fixes them. It runs in the background with live progress on the Tasks page, and the result is saved on the task.</p>
+      <div class="field"><label for="tt-goal">What should the team make?</label><textarea class="input" id="tt-goal" name="goal" rows="5" maxlength="4000" required placeholder="A one-page landing page for a dog-walking business: headline, three services with prices, and a contact section.">${esc(preset.goal ?? '')}</textarea></div>
+      <div class="field"><label for="tt-folder">Folder to work in (optional)</label>
+        <div class="folder-row"><input class="input" id="tt-folder" name="folder" autocomplete="off" placeholder="Leave empty for a text result, or paste a folder path" value="${esc(preset.folder ?? '')}"><button class="btn" type="button" data-action="pick-folder">${ICON.folder}Choose…</button></div>
+        <span class="help">With a folder, the builder can create and change files in it, and the planner, reviewer and debugger can read them. None of them run shell commands, except Codex inside its own sandbox. Use a folder you have a copy of, such as a git project.</span></div>
+      <div><div class="lineup-label">Who does what</div><div id="tt-lineup">${lineupStrip(lineup)}</div></div>
+      <div class="form-actions"><button class="btn primary" type="submit">${ICON.play}Start team task</button><a class="btn ghost" href="#settings" data-action="close">Change roles</a></div>
+      <div class="error-text" data-error></div>
+    </form>`, { center: true });
+  (preset.goal ? $('#tt-folder') : $('#tt-goal'))?.focus();
+}
+
+let lineupTimer = 0;
+/** With a folder, only apps on this computer can take part, so the lineup can change. */
+function refreshLineup() {
+  clearTimeout(lineupTimer);
+  lineupTimer = setTimeout(async () => {
+    const box = $('#tt-lineup');
+    if (!box) return;
+    const folder = $('#tt-folder')?.value.trim();
+    try {
+      const r = await api(`/api/team${folder ? '?folder=1' : ''}`);
+      box.innerHTML = r.lineup ? lineupStrip(r.lineup) : '<p class="fine err-text">Working in a folder needs an AI app on this computer: Claude Code, Codex, Gemini CLI, GitHub Copilot or Cursor.</p>';
+    } catch {
+      /* keep the last lineup */
+    }
+  }, 250);
+}
+
+async function startedTeam(r) {
+  const l = r.lineup ?? {};
+  const name = (id) => S.data.engines.find((e) => e.id === id)?.label ?? id;
+  toast(`Team started: ${name(l.planner)} plans, ${name(l.builder)} builds, ${name(l.reviewer)} reviews`);
+  S.taskFilter = 'all';
+  await load({ force: true });
+  openTask(r.id);
 }
 
 function openNewTask(preset = {}) {
@@ -1361,7 +1509,7 @@ function openNewTask(preset = {}) {
   $('#ct-name')?.focus();
 }
 
-/** Finds Claude Code, Codex and Gemini CLI on this computer. */
+/** Finds Claude Code, Codex, Gemini CLI, GitHub Copilot CLI and the Cursor CLI on this computer. */
 function loadLocal({ fresh = false } = {}) {
   if (S.demo) return Promise.resolve(null);
   if (!S.localLoading || fresh) {
@@ -1392,7 +1540,7 @@ function renderAdd() {
   if (!a) return;
   if (a.step === 'pick') {
     const caps = (c) => `<div class="caps">${Object.entries(c.capabilities).filter(([, v]) => v !== 'none').map(([k, v]) => `<span class="cap">${CAP_NAME[k]}: <b>${esc(capShort(k, v))}</b></span>`).join('')}</div>`;
-    const item = (c) => `<button class="cat-item" data-action="pick-adapter" data-id="${esc(c.id)}">${logo(c)}<div class="min0">
+    const item = (c) => `<button class="cat-item" data-action="pick-adapter" data-id="${esc(c.id)}">${logo({ ...c, adapter: c.id })}<div class="min0">
       <b>${esc(c.name)}</b> <span class="faint small">${esc(c.vendor)}</span><p>${esc(c.description)}</p>${caps(c)}</div></button>`;
     const localItem = (c) => {
       const l = S.local?.find((x) => x.id === c.id);
@@ -1401,7 +1549,7 @@ function renderAdd() {
           : !l.installed ? '<span class="state warn">Not installed yet</span>'
             : l.signed_in ? `<span class="state ok">Installed and signed in${l.account?.email ? ` as ${esc(l.account.email)}` : ''}</span>` : '<span class="state warn">Installed, not signed in yet</span>';
       const action = l?.connected_id ? `<a class="btn small" href="#tool-${l.connected_id}" data-action="close">Open</a>` : `<button class="btn small ${l?.installed ? 'primary' : ''}" data-action="connect-local" data-id="${esc(c.id)}" ${l ? '' : 'disabled'}>Connect</button>`;
-      return `<div class="cat-item local">${logo(c)}<div class="min0"><b>${esc(c.name)}</b> <span class="faint small">${esc(c.account)}</span><p>${esc(c.description)}</p>${state}</div>${action}</div>`;
+      return `<div class="cat-item local">${logo({ ...c, adapter: c.id })}<div class="min0"><b>${esc(c.name)}</b> <span class="faint small">${esc(c.account)}</span><p>${esc(c.description)}</p>${state}</div>${action}</div>`;
     };
     openPanel('Connect a tool', `
       <div class="section"><h4>${ICON.signin} Sign in with your account · no API key</h4><div class="catalog">${S.catalog ? S.catalog.filter((c) => c.kind === 'local').map(localItem).join('') : '<div class="faint small"><span class="spin"></span> Loading…</div>'}</div>
@@ -1494,6 +1642,11 @@ const FORMS = {
     toast('Usage saved');
     await load({ force: true });
   },
+  async 'team-task'(fd) {
+    const r = await api('/api/team-tasks', { method: 'POST', body: { goal: fd.goal, folder: fd.folder?.trim() || null } });
+    closeModal();
+    await startedTeam(r);
+  },
   async 'claude-task'(fd) {
     const r = await api('/api/claude-tasks', { method: 'POST', body: { name: fd.name, instructions: fd.instructions } });
     closeModal();
@@ -1525,6 +1678,22 @@ async function onSubmit(e) {
   if (!form) return;
   e.preventDefault();
   const kind = form.dataset.form;
+  if (kind === 'team-quick') {
+    const goal = String(new FormData(form).get('goal') ?? '').trim();
+    if (!goal) return;
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/team-tasks', { method: 'POST', body: { goal } });
+      form.reset();
+      await startedTeam(r);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      if (btn.isConnected) btn.disabled = false;
+    }
+    return;
+  }
   if (kind === 'ask' || kind === 'chat' || kind === 'ask-tool') {
     const text = String(new FormData(form).get('text') ?? '').trim();
     if (!text) return;
@@ -1692,6 +1861,32 @@ const ACTIONS = {
     if (S.chat.thread) await api(`/api/assistant/threads/${S.chat.thread.id}/stop`, { method: 'POST' });
   },
   'new-claude-task': () => openNewTask(),
+  'new-team-task': () => openTeamTask(),
+  'hero-mode'(el) {
+    S.heroMode = el.dataset.mode === 'team' ? 'team' : 'ask';
+    writeStore('acc-hero-mode', S.heroMode);
+    renderPage();
+    $('.command-input')?.focus();
+  },
+  'team-folder'() {
+    const goal = $('.command-input')?.value.trim() ?? '';
+    openTeamTask({ goal });
+  },
+  async 'pick-folder'(el) {
+    el.disabled = true;
+    try {
+      const r = await api('/api/pick-folder', { method: 'POST' });
+      if (r.path) {
+        $('#tt-folder').value = r.path;
+        refreshLineup();
+      }
+    } catch (err) {
+      toast(err.message, true);
+      $('#tt-folder')?.focus();
+    } finally {
+      el.disabled = false;
+    }
+  },
   async 'task-cancel'(el) {
     el.disabled = true;
     await api(`/api/tasks/${el.dataset.id}/cancel`, { method: 'POST' });
@@ -1821,6 +2016,18 @@ async function onChange(e) {
     }
     return;
   }
+  if (el.dataset.teamRole) {
+    try {
+      await api('/api/settings', { method: 'PUT', body: { team_roles: { [el.dataset.teamRole]: el.value } } });
+      toast('Team role saved');
+      await load({ force: true });
+      renderPage();
+    } catch (err) {
+      toast(err.message, true);
+      renderPage();
+    }
+    return;
+  }
   if (el.dataset.setting) {
     try {
       await api('/api/settings', { method: 'PUT', body: { [el.dataset.setting]: el.checked } });
@@ -1859,7 +2066,10 @@ async function boot() {
     document.addEventListener('click', onClick);
     document.addEventListener('submit', onSubmit);
     document.addEventListener('change', onChange);
-    document.addEventListener('input', (e) => e.target.id === 'chat-input' && autosize(e.target));
+    document.addEventListener('input', (e) => {
+      if (e.target.id === 'chat-input') autosize(e.target);
+      else if (e.target.id === 'tt-folder') refreshLineup();
+    });
     document.addEventListener('keydown', (e) => {
       if (e.target.id === 'chat-input' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();

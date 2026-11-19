@@ -10,6 +10,7 @@ import { buildFacts } from './summary.js';
 import { syncIntegration } from './sync.js';
 import { evaluateAlerts } from './alerts.js';
 import { cancelClaudeTask, retryClaudeTask, startClaudeTask } from './runner.js';
+import { startTeamTask } from './team.js';
 
 export class ToolInputError extends Error {}
 
@@ -220,6 +221,21 @@ export const ACTION_TOOLS = [
     run(input) {
       const t = startClaudeTask({ name: text(input.name, 'name', 80), instructions: text(input.instructions, 'instructions', 2000) });
       return { ok: true, task_id: t.id, status: t.status, note: 'It is visible on the Tasks page.' };
+    },
+  },
+  {
+    name: 'start_team_task',
+    description: 'Start an AI team task: the connected AIs split the work by role. One plans (Codex first), one builds (Claude Code first), another reviews it, and if the review finds problems one debugs (Gemini CLI first) and the builder fixes them. Use it when the person asks for the team, for several AIs to work together, or for substantial work that benefits from a second opinion. It shows on the Tasks page with each stage and who did it. From the chat it produces text only; to have the team work on files in a folder, the person starts it from the Tasks page.',
+    input_schema: obj({ goal: { type: 'string', description: 'What the team should produce, complete and self-contained. The team cannot see this chat.' } }, ['goal']),
+    label: (i) => `Started an AI team task: “${String(i.goal ?? '').split('\n')[0].slice(0, 70)}”`,
+    run(input) {
+      let t;
+      try {
+        t = startTeamTask({ goal: text(input.goal, 'goal', 4000) });
+      } catch (err) {
+        throw new ToolInputError(err.message);
+      }
+      return { ok: true, task_id: t.id, status: t.status, roles: t.lineup, note: 'It is visible on the Tasks page.' };
     },
   },
   {

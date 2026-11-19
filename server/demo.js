@@ -27,6 +27,7 @@ export function demoState(now = new Date()) {
     version: null,
     limits: null,
     engine: adapters[adapter].engine ? { id: adapter, label: adapters[adapter].engine.label, via: adapters[adapter].engine.via } : null,
+    replaced_by: null,
     cli: adapters[adapter].cli
       ? { install: adapters[adapter].cli.install.text, install_url: adapters[adapter].cli.install.url, login: adapters[adapter].cli.login.text, login_help: adapters[adapter].cli.login.help }
       : null,
@@ -81,8 +82,8 @@ export function demoState(now = new Date()) {
       cost_mtd: agentMtd, cost_today: agentCost[29], tokens_mtd: Math.round(agentMtd * 250_000), tokens_today: Math.round(agentCost[29] * 250_000),
       requests_mtd: Math.round(agentMtd * 90),
     }),
-    base(4, 'cursor', 'Cursor', { status: 'tracked', cost_mtd: 20, last_usage_day: monthStart, budget_usd: 20, budget_pct: 100 }),
-    base(5, 'github-copilot', 'GitHub Copilot', { status: 'tracked' }),
+    base(4, 'cursor-cli', 'Cursor', { status: 'signin', account: null }),
+    base(5, 'copilot-cli', 'GitHub Copilot', { status: 'ok', version: '1.0.2', account: { email: null, user: 'octo-dev', plan: null, method: 'GitHub account', org: null }, last_sync_at: ago(1) }),
     base(6, 'anthropic', 'Claude API (side project)', {
       status: 'error', secret_hint: 'sk-ant-…09bd', last_sync_at: ago(31),
       last_error: 'Anthropic rejected the key. Use an Admin API key (sk-ant-admin…); regular API keys cannot read usage.',
@@ -94,9 +95,22 @@ export function demoState(now = new Date()) {
     description: null, progress: null, step: null, started_at: null, eta: null,
     eta_at: null, eta_source: null, stalled: false, overdue: false, longer_than_usual: false, typical_ms: null,
     scheduled_for: null, finished_at: null, error: null, has_result: false,
-    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, controls: [], ...extra,
+    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, team: null, controls: [], ...extra,
   });
+  const stage = (key, label, role, engine, engine_label, status, extra = {}) => ({ key, label, role, engine, engine_label, status, started_at: null, finished_at: null, verdict: undefined, note: undefined, error: undefined, ...extra });
   const tasks = [
+    T(12, 7, 'Landing page copy for the billing launch', 'running', {
+      kind: 'team', runner: 'team', runner_label: 'AI team', controls: ['cancel'], progress: 58, step: 'Reviewing · Codex', started_at: ago(9), eta_at: ahead(6), eta_source: 'progress', updated_at: ago(1),
+      description: 'Write landing page copy for the new billing feature: a headline, three benefit sections and an FAQ.',
+      team: { folder: null, stages: [
+        stage('plan', 'Plan', 'planner', 'codex', 'Codex', 'done', { started_at: ago(9), finished_at: ago(8) }),
+        stage('build', 'Build', 'builder', 'claude-code', 'Claude Code', 'done', { started_at: ago(8), finished_at: ago(2) }),
+        stage('review', 'Review', 'reviewer', 'codex', 'Codex', 'running', { started_at: ago(2) }),
+        stage('debug', 'Debug', 'debugger', 'gemini-cli', 'Gemini CLI', 'pending'),
+        stage('fix', 'Fix', 'builder', 'claude-code', 'Claude Code', 'pending'),
+        stage('check', 'Final check', 'reviewer', 'codex', 'Codex', 'pending'),
+      ] },
+    }),
     T(10, 7, 'Refactor billing module', 'running', { kind: 'session', description: 'in billing-service · claude-opus-5-5 · 3,412,880 tokens', started_at: ago(42), updated_at: ago(1) }),
     T(11, 8, 'Write migration for invoices table', 'completed', { kind: 'session', description: 'in billing-service · gpt-5-codex · 812,400 tokens', started_at: ago(70), finished_at: ago(25), updated_at: ago(25) }),
     T(1, 3, 'Weekly competitor digest', 'running', { description: 'Collect pricing pages from 14 competitors and summarize changes since last week.', progress: 64, step: 'Comparing pricing pages', started_at: ago(18), eta: ahead(9), eta_at: ahead(9), eta_source: 'reported', updated_at: ago(1) }),
@@ -142,7 +156,7 @@ export function demoState(now = new Date()) {
     generated_at: now.toISOString(),
     stats: {
       connected: tools.length, active: tools.filter((t) => t.active).length, needs_attention: 1,
-      running: 4, queued: 1, scheduled: 2, completed_today: 2, failed_today: 1, sessions_running: 1,
+      running: 5, queued: 1, scheduled: 2, completed_today: 2, failed_today: 1, sessions_running: 1,
       cost_today: sum('cost_today'), cost_mtd: sum('cost_mtd'), tokens_today: sum('tokens_today'), tokens_mtd: sum('tokens_mtd'),
       requests_mtd: sum('requests_mtd'), tools_reporting_cost: 4, ceiling_usd: 300,
     },
@@ -173,8 +187,19 @@ export function demoState(now = new Date()) {
       { id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', integration_id: null, ready: false, reason: 'Add a Claude API key in Settings.' },
       { id: 'codex', label: 'Codex', via: 'your ChatGPT account', vendor: 'OpenAI', kind: 'cli', integration_id: 8, ready: true, reason: null },
       { id: 'gemini-cli', label: 'Gemini CLI', via: 'your Google account', vendor: 'Google', kind: 'cli', integration_id: null, ready: false, reason: 'Connect Gemini CLI first.' },
+      { id: 'copilot-cli', label: 'GitHub Copilot', via: 'your GitHub account', vendor: 'GitHub', kind: 'cli', integration_id: 5, ready: true, reason: null },
+      { id: 'cursor-cli', label: 'Cursor', via: 'your Cursor account', vendor: 'Anysphere', kind: 'cli', integration_id: 4, ready: false, reason: 'Cursor isn’t signed in.' },
     ],
     engine: { id: 'claude-code', label: 'Claude Code', via: 'your Claude account', vendor: 'Anthropic', kind: 'cli', integration_id: 7, ready: true, reason: null },
     engine_choice: 'auto',
+    team: {
+      lineup: {
+        planner: { id: 'codex', label: 'Codex', vendor: 'OpenAI', chosen: false },
+        builder: { id: 'claude-code', label: 'Claude Code', vendor: 'Anthropic', chosen: false },
+        reviewer: { id: 'codex', label: 'Codex', vendor: 'OpenAI', chosen: false },
+        debugger: { id: 'copilot-cli', label: 'GitHub Copilot', vendor: 'GitHub', chosen: false },
+      },
+      roles: { planner: { title: 'Planner', does: 'Plans the work' }, builder: { title: 'Builder', does: 'Does the work and applies fixes' }, reviewer: { title: 'Reviewer', does: 'Checks the work' }, debugger: { title: 'Debugger', does: 'Finds the cause of problems' } },
+    },
   };
 }
