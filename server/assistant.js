@@ -11,6 +11,7 @@ import { ACTION_TOOLS, READ_TOOLS, definition, labelFor, runTool } from './assis
 import { claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
 import { chooseEngine } from './engine-list.js';
 import { runCliEngine } from './engines.js';
+import { FAKE_CALLS } from './adapters/local.js';
 import { HttpError, nowIso } from './util.js';
 
 const MAX_TURNS = 16;
@@ -194,6 +195,11 @@ export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
       rec.finish(out.text);
       save();
     } catch (err) {
+      // Imitation tool calls written as text are not a reply; leave them out of the conversation.
+      for (const m of messages.slice(before)) {
+        if (m.role === 'assistant') m.content = m.content.filter((b) => b.type !== 'text' || !FAKE_CALLS.test(b.text));
+      }
+      for (let i = messages.length - 1; i > before; i--) if (messages[i].role === 'assistant' && !messages[i].content.length) messages.splice(i, 1);
       rec.finish(isAbort(err) ? '(Stopped.)' : '(The reply was interrupted.)');
       const gotReply = messages.length > before + 1;
       if (!gotReply) messages.pop();

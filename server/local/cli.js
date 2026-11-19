@@ -84,10 +84,19 @@ export function resolveCli(bin, candidates = []) {
 
 export const forgetResolved = () => resolved.clear();
 
-/** Environment for the CLIs. Markers from a surrounding Claude Code session are removed so a nested run isn't refused. */
+/**
+ * Environment for the CLIs.
+ * - MCP_CONNECTION_NONBLOCKING is always removed: with it, Claude Code answers before the app's functions connect.
+ * - When this app itself runs inside a Claude Code session (as during development), that session's own variables
+ *   are removed too, so the run behaves like one started from your desktop and uses your own sign-in.
+ */
 export function childEnv(extra = {}) {
   const env = { ...process.env };
-  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS']) delete env[k];
+  const nested = Boolean(env.CLAUDECODE || env.CLAUDE_CODE_SESSION_ID);
+  for (const k of Object.keys(env)) {
+    if (['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'MCP_CONNECTION_NONBLOCKING'].includes(k)) delete env[k];
+    else if (nested && (/^CLAUDE_CODE_|^CLAUDE_AGENT_SDK_|^CLAUDE_PREVIEW_|^MCP_SERVER_/.test(k) || ['CLAUDECODE', 'CLAUDE_PID', 'ANTHROPIC_BASE_URL'].includes(k))) delete env[k];
+  }
   return { ...env, ...extra };
 }
 

@@ -25,6 +25,7 @@ const tryJson = (s) => {
   }
 };
 const firstLine = (s) => String(s ?? '').trim().split(/\r?\n/)[0]?.trim() || null;
+export const FAKE_CALLS = /<function_calls>|<invoke name=/;
 
 function local({ id, statusCheck, ...def }) {
   const adapter = {
@@ -163,7 +164,10 @@ export const claudeCode = local({
             return { error: /log ?in|sign ?in|api key|authenticat|oauth/i.test(msg) ? 'Claude Code isn’t signed in. Open Claude Code in the sidebar and choose Sign in.' : msg };
           }
           if (!result) return { error: firstLine(run.stderr) ?? `Claude Code exited without a reply (code ${run.code}).` };
-          return { text: typeof result.result === 'string' && result.result ? result.result : texts.at(-1) ?? '' };
+          const text = typeof result.result === 'string' && result.result ? result.result : texts.at(-1) ?? '';
+          // If the app's functions never reached the model, it may write imitation tool calls as text. Don't pass that off as an answer.
+          if (FAKE_CALLS.test(text)) return { error: 'Claude Code couldn’t reach this app’s functions for that reply. Try again.' };
+          return { text };
         },
       };
     },
