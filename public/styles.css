@@ -551,6 +551,11 @@ td.na { color: var(--text-3); }
 .callout.upgrade { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .callout.upgrade > svg { width: 16px; height: 16px; color: var(--accent-ink); flex-shrink: 0; }
 
+.restore-box { margin-top: 12px; line-height: 1.55; }
+.restore-box .form-actions { margin-top: 10px; }
+label.btn { position: relative; }
+label.btn.disabled { opacity: 0.5; pointer-events: none; }
+
 /* Settings */
 .engine-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 12px; }
 .engine-opt { display: flex; align-items: center; gap: 11px; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; transition: border-color 0.12s; }

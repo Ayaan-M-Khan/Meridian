@@ -27,6 +27,7 @@ function createApp() {
     next();
   });
 
+  app.use('/api/restore', express.json({ limit: '64mb' })); // backups can be large; everything else stays small
   app.use('/api', express.json({ limit: '256kb' }));
 
   // Browsers can't send a custom header cross-site without CORS preflight, which this server never grants.

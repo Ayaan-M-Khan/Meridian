@@ -15,6 +15,17 @@ import { LOCAL_ADAPTERS } from './adapters/local.js';
 import { openConsole, forgetResolved } from './local/cli.js';
 import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
 import { ROLES, lineupView, startTeamTask } from './team.js';
+import { makeBackup, restoreBackup } from './backup.js';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const APP_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')).version;
+  } catch {
+    return null;
+  }
+})();
 
 const ENGINE_CHOICES = ['auto', 'claude-code', 'codex', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli', 'claude-api'];
 
@@ -271,6 +282,22 @@ export function apiRoutes(app) {
   });
 
   app.post('/api/summary/refresh', async (req, res) => res.json(await refreshSummary()));
+
+  // ── Backups ──
+  app.get('/api/backup', (req, res) => {
+    const b = makeBackup(APP_VERSION);
+    res.setHeader('Content-Disposition', `attachment; filename="ai-command-center-backup-${b.exported_at.slice(0, 10)}.json"`);
+    res.json(b);
+  });
+  app.post('/api/restore', (req, res) => {
+    const counts = restoreBackup(req.body);
+    evaluateAlerts();
+    // Tools that read their data again on their own catch up now instead of on the next tick.
+    for (const r of db.prepare('SELECT id, adapter FROM integrations WHERE enabled = 1').all()) {
+      if (adapters[r.adapter]?.kind === 'local') syncIntegration(r.id).catch(() => {});
+    }
+    res.json({ ok: true, ...counts });
+  });
 
   // ── Tasks ──
   app.get('/api/tasks/:id', (req, res) => {

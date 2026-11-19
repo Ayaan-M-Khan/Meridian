@@ -1166,6 +1166,13 @@ const VIEWS = {
           ].map(([k, label, help]) => `<label class="switch"><span><span class="switch-label">${esc(label)}</span><span class="faint small">${esc(help)}</span></span><input type="checkbox" data-desktop="${k}" ${st.desktop?.[k] ? 'checked' : ''} ${dis}></label>`).join('')}
         </section>` : ''}
 
+        <section class="card"><div class="card-head">${ICON.download}<h3>Backup</h3></div>
+          <p class="muted small">Save your tools, tasks and their results, conversations, alerts and settings to a file. Backups never include your password, API keys or ingest tokens, so a backup file is safe to keep, and you add keys again after restoring.</p>
+          <div class="form-actions"><button class="btn" data-action="backup-download" ${dis}>${ICON.download}Download a backup</button>
+            <label class="btn ${d.demo ? 'disabled' : ''}">${ICON.folder}Restore from a backup…<input type="file" accept="application/json,.json" data-action-change="backup-file" hidden ${dis}></label></div>
+          <div id="restore-confirm"></div>
+        </section>
+
         <section class="card"><div class="card-head">${ICON.sun}<h3>Appearance, demo and account</h3></div>
           <div class="switch"><span><span class="switch-label">Theme</span><span class="faint small">Saved on this device</span></span>
             <div class="seg" role="group" aria-label="Theme">${['system', 'dark', 'light'].map((v) => `<button type="button" class="seg-btn" data-action="set-theme" data-theme="${v}" aria-pressed="${theme === v}">${cap1(v)}</button>`).join('')}</div></div>
@@ -1613,6 +1620,19 @@ async function waitForLocal(adapterId, kind) {
 // ── Events ───────────────────────────────────────────────────────────────
 const numOrNull = (v) => (v === '' || v == null ? null : Number(v));
 
+/** Hands a file to the browser (or the desktop app's save dialog). */
+function saveFile(name, data, type = 'application/octet-stream') {
+  const blob = data instanceof Blob ? data : new Blob([data], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 const FORMS = {
   async setup(fd) {
     await api('/api/auth/setup', { method: 'POST', body: fd });
@@ -1869,6 +1889,32 @@ const ACTIONS = {
   async 'stop-chat'() {
     if (S.chat.thread) await api(`/api/assistant/threads/${S.chat.thread.id}/stop`, { method: 'POST' });
   },
+  async 'backup-download'(el) {
+    el.disabled = true;
+    try {
+      const res = await fetch('/api/backup', { headers: { 'x-acc-request': '1' } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Backup failed (${res.status}).`);
+      const name = res.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] ?? 'ai-command-center-backup.json';
+      saveFile(name, await res.blob());
+      toast('Backup saved');
+    } finally {
+      el.disabled = false;
+    }
+  },
+  async 'confirm-restore'(el) {
+    el.disabled = true;
+    const r = await api('/api/restore', { method: 'POST', body: S.pendingRestore });
+    S.pendingRestore = null;
+    S.local = null;
+    S.chat = { loaded: false, threads: [], thread: null, streaming: false, pending: null, draft: '' };
+    toast(`Restored ${plural(r.tools, 'tool')}, ${plural(r.tasks, 'task')} and ${plural(r.conversations, 'conversation')}`);
+    await load({ force: true });
+    renderPage();
+  },
+  'cancel-restore'() {
+    S.pendingRestore = null;
+    $('#restore-confirm').innerHTML = '';
+  },
   'new-claude-task': () => openNewTask(),
   'new-team-task': () => openTeamTask(),
   'hero-mode'(el) {
@@ -2022,6 +2068,24 @@ async function onChange(e) {
     } catch (err) {
       toast(err.message, true);
       renderPage();
+    }
+    return;
+  }
+  if (act === 'backup-file') {
+    const file = el.files?.[0];
+    el.value = '';
+    if (!file) return;
+    try {
+      const b = JSON.parse(await file.text());
+      if (b?.format !== 'ai-command-center-backup') throw new Error('That file isn’t an AI Command Center backup.');
+      S.pendingRestore = b;
+      $('#restore-confirm').innerHTML = `<div class="callout warn restore-box">
+        <b>Restore the backup from ${esc(String(b.exported_at ?? '').slice(0, 10) || 'an unknown date')}?</b>
+        It has ${plural(b.integrations?.length ?? 0, 'tool')}, ${plural(b.tasks?.length ?? 0, 'task')} and ${plural(b.assistant_threads?.length ?? 0, 'conversation')}.
+        They replace everything in the app now. Your account and Claude API key stay as they are; other tools’ keys need adding again.
+        <div class="form-actions"><button class="btn danger" data-action="confirm-restore">Replace with the backup</button><button class="btn ghost" data-action="cancel-restore">Cancel</button></div></div>`;
+    } catch (err) {
+      toast(err instanceof SyntaxError ? 'That file isn’t valid JSON.' : err.message, true);
     }
     return;
   }

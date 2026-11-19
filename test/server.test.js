@@ -117,3 +117,33 @@ test('demo state has the live shape and is flagged', () => {
   for (const key of Object.keys(live.tools[0])) assert.ok(key in d.tools[0], `demo tool is missing ${key}`);
   for (const key of Object.keys(live.tasks[0])) assert.ok(key in d.tasks[0], `demo task is missing ${key}`);
 });
+
+test('backups leave out every secret, and restoring brings tools, tasks and conversations back', async () => {
+  const { makeBackup, restoreBackup } = await import('../server/backup.js');
+  const now = new Date().toISOString();
+  const key = db.prepare("INSERT INTO integrations(adapter, name, status, secret_hint, ingest_hash, created_at) VALUES('anthropic', 'Work Claude', 'ok', 'sk-…abcd', 'hash-of-token', ?)").run(now);
+  const keyId = Number(key.lastInsertRowid);
+  db.prepare('UPDATE integrations SET secret_enc = ? WHERE id = ?').run(encrypt('sk-ant-admin-secret-value', keyId), keyId);
+  const agent = Number(db.prepare("INSERT INTO integrations(adapter, name, budget_usd, status, created_at) VALUES('custom-agent', 'Backup agent', 12, 'tracked', ?)").run(now).lastInsertRowid);
+  upsertTask({ id: agent, name: 'Backup agent' }, parseTask({ id: 'b1', name: 'Nightly crawl', status: 'completed', result: 'Crawled 40 pages' }, 0));
+  db.prepare("INSERT INTO assistant_threads(title, messages, created_at, updated_at) VALUES('Budget chat', '[]', ?, ?)").run(now, now);
+
+  const b = makeBackup('9.9.9');
+  const text = JSON.stringify(b);
+  for (const secret of ['sk-ant-admin-secret-value', 'hash-of-token', 'secret_enc', 'ingest_hash', 'pass_hash', 'summary_key']) {
+    assert.ok(!text.includes(secret), `the backup must not contain ${secret}`);
+  }
+
+  db.prepare('DELETE FROM integrations').run();
+  db.prepare('DELETE FROM assistant_threads').run();
+  const counts = restoreBackup(JSON.parse(text));
+  assert.ok(counts.tools >= 2);
+  const restored = db.prepare('SELECT * FROM integrations WHERE id = ?').get(keyId);
+  assert.equal(restored.status, 'error', 'a tool that needs a key comes back asking for it');
+  assert.match(restored.last_error, /Add the key again/);
+  assert.equal(restored.secret_enc, null);
+  assert.equal(db.prepare('SELECT budget_usd FROM integrations WHERE id = ?').get(agent).budget_usd, 12);
+  assert.equal(db.prepare("SELECT result FROM tasks WHERE external_id = 'b1'").get().result, 'Crawled 40 pages');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM assistant_threads WHERE title = 'Budget chat'").get().n, 1);
+  assert.throws(() => restoreBackup({ format: 'something-else' }), /isn’t an AI Command Center backup/);
+});
