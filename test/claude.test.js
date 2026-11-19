@@ -124,7 +124,7 @@ test('a Claude background task reports progress, saves its result and records to
   assert.equal(usage.i, 200);
   assert.equal(usage.r, 2);
   const view = buildState().tasks.find((x) => x.id === t.id);
-  assert.equal(view.runner, 'claude');
+  assert.equal(view.runner, 'claude-api');
   assert.deepEqual(view.controls, ['retry']);
 });
 

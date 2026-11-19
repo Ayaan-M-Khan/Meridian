@@ -6,6 +6,8 @@ const fmtNum = (n) =>
   n == null ? null : n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n));
 const fmtPct = (n) => (n == null ? null : `${Math.round(n)}%`);
 const or = (v, label = 'Not available') => (v == null ? `<span class="faint">${esc(label)}</span>` : esc(v));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 function rel(iso) {
   if (!iso) return null;
   const s = (Date.now() - Date.parse(iso)) / 1000;
@@ -19,39 +21,52 @@ const shortDay = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString([], { mont
 const utcToday = () => new Date().toISOString().slice(0, 10);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const reportingCost = (n) => `From ${plural(n, 'tool')} that report${n === 1 ? 's' : ''} cost`;
+const sumOrNull = (xs) => (xs.some((v) => v != null) ? xs.reduce((a, v) => a + (v ?? 0), 0) : null);
 
+const svg = (body, attrs = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"') =>
+  `<svg viewBox="0 0 16 16" ${attrs} aria-hidden="true">${body}</svg>`;
 const ICON = {
-  grid: '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.4"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.4"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1.4"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.4"/></svg>',
-  tools: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="4" rx="1.2"/><rect x="2" y="10" width="12" height="4" rx="1.2"/><circle cx="5" cy="4" r=".6" fill="currentColor"/><circle cx="5" cy="12" r=".6" fill="currentColor"/></svg>',
-  chart: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14h12"/><path d="M4 11V8M8 11V4M12 11V6.5"/></svg>',
-  tasks: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8M6 8h8M6 12h8"/><path d="M2 4l.8.8L4 3.4M2 8l.8.8L4 7.4M2 12l.8.8L4 11.4"/></svg>',
-  bell: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2a4.5 4.5 0 0 0-4.5 4.5V9L2.5 11h11l-1-2V6.5A4.5 4.5 0 0 0 8 2z"/><path d="M6.5 13.2a1.6 1.6 0 0 0 3 0"/></svg>',
-  gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3"/></svg>',
-  refresh: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>',
-  close: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
-  play: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9l7-4.5z"/></svg>',
-  clock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="5.8"/><path d="M8 5v3.2l2 1.3"/></svg>',
-  check: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.3l3 3 6-6.5"/></svg>',
-  x: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
-  warn: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2l6 10.6H2z"/><path d="M8 6.5v2.8M8 11.2v.1"/></svg>',
-  info: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="5.8"/><path d="M8 7.3v3.6M8 5.2v.1"/></svg>',
-  spark: '<svg viewBox="0 0 16 16"><path d="M8 1.2l1.7 4.6 4.6 1.7-4.6 1.7L8 13.8 6.3 9.2 1.7 7.5l4.6-1.7z"/></svg>',
+  grid: svg('<rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.4"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.4"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1.4"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.4"/>', 'fill="currentColor"'),
+  tools: svg('<rect x="2" y="2" width="12" height="4" rx="1.2"/><rect x="2" y="10" width="12" height="4" rx="1.2"/><circle cx="5" cy="4" r=".6" fill="currentColor"/><circle cx="5" cy="12" r=".6" fill="currentColor"/>'),
+  chart: svg('<path d="M2 14h12"/><path d="M4 11V8M8 11V4M12 11V6.5"/>'),
+  tasks: svg('<path d="M6 4h8M6 8h8M6 12h8"/><path d="M2 4l.8.8L4 3.4M2 8l.8.8L4 7.4M2 12l.8.8L4 11.4"/>'),
+  bell: svg('<path d="M8 2a4.5 4.5 0 0 0-4.5 4.5V9L2.5 11h11l-1-2V6.5A4.5 4.5 0 0 0 8 2z"/><path d="M6.5 13.2a1.6 1.6 0 0 0 3 0"/>'),
+  gear: svg('<circle cx="8" cy="8" r="2.3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3"/>'),
+  refresh: svg('<path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/>'),
+  close: svg('<path d="M4 4l8 8M12 4l-8 8"/>', 'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"'),
+  play: svg('<path d="M5 3.5v9l7-4.5z"/>', 'fill="currentColor"'),
+  clock: svg('<circle cx="8" cy="8" r="5.8"/><path d="M8 5v3.2l2 1.3"/>'),
+  check: svg('<path d="M3.5 8.3l3 3 6-6.5"/>', 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"'),
+  x: svg('<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>', 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"'),
+  warn: svg('<path d="M8 2.2l6 10.6H2z"/><path d="M8 6.5v2.8M8 11.2v.1"/>'),
+  info: svg('<circle cx="8" cy="8" r="5.8"/><path d="M8 7.3v3.6M8 5.2v.1"/>'),
+  spark: svg('<path d="M8 1.2l1.7 4.6 4.6 1.7-4.6 1.7L8 13.8 6.3 9.2 1.7 7.5l4.6-1.7z"/>', 'fill="currentColor"'),
+  send: svg('<path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/>', 'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"'),
+  stop: svg('<rect x="4" y="4" width="8" height="8" rx="1.5"/>', 'fill="currentColor"'),
+  plus: svg('<path d="M8 3v10M3 8h10"/>', 'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"'),
+  trash: svg('<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>'),
+  terminal: svg('<rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6.5l2 1.5-2 1.5M8.5 10h3"/>'),
+  key: svg('<circle cx="5.5" cy="10.5" r="3"/><path d="M7.7 8.3L13.5 2.5M11.5 4.5l1.5 1.5M10 6l1.2 1.2"/>'),
+  pencil: svg('<path d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path d="M9 4l3 3"/>'),
+  signin: svg('<path d="M9.5 2.5h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3"/><path d="M2.5 8h7M6.5 5l3 3-3 3"/>'),
+  download: svg('<path d="M8 2.5v8M4.5 7.5L8 11l3.5-3.5"/><path d="M2.5 13.5h11"/>'),
+  chevron: svg('<path d="M6 3.5L10.5 8 6 12.5"/>'),
+  external: svg('<path d="M9.5 2.5h4v4M13.5 2.5L7.5 8.5"/><path d="M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/>'),
+  chat: svg('<path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11h0A1.5 1.5 0 0 1 2.5 9.5z"/>'),
+  sun: svg('<circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1"/>'),
+  bolt: svg('<path d="M9 1.5L3.5 9h4L7 14.5 12.5 7h-4z"/>'),
 };
-
-ICON.claude = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.2l1.7 4.6 4.6 1.7-4.6 1.7L8 13.8 6.3 9.2 1.7 7.5l4.6-1.7z"/></svg>';
-ICON.send = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
-ICON.stop = '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>';
-ICON.plus = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>';
-ICON.trash = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg>';
+ICON.claude = ICON.spark;
 
 const PAGES = {
   dashboard: { title: 'Overview', icon: 'grid', short: 'Home' },
-  assistant: { title: 'Claude', icon: 'claude', short: 'Claude' },
-  tools: { title: 'AI Tools', icon: 'tools', short: 'Tools' },
-  usage: { title: 'Usage & Costs', icon: 'chart', short: 'Usage' },
+  assistant: { title: 'Assistant', icon: 'chat', short: 'Assistant' },
   tasks: { title: 'Tasks', icon: 'tasks', short: 'Tasks' },
+  usage: { title: 'Usage & Costs', icon: 'chart', short: 'Usage' },
   notifications: { title: 'Alerts', icon: 'bell', short: 'Alerts' },
+  tools: { title: 'AI Tools', icon: 'tools', short: 'Tools' },
   settings: { title: 'Settings', icon: 'gear', short: 'Settings' },
+  tool: { title: 'Tool', icon: 'tools', short: 'Tool' },
 };
 const TASK_STATUS = {
   running: { label: 'Running', icon: 'play', pill: 's-running' },
@@ -60,11 +75,13 @@ const TASK_STATUS = {
   completed: { label: 'Completed', icon: 'check', pill: 's-completed' },
   failed: { label: 'Failed', icon: 'x', pill: 's-failed' },
 };
+const SESSION_STATUS = { running: { label: 'Active', pill: 's-running' }, completed: { label: 'Idle', pill: 's-queued' } };
 const SEVERITY_ICON = { err: 'x', warn: 'warn', ok: 'check', info: 'info' };
 const CAP_NAME = { usage: 'Usage', cost: 'Cost', limits: 'Limits', tasks: 'Tasks', control: 'Controls' };
-const CAP_SHORT = { api: 'API', manual: 'You log it', webhook: 'Your scripts', app: 'This app', none: 'None' };
+const CAP_SHORT = { api: 'API', local: 'This computer', manual: 'You log it', webhook: 'Your scripts', app: 'This app', none: 'None' };
 const CAP_LONG = {
   api: 'Read automatically from the provider’s official API',
+  local: 'Read from the app’s own files on this computer',
   manual: 'Entered by you in this app',
   webhook: 'Reported by your own scripts with the ingest token',
   app: 'Measured or controlled by this app itself',
@@ -78,33 +95,51 @@ const NOTIFY_LABELS = {
   scheduled: ['Upcoming scheduled tasks', 'An hour before a scheduled task starts'],
   usage_warning: ['Budget warnings', 'When a tool or your total passes the warning level'],
   limit_reached: ['Budget reached', 'When a tool or your total reaches its budget'],
-  connection: ['Connection failures', 'When a tool can’t sync from its API'],
+  connection: ['Connection failures', 'When a tool can’t sync'],
   spike: ['Unusual spending', 'When a day costs far more than the previous week’s average'],
 };
+const HUE = { Anthropic: 'clay', OpenAI: 'mint', Google: 'blue', GitHub: 'slate', Anysphere: 'slate', 'Perplexity AI': 'teal', 'Your own': 'violet', 'AI Command Center': 'brand' };
+const KIND_LABEL = { local: 'Your account, no API key', api: 'API key', manual: 'Tracked manually', builtin: 'Built in' };
 
 const S = {
   user: null,
   data: null,
-  demo: readDemo(),
-  page: pageFromHash(),
+  demo: readStore('acc-demo') === '1',
+  ...routeFromHash(),
   taskFilter: 'all',
   catalog: null,
+  local: null,
+  localLoading: null,
   add: null,
   charts: [],
   loadError: null,
   timer: null,
+  waiting: {}, // adapter id -> 'signin' | 'install' while the app waits for you to finish
+  flashTool: null,
+  confirmRemove: null,
   chat: { loaded: false, threads: [], thread: null, streaming: false, pending: null, draft: '' },
 };
 
-function readDemo() {
-  try { return localStorage.getItem('acc-demo') === '1'; } catch { return false; }
+function readStore(k) {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
 }
-function writeDemo(v) {
-  try { localStorage.setItem('acc-demo', v ? '1' : '0'); } catch { /* storage unavailable */ }
+function writeStore(k, v) {
+  try {
+    if (v == null) localStorage.removeItem(k);
+    else localStorage.setItem(k, v);
+  } catch {
+    /* storage unavailable */
+  }
 }
-function pageFromHash() {
+function routeFromHash() {
   const h = location.hash.slice(1);
-  return PAGES[h] ? h : 'dashboard';
+  const m = h.match(/^tool-(\d+)$/);
+  if (m) return { page: 'tool', toolId: Number(m[1]) };
+  return { page: PAGES[h] && h !== 'tool' ? h : 'dashboard', toolId: null };
 }
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -112,7 +147,11 @@ async function api(path, { method = 'GET', body } = {}) {
   if (body !== undefined) headers['content-type'] = 'application/json';
   const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   let json = {};
-  try { json = await res.json(); } catch { /* empty body */ }
+  try {
+    json = await res.json();
+  } catch {
+    /* empty body */
+  }
   if (res.status === 401 && !path.startsWith('/api/auth')) {
     S.user = null;
     await showAuth();
@@ -129,8 +168,23 @@ function toast(msg, isErr = false) {
   t.className = isErr ? 'err' : '';
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), isErr ? 6000 : 3000);
+  toastTimer = setTimeout(() => (t.hidden = true), isErr ? 6500 : 3200);
 }
+
+// ── Logos ────────────────────────────────────────────────────────────────
+function monogram(name) {
+  const words = String(name ?? '').replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length === 1) return esc(words[0].slice(0, 2).replace(/^./, (c) => c.toUpperCase()));
+  return esc((words[0][0] + words[1][0]).toUpperCase());
+}
+/** A vendor-tinted monogram tile. It is a label, not the vendor's logo. */
+function logo(item, size = '') {
+  const hue = HUE[item.vendor] ?? 'slate';
+  const inner = item.kind === 'builtin' ? ICON.spark : monogram(item.adapter_name ?? item.name);
+  return `<span class="logo ${size} hue-${hue}" aria-hidden="true">${inner}</span>`;
+}
+const engineLogo = (e, size = '') => logo({ vendor: e.vendor, name: e.label }, size);
 
 // ── Auth ─────────────────────────────────────────────────────────────────
 async function showAuth() {
@@ -143,15 +197,15 @@ async function showAuth() {
     ? `<input type="hidden" name="setupCode" value="${esc(preset)}">`
     : '<div class="field"><label for="f-code">Setup code</label><input class="input" id="f-code" name="setupCode" autocomplete="one-time-code" required></div>';
   $('#root').innerHTML = `
-  <div class="auth"><div class="card">
-    <div class="brand-mark">${ICON.spark}</div>
-    <h1>${setup ? 'Create your account' : 'Sign in'}</h1>
+  <div class="auth"><div class="auth-card">
+    <div class="brand-mark lg">${ICON.spark}</div>
+    <h1>${setup ? 'Create your account' : 'Welcome back'}</h1>
     <p>${setup ? `This is the only account for this AI Command Center.${preset ? '' : ' The setup code is printed in the server console.'}` : 'Sign in to AI Command Center.'}</p>
     <form class="form" data-form="${setup ? 'setup' : 'login'}">
       <div class="field"><label for="f-user">Username</label><input class="input" id="f-user" name="username" autocomplete="username" required></div>
       <div class="field"><label for="f-pass">Password</label><input class="input" id="f-pass" name="password" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" minlength="${setup ? 10 : 1}" required>${setup ? '<span class="help">At least 10 characters.</span>' : ''}</div>
       ${setup ? codeField : ''}
-      <button class="btn primary" type="submit">${setup ? 'Create account' : 'Sign in'}</button>
+      <button class="btn primary lg" type="submit">${setup ? 'Create account' : 'Sign in'}</button>
       <div class="error-text" data-error></div>
     </form>
   </div></div>`;
@@ -160,44 +214,70 @@ async function showAuth() {
 
 // ── Shell ────────────────────────────────────────────────────────────────
 function renderShell() {
-  const nav = (key, cls = '') => `<a href="#${key}" data-nav="${key}" class="${cls}">${ICON[PAGES[key].icon]}<span>${PAGES[key].title}</span><span class="count" data-count="${key}" hidden></span></a>`;
+  const nav = (key) => `<a href="#${key}" data-nav="${key}">${ICON[PAGES[key].icon]}<span>${PAGES[key].title}</span><span class="count" data-count="${key}" hidden></span></a>`;
   const tab = (key) => `<a href="#${key}" data-nav="${key}">${ICON[PAGES[key].icon]}<span>${PAGES[key].short}</span><span class="dot-badge" data-count="${key}" hidden></span></a>`;
   $('#root').innerHTML = `
   <div class="app">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">${ICON.spark}</div><div class="brand-name">AI Command Center</div></div>
+      <a class="brand" href="#dashboard"><div class="brand-mark">${ICON.spark}</div><div><div class="brand-name">AI Command Center</div><div class="brand-sub">All your AI, one place</div></div></a>
       <nav class="nav" aria-label="Main">
-        ${nav('dashboard')}${nav('assistant')}${nav('tools')}
-        <div class="nav-label">Monitor</div>
-        ${nav('usage')}${nav('tasks')}${nav('notifications')}
-        <div class="nav-label">System</div>
-        ${nav('settings')}
+        ${nav('dashboard')}${nav('assistant')}${nav('tasks')}${nav('usage')}${nav('notifications')}
+        <div class="nav-label nav-label-row"><span>Connected</span><button class="nav-add" data-action="add-tool" aria-label="Connect a tool" title="Connect a tool">${ICON.plus}</button></div>
+        <div class="nav-tools" id="nav-tools"></div>
+        <div class="nav-label">Manage</div>
+        ${nav('tools')}${nav('settings')}
       </nav>
-      <div class="sidebar-foot"><span class="who">Signed in as ${esc(S.user.username)}</span><button class="btn small ghost" data-action="logout">Sign out</button></div>
+      <div class="sidebar-foot"><span class="avatar">${esc(S.user.username.slice(0, 1).toUpperCase())}</span><span class="who">${esc(S.user.username)}</span><button class="btn small ghost" data-action="logout">Sign out</button></div>
     </aside>
     <div class="main">
       <header class="topbar">
-        <h1 id="page-title"></h1>
-        <span class="updated hide-sm" id="updated"></span>
-        <button class="btn icon-btn ghost" data-action="reload" aria-label="Refresh">${ICON.refresh}</button>
-        <a class="btn icon-btn ghost" href="#notifications" aria-label="Alerts">${ICON.bell}<span class="dot-badge" id="bell-count" hidden></span></a>
-        <a class="btn icon-btn ghost" href="#settings" aria-label="Settings">${ICON.gear}</a>
+        <div class="topbar-title"><h1 id="page-title"></h1><span class="updated" id="updated"></span></div>
+        <button class="btn icon-btn ghost" data-action="reload" aria-label="Refresh" title="Refresh">${ICON.refresh}</button>
+        <a class="btn icon-btn ghost" href="#notifications" aria-label="Alerts" title="Alerts">${ICON.bell}<span class="dot-badge" id="bell-count" hidden></span></a>
+        <a class="btn icon-btn ghost hide-lg" href="#settings" aria-label="Settings">${ICON.gear}</a>
       </header>
       <div class="demo-banner" id="demo-banner" hidden>
         <span>You’re looking at demo data. None of it comes from your accounts.</span>
         <button class="btn small" data-action="toggle-demo">Exit demo</button>
       </div>
       <main class="content" id="content"></main>
-      <nav class="tabbar" aria-label="Main">${['dashboard', 'assistant', 'tasks', 'usage', 'tools', 'notifications'].map(tab).join('')}</nav>
+      <nav class="tabbar" aria-label="Main">${['dashboard', 'assistant', 'tasks', 'tools', 'usage'].map(tab).join('')}</nav>
     </div>
   </div>`;
 }
 
+function navTools() {
+  const el = $('#nav-tools');
+  if (!el) return;
+  const tools = (S.data?.tools ?? []).filter((t) => t.kind !== 'builtin');
+  if (!tools.length) {
+    el.innerHTML = '<button class="nav-empty" data-action="add-tool">Connect your first AI tool</button>';
+    return;
+  }
+  el.innerHTML = tools.map((t) => {
+    const st = toolStatus(t);
+    const busy = t.sessions_running || t.current_activity;
+    const cur = S.page === 'tool' && S.toolId === t.id ? 'aria-current="page"' : '';
+    return `<a href="#tool-${t.id}" class="nav-tool ${S.flashTool === t.id ? 'flash' : ''}" ${cur} title="${esc(`${t.name} · ${st.label}`)}">
+      ${logo(t, 'xs')}<span class="nav-tool-name">${esc(t.name)}</span>
+      <span class="nav-dot d-${st.dot} ${busy ? 'pulse' : ''}" aria-label="${esc(st.label)}"></span></a>`;
+  }).join('');
+}
+
+function currentTitle() {
+  if (S.page === 'tool') return S.data?.tools.find((t) => t.id === S.toolId)?.name ?? 'Tool';
+  return PAGES[S.page].title;
+}
+
 function updateChrome() {
   const d = S.data;
-  document.querySelectorAll('[data-nav]').forEach((a) => (a.dataset.nav === S.page ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
-  $('#page-title').textContent = PAGES[S.page].title;
-  document.title = `${PAGES[S.page].title} · AI Command Center`;
+  document.querySelectorAll('[data-nav]').forEach((a) => {
+    const on = a.dataset.nav === S.page || (S.page === 'tool' && a.dataset.nav === 'tools' && a.closest('.tabbar'));
+    if (on) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  $('#page-title').textContent = currentTitle();
+  document.title = `${currentTitle()} · AI Command Center`;
   $('#demo-banner').hidden = !S.demo;
   $('#updated').textContent = S.loadError ? 'Couldn’t refresh' : d ? `Updated ${rel(d.generated_at)}` : '';
   const counts = d ? { tools: d.stats.needs_attention, tasks: d.stats.running, notifications: d.unread } : {};
@@ -210,6 +290,7 @@ function updateChrome() {
   const bell = $('#bell-count');
   bell.hidden = !d?.unread;
   bell.textContent = d?.unread || '';
+  navTools();
 }
 
 async function load({ force = false } = {}) {
@@ -224,7 +305,7 @@ async function load({ force = false } = {}) {
   const typing = document.activeElement?.closest?.('#content') && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
   // Settings and the chat keep their own state on screen, so background refreshes leave them alone.
   const keep = ['settings', 'assistant'].includes(S.page) && $('#content')?.dataset.page === S.page;
-  if (force ? !(S.page === 'assistant' && keep) : !(typing || keep)) renderPage();
+  if (force ? !(S.page === 'assistant' && keep && S.chat.streaming) : !(typing || keep)) renderPage();
 }
 
 /** Refresh every 30 seconds, or every 10 while tasks are running so their ETAs stay current. */
@@ -247,26 +328,38 @@ function renderPage() {
     el.innerHTML = S.loadError ? `<div class="page"><div class="callout err">${esc(S.loadError)}</div></div>` : '<div class="empty">Loading…</div>';
     return;
   }
-  el.dataset.page = S.page;
-  el.innerHTML = `<div class="page">${S.loadError ? `<div class="callout err">Couldn’t refresh: ${esc(S.loadError)}</div>` : ''}${VIEWS[S.page]()}</div>`;
+  const key = S.page === 'tool' ? `tool-${S.toolId}` : S.page;
+  el.dataset.page = key;
+  el.innerHTML = `<div class="page page-${S.page}">${S.loadError ? `<div class="callout err">Couldn’t refresh: ${esc(S.loadError)}</div>` : ''}${VIEWS[S.page]()}</div>`;
   AFTER[S.page]?.();
 }
 
 // ── Shared fragments ─────────────────────────────────────────────────────
 const statusIcon = (status) => `<div class="status-ico ${TASK_STATUS[status].pill}">${ICON[TASK_STATUS[status].icon]}</div>`;
 const pill = (cls, label) => `<span class="pill ${cls}">${esc(label)}</span>`;
-const initials = (name) => esc(name.replace(/[^\p{L}\p{N} ]/gu, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?');
 const barCls = (pct, warnAt) => (pct >= 100 ? 'err' : pct >= warnAt ? 'warn' : '');
 const bar = (pct, cls = '', thin = false) => `<div class="bar ${cls} ${thin ? 'thin' : ''}"><i style="width:${Math.min(100, Math.max(0, pct))}%"></i></div>`;
 
 function toolStatus(t) {
+  const local = t.kind === 'local';
   return {
-    ok: { label: 'Synced', cls: 's-ok' },
-    pending: { label: 'Waiting for first sync', cls: 's-info' },
-    error: { label: 'Sync failed', cls: 's-err' },
-    tracked: { label: 'Tracked manually', cls: 's-queued' },
-    disabled: { label: 'Off', cls: 's-queued' },
-  }[t.status] ?? { label: t.status, cls: 's-queued' };
+    ok: { label: local ? 'Signed in' : 'Synced', cls: 's-ok', dot: 'ok' },
+    pending: { label: 'Checking…', cls: 's-info', dot: 'info' },
+    signin: { label: 'Needs sign-in', cls: 's-warn', dot: 'warn' },
+    missing: { label: 'Not installed', cls: 's-warn', dot: 'warn' },
+    error: { label: local ? 'Problem' : 'Sync failed', cls: 's-err', dot: 'err' },
+    tracked: { label: t.kind === 'builtin' ? 'Built in' : 'Tracked manually', cls: 's-queued', dot: 'idle' },
+    disabled: { label: 'Off', cls: 's-queued', dot: 'off' },
+  }[t.status] ?? { label: t.status, cls: 's-queued', dot: 'idle' };
+}
+
+function accountLine(t) {
+  const a = t.account;
+  if (t.kind !== 'local') return null;
+  if (t.status === 'missing') return `${t.adapter_name} isn’t installed on this computer`;
+  if (!a) return t.status === 'signin' ? `Not signed in to your ${t.account_kind ?? 'account'}` : null;
+  const who = a.email ? `Signed in as ${a.email}` : `Signed in${a.method ? ` with ${a.method}` : ''}`;
+  return `${who}${a.plan ? ` · ${cap1(a.plan)} plan` : ''}`;
 }
 
 function capShort(key, level) {
@@ -275,9 +368,9 @@ function capShort(key, level) {
 }
 
 function taskWhen(t) {
+  if (t.kind === 'session') return t.status === 'running' ? `Active ${rel(t.updated_at)}` : `Last active ${rel(t.updated_at)}`;
   if (t.status === 'running') return t.started_at ? `Started ${rel(t.started_at)}` : 'Running';
-  if (t.status === 'scheduled' && t.scheduled_for && Date.parse(t.scheduled_for) < Date.now())
-    return `Was due ${when(t.scheduled_for)}, no update since`;
+  if (t.status === 'scheduled' && t.scheduled_for && Date.parse(t.scheduled_for) < Date.now()) return `Was due ${when(t.scheduled_for)}, no update since`;
   if (t.status === 'scheduled') return t.scheduled_for ? `Scheduled ${when(t.scheduled_for)}` : 'Scheduled';
   if (t.status === 'queued') return `Queued ${rel(t.updated_at)}`;
   return t.finished_at ? `${TASK_STATUS[t.status].label} ${rel(t.finished_at)}` : TASK_STATUS[t.status].label;
@@ -295,6 +388,7 @@ const ETA_BASIS = { reported: 'reported by the task', progress: 'estimated from 
 /** What the ETA watcher knows about a running task, as one short line. */
 function etaInfo(t) {
   if (t.status !== 'running') return null;
+  if (t.kind === 'session') return { text: 'Interactive session', basis: 'no set end, so no finish estimate', cls: 'none' };
   if (t.stalled) return { text: `No progress for ${dur(Date.now() - Date.parse(t.updated_at))}`, basis: 'it may be stuck', cls: 'err' };
   if (t.overdue) return { text: `Past its expected finish of ${when(t.eta_at)}`, basis: ETA_BASIS[t.eta_source], cls: 'warn' };
   if (t.eta_at) {
@@ -309,7 +403,7 @@ const etaLine = (t) => {
   return e ? `<div class="eta ${e.cls}">${esc(e.text)}${e.basis ? `<span> · ${esc(e.basis)}</span>` : ''}</div>` : '';
 };
 
-/** A small, safe Markdown subset for Claude's replies: escapes everything first, then adds formatting. */
+/** A small, safe Markdown subset for the assistant's replies: escapes everything first, then adds formatting. */
 function md(src) {
   const inline = (s) =>
     esc(s)
@@ -342,7 +436,8 @@ function md(src) {
     const ol = line.match(/^\s*\d+[.)]\s+(.*)/);
     if (h) {
       closeList();
-      out.push(`<h${Math.min(6, h[1].length + 3)}>${inline(h[2])}</h${Math.min(6, h[1].length + 3)}>`);
+      const lv = Math.min(6, h[1].length + 3);
+      out.push(`<h${lv}>${inline(h[2])}</h${lv}>`);
     } else if (ul || ol) {
       const kind = ul ? 'ul' : 'ol';
       if (list !== kind) {
@@ -364,59 +459,124 @@ function md(src) {
 }
 
 function taskRow(t, { compact = false } = {}) {
+  const session = t.kind === 'session';
   const prog = t.status === 'running' && t.progress != null;
+  const st = session ? SESSION_STATUS[t.status] ?? SESSION_STATUS.completed : TASK_STATUS[t.status];
+  const badge = session ? '<span class="tag">Session</span>' : t.runner_label ? `<span class="tag accent">${esc(t.runner_label)}</span>` : '';
   return `<button class="row" data-action="open-task" data-id="${t.id}">
-    ${statusIcon(t.status)}
+    ${session ? `<div class="status-ico ${t.status === 'running' ? 's-running' : 's-queued'}">${ICON.terminal}</div>` : statusIcon(t.status)}
     <div class="row-main">
-      <div class="row-title">${esc(t.name)}${t.runner === 'claude' ? ' <span class="by-claude">Claude</span>' : ''}</div>
+      <div class="row-title">${esc(t.name)} ${badge}</div>
       <div class="row-sub">${esc(t.tool_name)} · ${esc(taskWhen(t))}${t.step && t.status === 'running' ? ` · ${esc(t.step)}` : ''}</div>
-      ${prog ? `<div style="margin-top:7px;display:flex;align-items:center;gap:8px"><div style="flex:1">${bar(t.progress, t.stalled ? 'err' : 'info', true)}</div><span class="faint num" style="font-size:11.5px">${Math.round(t.progress)}%</span></div>` : ''}
-      ${etaLine(t)}
-      ${t.status === 'failed' && t.error && !compact ? `<div class="row-sub" style="color:var(--err)">${esc(t.error)}</div>` : ''}
+      ${prog ? `<div class="row-progress"><div>${bar(t.progress, t.stalled ? 'err' : 'info', true)}</div><span class="num">${Math.round(t.progress)}%</span></div>` : ''}
+      ${compact && session ? '' : etaLine(t)}
+      ${t.status === 'failed' && t.error && !compact ? `<div class="row-sub err-text">${esc(t.error)}</div>` : ''}
     </div>
-    ${compact ? '' : pill(TASK_STATUS[t.status].pill, TASK_STATUS[t.status].label)}
+    ${compact ? '' : pill(st.pill, st.label)}
   </button>`;
 }
 
 function emptyBlock(title, text, action = '') {
-  return `<div class="empty"><strong>${esc(title)}</strong>${esc(text)}${action ? `<div style="margin-top:12px">${action}</div>` : ''}</div>`;
+  return `<div class="empty"><strong>${esc(title)}</strong>${esc(text)}${action ? `<div class="empty-action">${action}</div>` : ''}</div>`;
 }
 
-function tile(label, value, sub, cls = '', naLabel = 'Not reported') {
-  return `<div class="tile ${cls}"><div class="tile-label">${esc(label)}</div>
-    ${value == null ? `<div class="tile-value na">${esc(naLabel)}</div>` : `<div class="tile-value">${esc(value)}</div>`}
-    <div class="tile-sub">${esc(sub)}</div></div>`;
+/** A tiny trend line for a stat tile. Missing days are gaps, never zeros. */
+function sparkline(values) {
+  const pts = values.map((v, i) => [i, v]).filter(([, v]) => v != null);
+  if (pts.length < 4) return ''; // too few days to show a trend
+  const max = Math.max(...pts.map(([, v]) => v), 1);
+  const w = 100;
+  const h = 28;
+  const x = (i) => (i / (values.length - 1)) * w;
+  const y = (v) => h - 2 - (v / max) * (h - 4);
+  const d = pts.map(([i, v], k) => `${k && pts[k - 1][0] === i - 1 ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}"/></svg>`;
 }
 
-// ── Claude: overview card and chat ───────────────────────────────────────
+function tile(label, value, sub, { cls = '', na = 'Not reported', icon = null, trend = null } = {}) {
+  return `<div class="tile ${cls}"><div class="tile-top"><span class="tile-label">${esc(label)}</span>${icon ? `<span class="tile-ico">${ICON[icon]}</span>` : ''}</div>
+    ${value == null ? `<div class="tile-value na">${esc(na)}</div>` : `<div class="tile-value">${esc(value)}</div>`}
+    <div class="tile-sub">${esc(sub)}</div>${trend ? sparkline(trend) : ''}</div>`;
+}
+
+const dailyTotal = (d, key, n = 14) => d.usage.days.slice(-n).map((_, i) => sumOrNull(d.usage.series.map((s) => s[key][s[key].length - n + i])));
+
+function limitMeters(t) {
+  const L = t.limits;
+  if (!L) return '';
+  const win = (w, fallback) => {
+    if (!w) return '';
+    const name = w.window_minutes ? (w.window_minutes >= 1440 ? `${Math.round(w.window_minutes / 1440)}-day limit` : `${Math.round(w.window_minutes / 60)}-hour limit`) : fallback;
+    return `<div class="meter"><div class="meter-top"><span>${esc(name)}</span><b>${esc(fmtPct(w.used_percent))} used</b></div>${bar(w.used_percent, barCls(w.used_percent, 75))}
+      ${w.resets_at ? `<div class="meter-sub">Resets ${esc(Date.parse(w.resets_at) > Date.now() ? rel(w.resets_at) : 'soon')}</div>` : ''}</div>`;
+  };
+  return `${win(L.primary, 'Short-term limit')}${win(L.secondary, 'Longer-term limit')}
+    <p class="fine">${L.plan ? `${esc(cap1(L.plan))} plan · ` : ''}As of ${esc(rel(L.observed_at) ?? 'the last session')}, from ${esc(t.adapter_name)}’s own logs.</p>`;
+}
+
+// ── Assistant: overview command bar and chat ─────────────────────────────
 function suggestions(d) {
   const out = ['What needs my attention right now?'];
-  if (d.tasks.some((t) => t.status === 'running')) out.push('When will my running tasks finish?');
+  if (d.tasks.some((t) => t.status === 'running' && t.kind !== 'session')) out.push('When will my running tasks finish?');
   const failed = d.tasks.find((t) => t.status === 'failed');
   if (failed) out.push(`Why did “${failed.name}” fail, and what should I do?`);
+  if (d.tools.some((t) => t.kind === 'local' && t.tokens_today)) out.push('How much have I used my AI apps today?');
   out.push('How is my spending this month compared to my budgets?');
   out.push('Draft a short report of this month’s AI usage');
   return out.slice(0, 4);
 }
 
-function askCard(d) {
-  const keySet = d.settings.summary_key_set;
-  const body = d.demo
-    ? '<p class="faint" style="margin:0;font-size:13px">Claude works with your real data. Exit demo to ask it something.</p>'
-    : !keySet
-      ? `<p class="muted" style="margin:0 0 10px;font-size:13px">Ask questions about your tools and tasks, or hand Claude work to do in the background. It needs a regular Claude API key.</p>
-         <a class="btn" href="#settings">Add a Claude API key</a>`
-      : `<form class="ask-form" data-form="ask"><input class="input" name="text" placeholder="Ask Claude, or tell it what to do…" autocomplete="off" maxlength="8000" aria-label="Ask Claude"><button class="btn primary" type="submit">Ask</button></form>
-         <div class="chips" style="margin-top:10px">${suggestions(d).map((p) => `<button class="chip" data-action="ask" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div>`;
-  return `<section class="card ask a-ask">
-    <div class="card-head">${ICON.claude}<h3>Ask Claude</h3>${!d.demo && keySet ? '<a class="aside" href="#assistant">Open chat</a>' : ''}</div>
-    ${body}
+function connectPrompt(d) {
+  const local = S.local;
+  // Connected but not ready yet (not signed in, not installed): point to its page to finish.
+  const pending = d.engines.filter((e) => e.kind === 'cli' && e.integration_id && !e.ready);
+  const found = (local ?? []).filter((l) => l.installed && !l.connected_id);
+  const buttons = [
+    ...pending.map((e) => `<a class="btn primary" href="#tool-${e.integration_id}">${engineLogo(e, 'xs')}Finish setting up ${esc(e.label)}</a>`),
+    ...found.map((l) => `<button class="btn" data-action="connect-local" data-id="${esc(l.id)}">${logo({ vendor: l.vendor, name: l.name }, 'xs')}Connect ${esc(l.name)}</button>`),
+  ];
+  if (!buttons.length) buttons.push('<button class="btn" data-action="add-tool">Connect an AI app</button>');
+  const why = pending.length ? ` ${pending.map((e) => e.reason).join(' ')}` : '';
+  return `<div class="hero-connect">
+    <p>Sign in to Claude Code, Codex or Gemini CLI with your own account to ask questions and run tasks from here. No API key needed.${esc(why)}</p>
+    <div class="form-actions">${buttons.join('')}<a class="btn ghost" href="#settings">Use an API key instead</a></div></div>`;
+}
+
+function hero(d) {
+  const e = d.engine;
+  const s = d.stats;
+  const hour = new Date().getHours();
+  const greet = hour < 5 ? 'Working late' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const pulse = [
+    s.running ? `${plural(s.running, 'task')} running` : 'Nothing running',
+    s.needs_attention ? `${s.needs_attention} need${s.needs_attention === 1 ? 's' : ''} attention` : null,
+    d.unread ? `${plural(d.unread, 'unread alert')}` : null,
+  ].filter(Boolean);
+  const ask = d.demo
+    ? '<p class="hero-note">The assistant works with your real data. Exit demo to ask it something.</p>'
+    : !e
+      ? connectPrompt(d)
+      : `<form class="command" data-form="ask">
+          <span class="command-engine" title="${esc(`${e.label}, ${e.via}`)}">${engineLogo(e, 'sm')}</span>
+          <input class="command-input" name="text" placeholder="Ask ${esc(e.label)} about your tools, or tell it what to do…" autocomplete="off" maxlength="8000" aria-label="Ask the assistant">
+          <button class="btn primary" type="submit">${ICON.send}<span class="hide-sm">Ask</span></button>
+        </form>
+        <div class="chips">${suggestions(d).map((p) => `<button class="chip" data-action="ask" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div>
+        <p class="hero-foot">Runs through <b>${esc(e.label)}</b> with ${esc(e.via)} · <a href="#assistant">Open chat</a> · <a href="#settings">Change</a></p>`;
+  return `<section class="hero a-hero">
+    <div class="hero-top"><div><div class="eyebrow">${esc(new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</div>
+      <h2>${esc(greet)}, ${esc(S.user.username)}</h2></div>
+      <div class="hero-pulse">${pulse.map((p, i) => `<span class="${i === 0 && s.running ? 'live' : ''}">${esc(p)}</span>`).join('')}</div></div>
+    ${ask}
   </section>`;
 }
 
 function chatItem(it) {
   if (it.role === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
-  if (it.role === 'assistant') return `<div class="msg ai"><div class="bubble md">${it.text ? md(it.text) : '<span class="typing"><i></i><i></i><i></i></span>'}</div></div>`;
+  if (it.role === 'assistant') {
+    const e = S.data?.engine;
+    return `<div class="msg ai">${e ? engineLogo(e, 'xs') : `<span class="logo xs hue-brand">${ICON.spark}</span>`}<div class="bubble md">${it.text ? md(it.text) : '<span class="typing"><i></i><i></i><i></i></span>'}</div></div>`;
+  }
   if (it.role === 'action') {
     const icon = it.pending ? '<span class="spin"></span>' : it.ok ? ICON.check : ICON.x;
     return `<div class="act ${it.pending ? '' : it.ok ? 'ok' : 'err'}">${icon}<span>${esc(it.label)}${it.error ? ` · ${esc(it.error)}` : ''}</span></div>`;
@@ -430,10 +590,11 @@ function renderMsgs() {
   const c = S.chat;
   const items = c.thread?.items ?? [];
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  const e = S.data.engine;
   el.innerHTML = items.length
     ? items.map(chatItem).join('')
-    : `<div class="chat-empty">${ICON.claude}<h3>What can Claude do for you?</h3>
-        <p>It can read your tools, tasks, spending and alerts, change budgets, sync tools, and run tasks in the background that show up on the Tasks page with live progress.</p>
+    : `<div class="chat-empty">${e ? engineLogo(e, 'lg') : ''}<h3>What can I do for you?</h3>
+        <p>I can read your tools, tasks, spending and alerts, change budgets, sync tools, and run tasks in the background that show up on the Tasks page with live progress.</p>
         <div class="chips">${suggestions(S.data).map((p) => `<button class="chip" data-action="ask-here" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div></div>`;
   if (nearBottom || c.streaming) el.scrollTop = el.scrollHeight;
   const form = $('#chat-form');
@@ -445,7 +606,10 @@ function renderMsgs() {
 
 let msgFrame = 0;
 const renderMsgsSoon = () => {
-  if (!msgFrame) msgFrame = requestAnimationFrame(() => { msgFrame = 0; renderMsgs(); });
+  if (!msgFrame) msgFrame = requestAnimationFrame(() => {
+    msgFrame = 0;
+    renderMsgs();
+  });
 };
 
 async function loadThreads() {
@@ -481,7 +645,16 @@ async function sendChat(text) {
   };
   assistantBubble();
   renderMsgs();
-  const finishPending = () => thread.items.forEach((it) => { if (it.pending) { it.pending = false; it.ok = true; } });
+  const finishPending = () => thread.items.forEach((it) => {
+    if (it.pending) {
+      it.pending = false;
+      it.ok = true;
+    }
+  });
+  const dropEmpty = () => {
+    if (current && !current.text) thread.items.splice(thread.items.indexOf(current), 1);
+    current = null;
+  };
 
   try {
     const res = await fetch(`/api/assistant/threads/${thread.id}/messages`, {
@@ -510,20 +683,19 @@ async function sendChat(text) {
           finishPending();
           assistantBubble().text += ev.delta;
         } else if (ev.type === 'searching') {
-          current = null;
+          dropEmpty();
           thread.items.push({ role: 'action', label: 'Searching the web', pending: true });
         } else if (ev.type === 'tool') {
-          if (current && !current.text) thread.items.splice(thread.items.indexOf(current), 1);
-          current = null;
+          dropEmpty();
           thread.items.push({ role: 'action', label: ev.label, pending: true });
         } else if (ev.type === 'tool_done') {
           const it = [...thread.items].reverse().find((x) => x.role === 'action' && x.pending);
           if (it) Object.assign(it, { pending: false, ok: ev.ok, label: ev.label, error: ev.error });
         } else if (ev.type === 'turn') {
+          if (current?.text) current = null;
           assistantBubble();
         } else if (ev.type === 'notice' || ev.type === 'error') {
-          if (current && !current.text) thread.items.splice(thread.items.indexOf(current), 1);
-          current = null;
+          dropEmpty();
           thread.items.push({ role: ev.type === 'error' ? 'error' : 'notice', text: ev.type === 'error' ? ev.message : ev.text });
           if (ev.unsent) c.draft = ev.unsent;
         } else if (ev.type === 'done') {
@@ -538,7 +710,7 @@ async function sendChat(text) {
       }
     }
   } catch (err) {
-    if (current && !current.text) thread.items.splice(thread.items.indexOf(current), 1);
+    dropEmpty();
     thread.items.push({ role: 'error', text: err.message });
     c.draft = err.unsent ?? text;
   } finally {
@@ -548,97 +720,86 @@ async function sendChat(text) {
       renderPage();
       $('#chat-input')?.focus();
     }
-    load({ force: true }); // Claude may have changed budgets or started tasks
+    load({ force: true }); // the assistant may have changed budgets or started tasks
   }
 }
 
-/** Opens the chat in a new conversation and sends a prompt, from the overview or a task. */
-function askClaude(prompt) {
+/** Opens the chat in a new conversation and sends a prompt, from the overview, a tool page or a task. */
+function askAssistant(prompt) {
   S.chat.thread = null;
   S.chat.pending = prompt;
   if (S.page === 'assistant') {
     renderPage();
-    AFTER.assistant();
   } else location.hash = '#assistant';
+}
+
+async function useEngine(id, { quiet = false } = {}) {
+  if (S.data.settings.assistant_engine === id) return;
+  await api('/api/settings', { method: 'PUT', body: { assistant_engine: id } });
+  await load({ force: true });
+  if (!quiet) toast(id === 'auto' ? 'The assistant picks an AI automatically' : `The assistant now uses ${S.data.engines.find((e) => e.id === id)?.label ?? id}`);
+}
+
+function engineOptions(d) {
+  const auto = d.engines.find((e) => e.ready);
+  return `<option value="auto" ${d.engine_choice === 'auto' ? 'selected' : ''}>Automatic${auto ? ` (${esc(auto.label)})` : ''}</option>
+    ${d.engines.map((e) => `<option value="${e.id}" ${d.engine_choice === e.id ? 'selected' : ''} ${e.ready ? '' : 'disabled'}>${esc(e.label)} · ${esc(e.ready ? e.via : e.reason)}</option>`).join('')}`;
 }
 
 // ── Views ────────────────────────────────────────────────────────────────
 const VIEWS = {
-  assistant() {
-    const d = S.data;
-    if (d.demo) return `<div class="card">${emptyBlock('Claude works with your real data', 'Exit demo to chat with Claude about your tools and tasks.', '<button class="btn" data-action="toggle-demo">Exit demo</button>')}</div>`;
-    if (!d.settings.summary_key_set) {
-      return `<div class="card" style="padding:24px"><div class="page-head"><div><h2>Bring Claude into your command center</h2>
-        <p>Add a regular Claude API key in Settings. Claude can then answer questions about your tools, tasks and spending, change budgets, sync tools, and run tasks in the background with live progress and ETAs.</p></div></div>
-        <div class="form-actions" style="margin-top:16px"><a class="btn primary" href="#settings">Open Settings</a></div></div>`;
-    }
-    const c = S.chat;
-    const options = c.threads.map((t) => `<option value="${t.id}" ${c.thread?.id === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('');
-    return `<div class="chat-page">
-      <div class="chat-bar">
-        <select class="input" id="thread-pick" data-action-change="pick-thread" aria-label="Conversation" ${c.streaming ? 'disabled' : ''}>
-          ${c.thread ? '' : '<option value="" selected>New conversation</option>'}${options}</select>
-        <button class="btn" data-action="new-chat" ${c.streaming ? 'disabled' : ''}>${ICON.plus}<span class="hide-sm">New chat</span></button>
-        ${c.thread ? `<button class="btn icon-btn ghost" data-action="delete-chat" aria-label="Delete this conversation" title="Delete this conversation" ${c.streaming ? 'disabled' : ''}>${ICON.trash}</button>` : ''}
-      </div>
-      <section class="card chat">
-        <div class="msgs" id="msgs" aria-live="polite"></div>
-        <form class="composer" id="chat-form" data-form="chat">
-          <textarea class="input" id="chat-input" name="text" rows="1" maxlength="8000" placeholder="Ask about your tools, or tell Claude what to do…" aria-label="Message Claude">${esc(c.draft)}</textarea>
-          <button class="btn primary icon-btn" type="submit" data-role="send" aria-label="Send">${ICON.send}</button>
-          <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
-        </form>
-      </section>
-      <p class="faint chat-foot">Claude uses the API key from Settings, and each message uses tokens. It changes budgets, syncs tools or starts tasks only when you ask${d.settings.assistant_web_search ? '. Web search is on' : ''}.</p>
-    </div>`;
-  },
-
   dashboard() {
     const d = S.data;
     const s = d.stats;
-    if (!d.demo && !d.tools.length) {
-      return `<div class="card" style="padding:28px">
-        <div class="page-head"><div><h2>Connect your first AI tool</h2>
-        <p>Add an API integration to pull usage and cost automatically, or track a tool manually and have your scripts report its tasks.</p></div></div>
-        <div class="form-actions" style="margin-top:18px"><button class="btn primary" data-action="add-tool">Add a tool</button><button class="btn" data-action="toggle-demo">Explore with demo data</button></div>
-      </div>`;
-    }
+    const tools = d.tools.filter((t) => t.kind !== 'builtin');
+    if (!d.demo && !tools.length) return welcome();
     const warnAt = d.settings.usage_warn_pct;
     const ceilPct = s.ceiling_usd && s.cost_mtd != null ? (s.cost_mtd / s.ceiling_usd) * 100 : null;
     const running = d.tasks.filter((t) => t.status === 'running');
     const budgeted = d.tools.filter((t) => t.enabled && t.budget_usd);
-    const unbudgeted = d.tools.filter((t) => t.enabled && !t.budget_usd);
+    const limited = d.tools.filter((t) => t.enabled && t.limits);
     const sm = d.summary;
-    const smSource = !sm ? '' : sm.source === 'ai' ? 'Written by Claude from your data' : sm.source === 'demo' ? 'Sample summary' : 'Generated from your data';
-    const stalled = running.filter((t) => t.stalled).length;
-    const nextEta = running.map((t) => t.eta_at && !t.overdue && Date.parse(t.eta_at)).filter(Boolean).sort((a, b) => a - b)[0];
-    const runningSub = stalled ? `${stalled} may be stuck` : nextEta ? `Next one done ${rel(new Date(nextEta).toISOString())}` : `${s.queued} queued · ${s.scheduled} scheduled`;
+    const smSource = !sm ? '' : sm.source === 'ai' ? `Written by ${sm.by ?? 'the assistant'} from your data` : sm.source === 'demo' ? 'Sample summary' : 'Generated from your data';
+    const work = running.filter((t) => t.kind !== 'session');
+    const stalled = work.filter((t) => t.stalled).length;
+    const nextEta = work.map((t) => t.eta_at && !t.overdue && Date.parse(t.eta_at)).filter(Boolean).sort((a, b) => a - b)[0];
+    const runningSub = stalled ? `${stalled} may be stuck` : nextEta ? `Next one done ${rel(new Date(nextEta).toISOString())}` : s.sessions_running ? `${plural(s.sessions_running, 'live session')} · ${s.queued} queued` : `${s.queued} queued · ${s.scheduled} scheduled`;
 
     return `<div class="dash">
+      ${hero(d)}
       <div class="tiles a-tiles">
-        ${tile('Tools connected', s.connected, s.needs_attention ? `${s.active} active · ${s.needs_attention} need attention` : `${s.active} active now`, s.needs_attention ? 'warn' : '')}
-        ${tile('Running tasks', s.running, runningSub, stalled ? 'warn' : s.running ? 'info' : '')}
-        ${tile('Spend today', fmtUsd(s.cost_today), s.cost_today == null ? 'API data can lag several hours' : reportingCost(s.tools_reporting_cost))}
-        ${tile('Spend this month', fmtUsd(s.cost_mtd), ceilPct != null ? `${Math.round(ceilPct)}% of ${fmtUsd(s.ceiling_usd)} ceiling` : 'No monthly ceiling set', ceilPct == null ? '' : barCls(ceilPct, warnAt))}
-        ${tile('Completed today', s.completed_today, 'Tasks your tools reported')}
-        ${tile('Failed today', s.failed_today, s.failed_today ? 'Open Tasks to see why' : 'Nothing has failed', s.failed_today ? 'err' : '')}
+        ${tile('Running now', s.running, runningSub, { cls: stalled ? 'warn' : s.running ? 'info' : '', icon: 'play' })}
+        ${tile('Tokens today', fmtNum(s.tokens_today), 'From tools that report tokens', { icon: 'bolt', trend: dailyTotal(d, 'tokens') })}
+        ${tile('Spend this month', fmtUsd(s.cost_mtd), ceilPct != null ? `${Math.round(ceilPct)}% of ${fmtUsd(s.ceiling_usd)} ceiling` : reportingCost(s.tools_reporting_cost), { cls: ceilPct == null ? '' : barCls(ceilPct, warnAt), trend: dailyTotal(d, 'cost'), na: 'No cost data' })}
+        ${tile('Completed today', s.completed_today, 'Tasks your tools reported', { icon: 'check' })}
+        ${tile('Failed today', s.failed_today, s.failed_today ? 'Open Tasks to see why' : 'Nothing has failed', { cls: s.failed_today ? 'err' : '', icon: 'x' })}
+        ${tile('Tools connected', s.connected, s.needs_attention ? `${s.needs_attention} need attention` : `${s.active} active now`, { cls: s.needs_attention ? 'warn' : '', icon: 'tools' })}
       </div>
 
+      <section class="card a-running">
+        <div class="card-head"><h3>Running now</h3><a class="aside" href="#tasks">All tasks ${ICON.chevron}</a></div>
+        ${running.length ? `<div class="rows">${running.slice(0, 6).map((t) => taskRow(t, { compact: true })).join('')}</div>` : emptyBlock('Nothing is running', 'Tasks and live sessions show up here as they happen.')}
+      </section>
+
       <section class="card summary a-summary">
-        <div class="card-head"><svg width="13" height="13" viewBox="0 0 16 16" fill="var(--accent)" aria-hidden="true"><path d="M8 1.2l1.7 4.6 4.6 1.7-4.6 1.7L8 13.8 6.3 9.2 1.7 7.5l4.6-1.7z"/></svg><h3>Daily summary</h3></div>
+        <div class="card-head">${ICON.spark}<h3>Daily summary</h3></div>
         <p>${esc(sm?.text ?? 'No summary yet. It is generated after the first sync, or you can generate one now.')}</p>
         <div class="meta">
           ${sm ? `<span>${esc(smSource)} · ${esc(rel(sm.generated_at))}</span>` : ''}
-          ${sm?.error ? `<span style="color:var(--warn)">${esc(sm.error)}</span>` : ''}
+          ${sm?.error ? `<span class="warn-text">${esc(sm.error)}</span>` : ''}
           ${!d.demo ? '<button class="btn small ghost" data-action="refresh-summary">Regenerate</button>' : ''}
         </div>
       </section>
 
-      ${askCard(d)}
-
-      <section class="card a-running">
-        <div class="card-head"><h3>Running now</h3><a class="aside" href="#tasks">All tasks</a></div>
-        ${running.length ? `<div class="rows">${running.slice(0, 6).map((t) => taskRow(t, { compact: true })).join('')}</div>` : emptyBlock('Nothing is running', 'Tasks show up here when your agents report them.')}
+      <section class="card a-tools">
+        <div class="card-head"><h3>Your AI tools</h3><button class="aside link" data-action="add-tool">${ICON.plus} Connect</button></div>
+        <div class="rows">${tools.map((t) => {
+          const st = toolStatus(t);
+          const sub = t.current_activity ? `Running: ${t.current_activity}` : accountLine(t) ?? KIND_LABEL[t.kind];
+          const fig = t.tokens_today != null ? `${fmtNum(t.tokens_today)} today` : t.cost_mtd != null ? `${fmtUsd(t.cost_mtd)} this month` : '';
+          return `<a class="row tool-row" href="#tool-${t.id}">${logo(t, 'sm')}<div class="row-main"><div class="row-title">${esc(t.name)}</div><div class="row-sub">${esc(sub)}</div></div>
+            <div class="row-end"><span class="num">${esc(fig)}</span>${pill(st.cls, st.label)}</div></a>`;
+        }).join('')}</div>
       </section>
 
       <section class="card a-upcoming">
@@ -647,21 +808,48 @@ const VIEWS = {
       </section>
 
       <section class="card a-limits">
-        <div class="card-head"><h3>Budgets and limits</h3><a class="aside" href="#usage">Usage</a></div>
+        <div class="card-head"><h3>Budgets and limits</h3><a class="aside" href="#usage">Usage ${ICON.chevron}</a></div>
         ${s.ceiling_usd ? `<div class="meter"><div class="meter-top"><span>All tools this month</span><b>${or(fmtUsd(s.cost_mtd), 'No cost data')} / ${esc(fmtUsd(s.ceiling_usd))}</b></div>${bar(ceilPct ?? 0, barCls(ceilPct ?? 0, warnAt))}</div>` : ''}
         ${budgeted.map((t) => `<div class="meter"><div class="meter-top"><span>${esc(t.name)}</span><b>${t.budget_pct == null ? '<span class="faint">No cost data</span>' : `${esc(fmtUsd(t.cost_mtd))} / ${esc(fmtUsd(t.budget_usd))}`}</b></div>${bar(t.budget_pct ?? 0, barCls(t.budget_pct ?? 0, warnAt))}</div>`).join('')}
-        ${!budgeted.length && !s.ceiling_usd ? emptyBlock('No budgets set', 'Set a monthly budget on a tool, or a ceiling in Settings, to track limits here.') : ''}
-        ${unbudgeted.length && (budgeted.length || s.ceiling_usd) ? `<p class="faint" style="font-size:12px;margin:10px 0 0">No budget set for ${esc(unbudgeted.map((t) => t.name).join(', '))}.</p>` : ''}
-        <p class="faint" style="font-size:12px;margin:10px 0 0">Plan limits on ChatGPT, Claude.ai, Cursor and Copilot are not available through their APIs, so they don’t appear here.</p>
+        ${limited.map((t) => `<div class="limit-group"><div class="limit-name">${logo(t, 'xs')}${esc(t.name)} plan limits</div>${limitMeters(t)}</div>`).join('')}
+        ${!budgeted.length && !s.ceiling_usd && !limited.length ? emptyBlock('No budgets set', 'Set a monthly budget on a tool, or a ceiling in Settings, to track limits here.') : ''}
+        <p class="fine">Claude.ai and ChatGPT plan limits aren’t available through their APIs. Codex’s limits appear here when Codex reports them in its logs.</p>
       </section>
 
       <section class="card a-activity">
         <div class="card-head"><h3>Recent activity</h3></div>
         ${d.feed.length ? `<div class="rows">${d.feed.slice(0, 8).map((e) => {
-          const sev = e.kind.includes('failed') ? 'err' : e.kind === 'connection' && /fail/.test(e.message) ? 'err' : e.kind.includes('completed') ? 'ok' : 'info';
-          return `<div class="row"><div class="status-ico s-${sev}">${ICON[SEVERITY_ICON[sev]]}</div><div class="row-main"><div class="row-sub" style="color:var(--text)">${esc(e.message)}</div></div><div class="row-time">${esc(rel(e.created_at))}</div></div>`;
+          const sev = e.kind.includes('failed') ? 'err' : e.kind === 'connection' && /fail|no longer|not found/.test(e.message) ? 'err' : e.kind.includes('completed') || /ready|reconnected/.test(e.message) ? 'ok' : 'info';
+          return `<div class="row"><div class="status-ico s-${sev}">${ICON[SEVERITY_ICON[sev]]}</div><div class="row-main"><div class="row-sub strong">${esc(e.message)}</div></div><div class="row-time">${esc(rel(e.created_at))}</div></div>`;
         }).join('')}</div>` : emptyBlock('No activity yet', 'Syncs, task updates and connection changes are listed here.')}
       </section>
+    </div>`;
+  },
+
+  assistant() {
+    const d = S.data;
+    if (d.demo) return `<div class="card">${emptyBlock('The assistant works with your real data', 'Exit demo to chat about your tools and tasks.', '<button class="btn" data-action="toggle-demo">Exit demo</button>')}</div>`;
+    if (!d.engine) return assistantSetup(d);
+    const c = S.chat;
+    const e = d.engine;
+    const options = c.threads.map((t) => `<option value="${t.id}" ${c.thread?.id === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('');
+    return `<div class="chat-page">
+      <div class="chat-bar">
+        <label class="engine-pick">${engineLogo(e, 'xs')}<select class="input" id="engine-pick" data-action-change="pick-engine" aria-label="Which AI answers" ${c.streaming ? 'disabled' : ''}>${engineOptions(d)}</select></label>
+        <select class="input" id="thread-pick" data-action-change="pick-thread" aria-label="Conversation" ${c.streaming ? 'disabled' : ''}>
+          ${c.thread ? '' : '<option value="" selected>New conversation</option>'}${options}</select>
+        <button class="btn" data-action="new-chat" ${c.streaming ? 'disabled' : ''}>${ICON.plus}<span class="hide-sm">New chat</span></button>
+        ${c.thread ? `<button class="btn icon-btn ghost" data-action="delete-chat" aria-label="Delete this conversation" title="Delete this conversation" ${c.streaming ? 'disabled' : ''}>${ICON.trash}</button>` : ''}
+      </div>
+      <section class="card chat">
+        <div class="msgs" id="msgs" aria-live="polite"></div>
+        <form class="composer" id="chat-form" data-form="chat">
+          <textarea class="input" id="chat-input" name="text" rows="1" maxlength="8000" placeholder="Message ${esc(e.label)}…" aria-label="Message the assistant">${esc(c.draft)}</textarea>
+          <button class="btn primary icon-btn" type="submit" data-role="send" aria-label="Send">${ICON.send}</button>
+          <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
+        </form>
+      </section>
+      <p class="chat-foot">Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}. It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.</p>
     </div>`;
   },
 
@@ -670,34 +858,123 @@ const VIEWS = {
     const warnAt = d.settings.usage_warn_pct;
     const card = (t) => {
       const st = toolStatus(t);
-      const caps = Object.entries(t.capabilities).map(([k, v]) => `<span class="cap ${v === 'none' ? 'none' : ''}">${CAP_NAME[k]}: <b>${esc(capShort(k, v))}</b></span>`).join('');
+      const caps = Object.entries(t.capabilities).filter(([, v]) => v !== 'none').map(([k, v]) => `<span class="cap">${CAP_NAME[k]}: <b>${esc(capShort(k, v))}</b></span>`).join('');
       const activity = t.last_error
-        ? `<span class="dotx err"></span><span style="color:var(--err)">${esc(t.last_error)}</span>`
+        ? `<span class="dotx err"></span><span class="err-text">${esc(t.last_error)}</span>`
         : t.current_activity
           ? `<span class="dotx on"></span><span>Running: ${esc(t.current_activity)}</span>`
-          : `<span class="dotx"></span><span>${t.active ? 'Recently active' : 'Idle'}</span>`;
-      const foot = t.can_sync ? (t.last_sync_at ? `Synced ${rel(t.last_sync_at)}` : 'Not synced yet') : 'No API sync';
+          : `<span class="dotx"></span><span>${esc(accountLine(t) ?? (t.active ? 'Recently active' : 'Idle'))}</span>`;
       const last = t.last_activity_at ? `Active ${rel(t.last_activity_at)}` : t.last_usage_day ? `Last usage ${shortDay(t.last_usage_day)}` : 'No activity yet';
-      return `<article class="card tool" role="button" tabindex="0" data-action="open-tool" data-id="${t.id}">
-        <div class="tool-head"><div class="logo">${initials(t.name)}</div>
-          <div style="min-width:0"><div class="tool-name">${esc(t.name)}</div><div class="tool-kind">${esc(t.adapter_name)} · ${esc(t.vendor)}</div></div>
+      return `<a class="card tool" href="#tool-${t.id}">
+        <div class="tool-head">${logo(t)}
+          <div class="min0"><div class="tool-name">${esc(t.name)}</div><div class="tool-kind">${esc(KIND_LABEL[t.kind] ?? t.adapter_name)} · ${esc(t.vendor)}</div></div>
           ${pill(st.cls, st.label)}</div>
-        <div class="caps">${caps}</div>
         <dl class="kv">
-          <div><dt>Spend this month</dt><dd class="${t.cost_mtd == null ? 'na' : ''}">${or(fmtUsd(t.cost_mtd))}</dd></div>
           <div><dt>Tokens this month</dt><dd class="${t.tokens_mtd == null ? 'na' : ''}">${or(fmtNum(t.tokens_mtd))}</dd></div>
+          <div><dt>Spend this month</dt><dd class="${t.cost_mtd == null ? 'na' : ''}">${or(fmtUsd(t.cost_mtd), t.kind === 'local' ? 'Included in plan' : 'Not available')}</dd></div>
         </dl>
-        ${t.budget_usd ? `<div class="meter" style="padding:0"><div class="meter-top"><span class="muted">Monthly budget</span><b>${t.budget_pct == null ? '<span class="faint">No cost data</span>' : `${esc(fmtPct(t.budget_pct))} of ${esc(fmtUsd(t.budget_usd))}`}</b></div>${bar(t.budget_pct ?? 0, barCls(t.budget_pct ?? 0, warnAt))}</div>` : '<div class="faint" style="font-size:12px">No monthly budget set</div>'}
+        ${t.budget_usd ? `<div class="meter flat"><div class="meter-top"><span class="muted">Monthly budget</span><b>${t.budget_pct == null ? '<span class="faint">No cost data</span>' : `${esc(fmtPct(t.budget_pct))} of ${esc(fmtUsd(t.budget_usd))}`}</b></div>${bar(t.budget_pct ?? 0, barCls(t.budget_pct ?? 0, warnAt))}</div>` : ''}
+        <div class="caps">${caps}</div>
         <div class="tool-activity">${activity}</div>
-        <div class="tool-foot"><span>${esc(foot)}</span><span>${esc(last)}</span></div>
-      </article>`;
+        <div class="tool-foot"><span>${esc(last)}</span><span class="go">Open ${ICON.chevron}</span></div>
+      </a>`;
     };
-    return `<div class="page-head"><div><h2>AI Tools</h2><p>${plural(d.tools.length, 'tool')} · each card shows what that integration can actually see.</p></div>
-      <button class="btn primary" data-action="add-tool" ${d.demo ? 'disabled title="Demo data is read-only"' : ''}>Add a tool</button></div>
-      ${d.tools.length ? `<div class="tools-grid">${d.tools.map(card).join('')}</div>` : `<div class="card">${emptyBlock('No tools yet', 'Add one to start tracking it.', '<button class="btn primary" data-action="add-tool">Add a tool</button>')}</div>`}
+    return `<div class="page-head"><div><h2>AI Tools</h2><p>${plural(d.tools.length, 'tool')} · each card shows what that connection can actually see.</p></div>
+      <button class="btn primary" data-action="add-tool" ${d.demo ? 'disabled title="Demo data is read-only"' : ''}>${ICON.plus}Connect a tool</button></div>
+      ${d.tools.length ? `<div class="tools-grid">${d.tools.map(card).join('')}</div>` : `<div class="card">${emptyBlock('No tools yet', 'Connect one to start tracking it.', '<button class="btn primary" data-action="add-tool">Connect a tool</button>')}</div>`}
       <div class="card"><div class="card-head"><h3>What the labels mean</h3></div>
         <dl class="detail-grid">${Object.entries(CAP_SHORT).map(([k, v]) => `<dt>${esc(v)}</dt><dd>${esc(CAP_LONG[k])}</dd>`).join('')}<dt>Your budget</dt><dd>A monthly dollar budget you set. Provider plan limits are not read.</dd></dl>
       </div>`;
+  },
+
+  tool() {
+    const d = S.data;
+    const t = d.tools.find((x) => x.id === S.toolId);
+    if (!t) return `<div class="card">${emptyBlock('This tool isn’t connected', 'It may have been removed.', '<a class="btn" href="#tools">See all tools</a>')}</div>`;
+    const st = toolStatus(t);
+    const demo = d.demo;
+    const warnAt = d.settings.usage_warn_pct;
+    const engine = d.engines.find((e) => e.integration_id === t.id);
+    const waiting = t.cli ? S.waiting[t.adapter] : null;
+    const tasks = d.tasks.filter((x) => x.integration_id === t.id);
+    const series = d.usage.series.find((x) => x.id === t.id);
+    const acct = accountLine(t);
+
+    const actions = [];
+    if (!demo && engine?.ready) actions.push(`<button class="btn primary" data-action="chat-with" data-engine="${engine.id}">${ICON.chat}Chat with ${esc(engine.label)}</button>`);
+    if (!demo && t.kind === 'local' && t.status === 'signin') actions.push(`<button class="btn primary" data-action="local-login" data-id="${esc(t.adapter)}">${ICON.signin}Sign in with your ${esc(t.account_kind ?? 'account')}</button>`);
+    if (!demo && t.kind === 'local' && t.status === 'missing') actions.push(`<button class="btn primary" data-action="local-install" data-id="${esc(t.adapter)}">${ICON.download}Install ${esc(t.adapter_name)}</button>`);
+    if (!demo && t.kind === 'local') actions.push(`<button class="btn" data-action="local-check" data-id="${esc(t.adapter)}">${ICON.refresh}Check again</button>`);
+    if (!demo && t.kind === 'api') actions.push(`<button class="btn" data-action="sync" data-id="${t.id}">${ICON.refresh}Sync now</button>`);
+
+    const setup = t.kind === 'local' && t.status !== 'ok' && t.status !== 'disabled' ? `
+      <section class="card setup">
+        <div class="card-head"><h3>Finish setting up ${esc(t.adapter_name)}</h3></div>
+        <ol class="steps">
+          <li class="${t.status !== 'missing' ? 'done' : 'now'}"><b>Install ${esc(t.adapter_name)}</b>
+            <span>${t.status !== 'missing' ? `Installed${t.version ? ` (version ${esc(t.version)})` : ''}.` : `Run <code>${esc(t.cli?.install)}</code>, or choose Install and the app opens a window that does it.`}</span></li>
+          <li class="${t.status === 'signin' ? 'now' : t.status === 'missing' ? '' : 'done'}"><b>Sign in with your ${esc(t.account_kind ?? 'account')}</b>
+            <span>${esc(t.cli?.login_help ?? '')} No API key is needed.</span></li>
+          <li><b>Use it here</b><span>Its usage and sessions appear on this page, and the assistant can run through it.</span></li>
+        </ol>
+        ${waiting ? `<div class="callout info waiting"><span class="spin"></span>${waiting === 'install' ? 'Waiting for the install to finish. This page updates when it’s done.' : 'Waiting for you to finish signing in. This page updates when you’re signed in.'}</div>` : ''}
+        ${t.last_error ? `<div class="callout err">${esc(t.last_error)}</div>` : ''}
+      </section>` : '';
+
+    const capRows = Object.entries(t.capabilities).map(([k, v]) => `<tr><td><b>${CAP_NAME[k]}</b><div class="faint small">${esc(k === 'limits' && v === 'manual' ? 'The monthly budget you set below' : CAP_LONG[v])}</div></td><td>${pill(v === 'none' ? 's-queued' : v === 'api' || v === 'local' ? 's-ok' : 's-info', capShort(k, v))}</td></tr>`).join('');
+
+    return `
+      <section class="tool-hero">
+        ${logo(t, 'xl')}
+        <div class="tool-hero-main">
+          <div class="eyebrow">${esc(KIND_LABEL[t.kind] ?? '')} · ${esc(t.vendor)}</div>
+          <h2>${esc(t.name)}</h2>
+          <div class="tool-hero-meta">${pill(st.cls, st.label)}${acct ? `<span>${esc(acct)}</span>` : ''}${t.version ? `<span class="faint">v${esc(t.version)}</span>` : ''}${t.secret_hint ? `<span class="faint">key ${esc(t.secret_hint)}</span>` : ''}</div>
+        </div>
+        <div class="tool-hero-actions">${actions.join('')}</div>
+      </section>
+      ${t.last_error && !setup ? `<div class="callout err">${esc(t.last_error)}</div>` : ''}
+      ${t.status === 'pending' ? '<div class="callout info">The first check hasn’t finished yet.</div>' : ''}
+      ${setup}
+
+      <div class="tiles tiles-5">
+        ${tile('Tokens this month', fmtNum(t.tokens_mtd), t.input_tokens_mtd != null ? `${fmtNum(t.input_tokens_mtd)} in · ${fmtNum(t.output_tokens_mtd)} out, plus cache` : 'Input, output and cache', { icon: 'bolt' })}
+        ${tile('Tokens today', fmtNum(t.tokens_today), 'UTC day', { trend: series?.tokens.slice(-14) })}
+        ${tile('Requests this month', t.requests_mtd?.toLocaleString() ?? null, t.kind === 'local' ? 'Model responses in its logs' : 'Where the tool reports them')}
+        ${tile('Spend this month', fmtUsd(t.cost_mtd), t.budget_usd ? `Budget ${fmtUsd(t.budget_usd)}` : t.kind === 'local' ? 'Plan usage isn’t priced per token' : 'No budget set', { na: t.kind === 'local' ? 'Included in plan' : 'Not reported', cls: t.budget_pct == null ? '' : barCls(t.budget_pct, warnAt) })}
+        ${tile(t.kind === 'local' ? 'Live sessions' : 'Running tasks', t.kind === 'local' ? t.sessions_running : tasks.filter((x) => x.status === 'running').length, t.last_activity_at ? `Last active ${rel(t.last_activity_at)}` : 'No activity yet', { icon: 'play' })}
+      </div>
+
+      <div class="grid-2">
+        <section class="card">
+          <div class="card-head"><h3>Daily tokens</h3><span class="aside">Last 30 days</span></div>
+          ${series ? '<div class="chart"><canvas id="ch-tool" aria-label="Daily tokens"></canvas></div>' : emptyBlock('No usage yet', t.kind === 'local' ? `Usage appears after ${t.adapter_name} has been used on this computer.` : 'Charts fill in once usage is reported.')}
+        </section>
+        ${engine?.ready && !demo ? `<section class="card ask-tool">
+          <div class="card-head">${ICON.chat}<h3>Ask ${esc(engine.label)}</h3></div>
+          <p class="muted small">Ask about your tools and tasks, or hand it work. It runs with ${esc(engine.via)} and can use this app’s functions.</p>
+          <form class="command compact" data-form="ask-tool" data-engine="${engine.id}"><input class="command-input" name="text" placeholder="e.g. Draft a summary of this week’s usage" autocomplete="off" maxlength="8000" aria-label="Ask ${esc(engine.label)}"><button class="btn primary" type="submit">${ICON.send}</button></form>
+          <div class="chips">${['What did I use this for today?', 'Am I close to any limits?', 'Start a task: write a weekly usage report'].map((p) => `<button class="chip" data-action="ask-tool" data-engine="${engine.id}" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div>
+        </section>` : t.limits ? `<section class="card"><div class="card-head"><h3>Plan limits</h3></div>${limitMeters(t)}</section>` : `<section class="card"><div class="card-head"><h3>This month</h3></div><dl class="detail-grid">
+          <dt>Spend</dt><dd>${or(fmtUsd(t.cost_mtd), t.kind === 'local' ? 'Included in plan' : 'Not available')}</dd>
+          <dt>Budget</dt><dd>${t.budget_usd ? `${esc(fmtUsd(t.budget_usd))}${t.budget_pct != null ? ` · ${esc(fmtPct(t.budget_pct))} used` : ''}` : '<span class="faint">Not set</span>'}</dd>
+          ${t.can_sync ? `<dt>Last ${t.kind === 'local' ? 'check' : 'sync'}</dt><dd>${or(t.last_sync_at && when(t.last_sync_at), 'Not yet')}</dd>` : ''}
+          ${t.data_refreshed_at && t.kind === 'api' ? `<dt>Data complete to</dt><dd>${esc(when(t.data_refreshed_at))}</dd>` : ''}
+        </dl></section>`}
+      </div>
+      ${engine?.ready && t.limits && !demo ? `<section class="card"><div class="card-head"><h3>Plan limits</h3></div>${limitMeters(t)}</section>` : ''}
+
+      <section class="card">
+        <div class="card-head"><h3>${t.kind === 'local' ? 'Sessions' : 'Tasks'}</h3><span class="aside">${plural(tasks.length, t.kind === 'local' ? 'session' : 'task')}</span></div>
+        ${tasks.length ? `<div class="rows">${tasks.slice(0, 12).map((x) => taskRow(x)).join('')}</div>` : emptyBlock(t.kind === 'local' ? 'No sessions in the last 30 days' : 'No tasks reported yet', t.kind === 'local' ? `Sessions appear here when you use ${t.adapter_name} on this computer.` : t.kind === 'builtin' ? 'Background tasks the assistant runs are listed here.' : 'Your scripts can report tasks with the ingest token below.')}
+      </section>
+
+      <div class="grid-2">
+        <section class="card"><div class="card-head"><h3>What this connection can see</h3></div><table class="cap-table"><tbody>${capRows}</tbody></table></section>
+        <section class="card"><div class="card-head"><h3>Good to know</h3></div><ul class="notes">${t.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>
+      </div>
+
+      ${demo ? '<div class="callout warn">Demo data is read-only.</div>' : manageSection(t)}`;
   },
 
   usage() {
@@ -705,41 +982,42 @@ const VIEWS = {
     const s = d.stats;
     const warnAt = d.settings.usage_warn_pct;
     const ceilPct = s.ceiling_usd && s.cost_mtd != null ? (s.cost_mtd / s.ceiling_usd) * 100 : null;
-    const apiTools = d.tools.filter((t) => t.can_sync && t.enabled);
+    const synced = d.tools.filter((t) => t.can_sync && t.enabled);
     const rows = d.tools.filter((t) => t.enabled).map((t) => `<tr>
-      <td><b>${esc(t.name)}</b><div class="faint" style="font-size:11.5px">${esc(t.adapter_name)}</div></td>
-      <td class="r ${t.cost_mtd == null ? 'na' : ''}">${or(fmtUsd(t.cost_mtd), '—')}</td>
+      <td><a class="cell-tool" href="#tool-${t.id}">${logo(t, 'xs')}<span><b>${esc(t.name)}</b><span class="faint small block">${esc(t.adapter_name)}</span></span></a></td>
+      <td class="r ${t.cost_mtd == null ? 'na' : ''}">${or(fmtUsd(t.cost_mtd), t.kind === 'local' ? 'In plan' : '—')}</td>
       <td class="r ${t.tokens_mtd == null ? 'na' : ''}">${or(fmtNum(t.tokens_mtd), '—')}</td>
       <td class="r ${t.input_tokens_mtd == null ? 'na' : ''}">${or(fmtNum(t.input_tokens_mtd), '—')}</td>
       <td class="r ${t.output_tokens_mtd == null ? 'na' : ''}">${or(fmtNum(t.output_tokens_mtd), '—')}</td>
       <td class="r ${t.requests_mtd == null ? 'na' : ''}">${or(t.requests_mtd == null ? null : t.requests_mtd.toLocaleString(), '—')}</td>
-      <td style="min-width:130px">${t.budget_pct != null ? `<div style="display:flex;gap:8px;align-items:center"><div style="flex:1">${bar(t.budget_pct, barCls(t.budget_pct, warnAt), true)}</div><span class="num" style="font-size:12px">${esc(fmtPct(t.budget_pct))}</span></div>` : `<span class="faint">${t.budget_usd ? 'No cost data' : 'No budget'}</span>`}</td>
-      <td class="muted" style="font-size:12px">${esc(capShort('usage', t.capabilities.usage))}</td>
+      <td class="budget-cell">${t.budget_pct != null ? `<div class="row-progress"><div>${bar(t.budget_pct, barCls(t.budget_pct, warnAt), true)}</div><span class="num">${esc(fmtPct(t.budget_pct))}</span></div>` : `<span class="faint">${t.budget_usd ? 'No cost data' : 'No budget'}</span>`}</td>
+      <td class="muted small">${esc(capShort('usage', t.capabilities.usage))}</td>
     </tr>`).join('');
     const models = d.usage.by_model.map((m) => `<tr><td><code>${esc(m.model)}</code></td><td class="r">${or(fmtNum(m.tokens), '—')}</td><td class="r">${or(fmtUsd(m.cost_usd), '—')}</td><td class="r">${or(m.requests?.toLocaleString(), '—')}</td></tr>`).join('');
     const hasSeries = d.usage.series.length > 0;
+    const hasCost = d.usage.series.some((x) => x.cost.some((v) => v != null));
 
     return `<div class="page-head"><div><h2>Usage & Costs</h2><p>This month so far. Days are in UTC, the same as the providers report.</p></div></div>
-      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-        ${tile('Spend this month', fmtUsd(s.cost_mtd), reportingCost(s.tools_reporting_cost))}
-        ${tile('Tokens this month', fmtNum(s.tokens_mtd), 'Input, output and cache')}
+      <div class="tiles tiles-4">
+        ${tile('Spend this month', fmtUsd(s.cost_mtd), reportingCost(s.tools_reporting_cost), { na: 'No cost data' })}
+        ${tile('Tokens this month', fmtNum(s.tokens_mtd), 'Input, output and cache', { trend: dailyTotal(d, 'tokens', 30) })}
         ${tile('Requests this month', s.requests_mtd?.toLocaleString() ?? null, 'Where the tool reports them')}
-        ${tile('Ceiling used', ceilPct == null ? null : fmtPct(ceilPct), s.ceiling_usd ? `Of ${fmtUsd(s.ceiling_usd)} this month` : 'Set a ceiling in Settings', ceilPct == null ? '' : barCls(ceilPct, warnAt), s.ceiling_usd ? 'No cost data' : 'No ceiling')}
+        ${tile('Ceiling used', ceilPct == null ? null : fmtPct(ceilPct), s.ceiling_usd ? `Of ${fmtUsd(s.ceiling_usd)} this month` : 'Set a ceiling in Settings', { cls: ceilPct == null ? '' : barCls(ceilPct, warnAt), na: s.ceiling_usd ? 'No cost data' : 'No ceiling' })}
       </div>
       <div class="grid-2">
-        <section class="card"><div class="card-head"><h3>Daily spend</h3><span class="aside">Last 30 days</span></div>
-          ${hasSeries ? '<div class="chart"><canvas id="ch-cost" aria-label="Daily spend by tool"></canvas></div><div class="legend" id="lg-cost"></div>' : emptyBlock('No usage data yet', 'Charts fill in after an API tool syncs or your scripts report usage.')}</section>
         <section class="card"><div class="card-head"><h3>Daily tokens</h3><span class="aside">Last 30 days</span></div>
-          ${hasSeries ? '<div class="chart"><canvas id="ch-tokens" aria-label="Daily tokens by tool"></canvas></div>' : emptyBlock('No usage data yet', 'Token counts appear for tools that report them.')}</section>
+          ${hasSeries ? '<div class="chart"><canvas id="ch-tokens" aria-label="Daily tokens by tool"></canvas></div><div class="legend" id="lg-tokens"></div>' : emptyBlock('No usage data yet', 'Token counts appear for tools that report them.')}</section>
+        <section class="card"><div class="card-head"><h3>Daily spend</h3><span class="aside">Last 30 days</span></div>
+          ${hasCost ? '<div class="chart"><canvas id="ch-cost" aria-label="Daily spend by tool"></canvas></div>' : emptyBlock('No cost data yet', 'Spend appears for API tools and tools you log costs for. Apps signed in with your account are included in your plan.')}</section>
       </div>
       <section class="card"><div class="card-head"><h3>By tool</h3><span class="aside">This month</span></div>
         ${rows ? `<div class="table-wrap"><table><thead><tr><th>Tool</th><th class="r">Spend</th><th class="r">Tokens</th><th class="r">Input</th><th class="r">Output</th><th class="r">Requests</th><th>Budget</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyBlock('No tools yet', 'Add a tool to see its usage.')}
-        <p class="faint" style="font-size:12px;margin:10px 0 0">A dash means the tool does not report that figure. It is not zero.</p></section>
+        <p class="fine">A dash means the tool does not report that figure. It is not zero. “In plan” means usage counts toward your subscription instead of being billed per token.</p></section>
       <section class="card"><div class="card-head"><h3>By model</h3><span class="aside">This month</span></div>
-        ${models ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th class="r">Tokens</th><th class="r">Spend</th><th class="r">Requests</th></tr></thead><tbody>${models}</tbody></table></div>` : emptyBlock('No model data', 'Per-model figures come from API integrations.')}
-        <p class="faint" style="font-size:12px;margin:10px 0 0">OpenAI reports cost per day without a model split, so its models show tokens but no spend.</p></section>
-      ${apiTools.length ? `<section class="card"><div class="card-head"><h3>Data freshness</h3></div><div class="rows">${apiTools.map((t) => `<div class="row"><div class="row-main"><div class="row-title">${esc(t.name)}</div><div class="row-sub">${t.last_sync_at ? `Synced ${esc(rel(t.last_sync_at))}` : 'Not synced yet'}${t.data_refreshed_at ? ` · provider data complete up to ${esc(when(t.data_refreshed_at))}` : ''}</div></div>${pill(toolStatus(t).cls, toolStatus(t).label)}</div>`).join('')}</div>
-        <p class="faint" style="font-size:12px;margin:10px 0 0">Anthropic usually publishes usage within 4 hours (up to 24). OpenAI cost data is daily.</p></section>` : ''}`;
+        ${models ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th class="r">Tokens</th><th class="r">Spend</th><th class="r">Requests</th></tr></thead><tbody>${models}</tbody></table></div>` : emptyBlock('No model data', 'Per-model figures come from API tools and AI apps on this computer.')}
+        <p class="fine">OpenAI reports cost per day without a model split, so its models show tokens but no spend.</p></section>
+      ${synced.length ? `<section class="card"><div class="card-head"><h3>Data freshness</h3></div><div class="rows">${synced.map((t) => `<div class="row">${logo(t, 'xs')}<div class="row-main"><div class="row-title">${esc(t.name)}</div><div class="row-sub">${t.last_sync_at ? `${t.kind === 'local' ? 'Logs read' : 'Synced'} ${esc(rel(t.last_sync_at))}` : 'Not synced yet'}${t.data_refreshed_at && t.kind === 'api' ? ` · provider data complete up to ${esc(when(t.data_refreshed_at))}` : ''}</div></div>${pill(toolStatus(t).cls, toolStatus(t).label)}</div>`).join('')}</div>
+        <p class="fine">Anthropic usually publishes usage within 4 hours (up to 24). OpenAI cost data is daily. Apps on this computer are read every 2 minutes.</p></section>` : ''}`;
   },
 
   tasks() {
@@ -748,27 +1026,29 @@ const VIEWS = {
       all: d.tasks,
       running: d.tasks.filter((t) => t.status === 'running'),
       upcoming: d.tasks.filter((t) => t.status === 'queued' || t.status === 'scheduled'),
-      completed: d.tasks.filter((t) => t.status === 'completed'),
+      completed: d.tasks.filter((t) => t.status === 'completed' && t.kind !== 'session'),
       failed: d.tasks.filter((t) => t.status === 'failed'),
+      sessions: d.tasks.filter((t) => t.kind === 'session'),
     };
-    const labels = { all: 'All', running: 'Running', upcoming: 'Upcoming', completed: 'Completed', failed: 'Failed' };
+    const labels = { all: 'All', running: 'Running', upcoming: 'Upcoming', completed: 'Completed', failed: 'Failed', sessions: 'Sessions' };
+    if (!groups.sessions.length) delete groups.sessions;
     const list = groups[S.taskFilter] ?? groups.all;
-    const canRun = !d.demo && d.settings.summary_key_set;
-    return `<div class="page-head"><div><h2>Tasks</h2><p>Tasks your agents and automations report, plus work Claude does here. Finish times come from each task’s reports.</p></div>
-      ${canRun ? `<button class="btn primary" data-action="new-claude-task">${ICON.claude}New Claude task</button>` : ''}</div>
+    const canRun = !d.demo && d.engine;
+    return `<div class="page-head"><div><h2>Tasks</h2><p>What your agents and apps report, live sessions from AI apps on this computer, and work the assistant does here.</p></div>
+      ${canRun ? `<button class="btn primary" data-action="new-claude-task">${ICON.spark}New assistant task</button>` : ''}</div>
       <div class="chips" role="group" aria-label="Filter tasks">${Object.keys(groups).map((k) => `<button class="chip" data-action="task-filter" data-filter="${k}" aria-pressed="${S.taskFilter === k}">${labels[k]} <span class="n num">${groups[k].length}</span></button>`).join('')}</div>
       <section class="card">${list.length ? `<div class="rows">${list.map((t) => taskRow(t)).join('')}</div>` : d.tasks.length
-        ? emptyBlock(`No ${labels[S.taskFilter].toLowerCase()} tasks`, 'Try another filter.')
-        : emptyBlock('No tasks reported yet', 'None of these providers expose your running tasks through their usage APIs, so tasks come from your own scripts. Open a tool on the AI Tools page to get its ingest token and an example request.')}</section>`;
+        ? emptyBlock(`No ${labels[S.taskFilter]?.toLowerCase() ?? ''} tasks`, 'Try another filter.')
+        : emptyBlock('No tasks yet', 'Connect Claude Code, Codex or Gemini CLI to see their sessions, have your scripts report tasks, or start an assistant task.')}</section>`;
   },
 
   notifications() {
     const d = S.data;
     return `<div class="page-head"><div><h2>Alerts</h2><p>${d.unread ? `${d.unread} unread` : 'All caught up'} · choose which alerts you get in Settings.</p></div>
       ${d.unread && !d.demo ? '<button class="btn" data-action="read-all">Mark all as read</button>' : ''}</div>
-      <section class="card">${d.notifications.length ? `<div class="rows">${d.notifications.map((n) => `<button class="row" data-action="read-notif" data-id="${n.id}">
+      <section class="card">${d.notifications.length ? `<div class="rows">${d.notifications.map((n) => `<button class="row ${n.read ? 'read' : ''}" data-action="read-notif" data-id="${n.id}">
         <div class="status-ico s-${esc(n.severity)}">${ICON[SEVERITY_ICON[n.severity] ?? 'info']}</div>
-        <div class="row-main"><div class="row-title" style="${n.read ? 'font-weight:500;color:var(--text-2)' : ''}">${n.read ? '' : '<span class="pill s-info plain" style="margin-right:6px">New</span>'}${esc(n.title)}</div><div class="row-sub">${esc(n.body)}</div></div>
+        <div class="row-main"><div class="row-title">${n.read ? '' : '<span class="new-dot" aria-label="Unread"></span>'}${esc(n.title)}</div><div class="row-sub">${esc(n.body)}</div></div>
         <div class="row-time">${esc(rel(n.created_at))}</div></button>`).join('')}</div>` : emptyBlock('No alerts yet', 'Failed tasks, budget warnings and connection problems show up here.')}</section>`;
   },
 
@@ -776,10 +1056,36 @@ const VIEWS = {
     const d = S.data;
     const st = d.settings;
     const dis = d.demo ? 'disabled' : '';
-    return `<div class="page-head"><div><h2>Settings</h2><p>Alerts, the daily summary and your account.</p></div></div>
+    const theme = readStore('acc-theme') ?? 'system';
+    return `<div class="page-head"><div><h2>Settings</h2><p>The assistant, alerts, appearance and your account.</p></div></div>
       ${d.demo ? '<div class="callout warn">Settings are read-only while demo data is showing.</div>' : ''}
       <div class="grid-2">
-        <section class="card"><div class="card-head"><h3>Budgets and syncing</h3></div>
+        <section class="card span-2"><div class="card-head">${ICON.chat}<h3>Assistant</h3></div>
+          <p class="muted small">The chat, background tasks and the daily summary run through one AI. Apps signed in with your own account need no API key; their usage counts toward your plan.</p>
+          <div class="engine-list" role="radiogroup" aria-label="Which AI the assistant uses">
+            <label class="engine-opt ${st.assistant_engine === 'auto' ? 'on' : ''}"><input type="radio" name="engine" value="auto" data-action-change="set-engine" ${st.assistant_engine === 'auto' ? 'checked' : ''} ${dis}>
+              <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic</b><span class="faint small block">The first ready one: Claude Code, then a Claude API key, Codex, Gemini CLI${d.engine ? `. Now: ${esc(d.engine.label)}` : ''}</span></span></label>
+            ${d.engines.map((e) => `<label class="engine-opt ${st.assistant_engine === e.id ? 'on' : ''} ${e.ready ? '' : 'off'}"><input type="radio" name="engine" value="${e.id}" data-action-change="set-engine" ${st.assistant_engine === e.id ? 'checked' : ''} ${e.ready ? '' : 'disabled'} ${dis}>
+              ${engineLogo(e, 'sm')}<span class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(e.ready ? `Ready · ${e.via}` : e.reason)}</span></span>
+              ${!e.ready && e.kind === 'cli' && !d.demo ? (e.integration_id ? `<a class="btn small" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small" type="button" data-action="connect-local" data-id="${e.id}">Connect</button>`) : ''}</label>`).join('')}
+          </div>
+        </section>
+
+        <section class="card"><div class="card-head">${ICON.key}<h3>Claude API key (optional)</h3></div>
+          <form class="form" data-form="summary">
+            <p class="muted small">Only needed if you want the assistant to use the Claude API instead of an app signed in with your account. Use a regular API key, not the Admin key. Requests use Claude Opus 5.5 and are billed per token.</p>
+            <div class="field"><label for="s-key">Claude API key</label><input class="input" id="s-key" name="summary_key" type="password" autocomplete="off" placeholder="${st.summary_key_set ? `Saved: ${esc(st.summary_key_hint)}` : 'sk-ant-…'}" ${dis}>
+              <span class="help">${st.summary_key_set ? 'Leave empty to keep the saved key.' : 'Stored encrypted on this computer.'}</span></div>
+            <div class="field"><label for="s-int">Regenerate the daily summary every (hours)</label><input class="input" id="s-int" name="summary_interval_hours" type="number" min="1" max="168" value="${esc(st.summary_interval_hours)}" ${dis}>
+              <span class="help">Each AI summary is one short request.</span></div>
+            <label class="switch"><span><span class="switch-label">Let Claude search the web</span><span class="faint small">With the Claude API key only. Searches are billed on top of tokens.</span></span><input type="checkbox" data-setting="assistant_web_search" ${st.assistant_web_search ? 'checked' : ''} ${dis}></label>
+            <div class="form-actions"><button class="btn primary" type="submit" ${dis}>Save</button>
+              ${st.summary_key_set ? `<button class="btn danger" type="button" data-action="remove-summary-key" ${dis}>Remove key</button>` : ''}
+              <button class="btn" type="button" data-action="refresh-summary" ${dis}>Generate summary now</button></div>
+            <div class="error-text" data-error></div>
+          </form></section>
+
+        <section class="card"><div class="card-head">${ICON.chart}<h3>Budgets and syncing</h3></div>
           <form class="form" data-form="alerts">
             <div class="form-row">
               <div class="field"><label for="s-ceil">Monthly ceiling, all tools ($)</label><input class="input" id="s-ceil" name="monthly_ceiling_usd" type="number" min="0" step="0.01" value="${esc(st.monthly_ceiling_usd ?? '')}" placeholder="None" ${dis}></div>
@@ -793,31 +1099,76 @@ const VIEWS = {
             <div class="error-text" data-error></div>
           </form></section>
 
-        <section class="card"><div class="card-head"><h3>Alerts</h3></div>
-          ${Object.entries(NOTIFY_LABELS).map(([k, [label, help]]) => `<label class="switch"><span><span style="display:block;font-weight:500">${esc(label)}</span><span class="faint" style="font-size:12px">${esc(help)}</span></span><input type="checkbox" id="n-${k}" data-notify="${k}" ${st.notify[k] ? 'checked' : ''} ${dis}></label>`).join('')}
+        <section class="card"><div class="card-head">${ICON.bell}<h3>Alerts</h3></div>
+          ${Object.entries(NOTIFY_LABELS).map(([k, [label, help]]) => `<label class="switch"><span><span class="switch-label">${esc(label)}</span><span class="faint small">${esc(help)}</span></span><input type="checkbox" id="n-${k}" data-notify="${k}" ${st.notify[k] ? 'checked' : ''} ${dis}></label>`).join('')}
         </section>
 
-        <section class="card"><div class="card-head"><h3>Claude</h3></div>
-          <form class="form" data-form="summary">
-            <p class="muted" style="margin:0;font-size:13px">One Claude API key powers the Claude chat, background tasks and the daily summary, all on Claude Opus 5.5. Use a regular API key here, not the Admin key. Without a key, the summary is assembled from your data by fixed rules and the chat is off.</p>
-            <div class="field"><label for="s-key">Claude API key</label><input class="input" id="s-key" name="summary_key" type="password" autocomplete="off" placeholder="${st.summary_key_set ? `Saved: ${esc(st.summary_key_hint)}` : 'sk-ant-…'}" ${dis}>
-              <span class="help">${st.summary_key_set ? 'Leave empty to keep the saved key.' : 'Stored encrypted on this server.'}</span></div>
-            <div class="field"><label for="s-int">Regenerate every (hours)</label><input class="input" id="s-int" name="summary_interval_hours" type="number" min="1" max="168" value="${esc(st.summary_interval_hours)}" ${dis}>
-              <span class="help">Each AI summary is one short request. Every 6 hours means 4 requests a day.</span></div>
-            <label class="switch"><span><span style="display:block;font-weight:500">Let Claude search the web</span><span class="faint" style="font-size:12px">For chat answers and background tasks. Searches are billed by Anthropic on top of tokens.</span></span><input type="checkbox" data-setting="assistant_web_search" ${st.assistant_web_search ? 'checked' : ''} ${dis}></label>
-            <div class="form-actions"><button class="btn primary" type="submit" ${dis}>Save</button>
-              ${st.summary_key_set ? `<button class="btn danger" type="button" data-action="remove-summary-key" ${dis}>Remove key</button>` : ''}
-              <button class="btn" type="button" data-action="refresh-summary" ${dis}>Generate now</button></div>
-            <div class="error-text" data-error></div>
-          </form></section>
-
-        <section class="card"><div class="card-head"><h3>Demo data and account</h3></div>
-          <label class="switch"><span><span style="display:block;font-weight:500">Show demo data</span><span class="faint" style="font-size:12px">Sample tools and tasks, labeled as demo. Your data is untouched.</span></span><input type="checkbox" id="s-demo" data-action-change="toggle-demo" ${S.demo ? 'checked' : ''}></label>
-          <div class="switch" style="cursor:default"><span>Signed in as <b>${esc(S.user.username)}</b></span><button class="btn small" data-action="logout">Sign out</button></div>
+        <section class="card"><div class="card-head">${ICON.sun}<h3>Appearance, demo and account</h3></div>
+          <div class="switch"><span><span class="switch-label">Theme</span><span class="faint small">Saved on this device</span></span>
+            <div class="seg" role="group" aria-label="Theme">${['system', 'dark', 'light'].map((v) => `<button type="button" class="seg-btn" data-action="set-theme" data-theme="${v}" aria-pressed="${theme === v}">${cap1(v)}</button>`).join('')}</div></div>
+          <label class="switch"><span><span class="switch-label">Show demo data</span><span class="faint small">Sample tools and tasks, labeled as demo. Your data is untouched.</span></span><input type="checkbox" id="s-demo" data-action-change="toggle-demo" ${S.demo ? 'checked' : ''}></label>
+          <div class="switch static"><span>Signed in as <b>${esc(S.user.username)}</b></span><button class="btn small" data-action="logout">Sign out</button></div>
         </section>
       </div>`;
   },
 };
+
+function welcome() {
+  const local = S.local;
+  const item = (l) => {
+    const state = !l.installed ? 'Not installed' : l.signed_in ? 'Installed and signed in' : 'Installed, not signed in';
+    return `<div class="welcome-app">${logo({ vendor: l.vendor, name: l.name }, 'sm')}<div class="min0"><b>${esc(l.name)}</b><span class="faint small block">${esc(state)} · ${esc(l.account_kind)}</span></div>
+      ${l.connected_id ? `<a class="btn small" href="#tool-${l.connected_id}">Open</a>` : `<button class="btn small ${l.installed ? 'primary' : ''}" data-action="connect-local" data-id="${esc(l.id)}">Connect</button>`}</div>`;
+  };
+  return `<section class="hero welcome">
+    <div class="eyebrow">Welcome, ${esc(S.user.username)}</div>
+    <h2>Bring your AI tools together</h2>
+    <p>Connect the AI apps you already use with your own account. No API keys needed. Their usage, sessions and limits show up here, and you can ask them to do things from this app.</p>
+    <div class="welcome-apps">${local === null ? '<div class="faint small"><span class="spin"></span> Looking for AI apps on this computer…</div>' : local.map(item).join('')}</div>
+    <div class="form-actions"><button class="btn" data-action="add-tool">${ICON.key}Connect with an API key or track a tool</button><button class="btn ghost" data-action="toggle-demo">Explore with demo data</button></div>
+  </section>`;
+}
+
+function assistantSetup(d) {
+  return `<section class="hero welcome">
+    <div class="eyebrow">Assistant</div>
+    <h2>Choose an AI for the assistant</h2>
+    <p>The assistant can answer questions about your tools and tasks, change budgets, and run tasks in the background with live progress. Connect an app signed in with your own account, or add a Claude API key.</p>
+    <div class="welcome-apps">${d.engines.map((e) => `<div class="welcome-app">${engineLogo(e, 'sm')}<div class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(e.ready ? e.via : e.reason)}</span></div>
+      ${e.kind === 'api' ? '<a class="btn small" href="#settings">Add key</a>' : e.integration_id ? `<a class="btn small primary" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small primary" data-action="connect-local" data-id="${e.id}">Connect</button>`}</div>`).join('')}</div>
+  </section>`;
+}
+
+function manageSection(t) {
+  const confirm = S.confirmRemove === t.id;
+  return `<section class="card manage">
+    <div class="card-head">${ICON.gear}<h3>Manage</h3></div>
+    <div class="manage-grid">
+      ${t.kind === 'builtin' ? '' : `<form class="form" data-form="budget" data-id="${t.id}">
+        <div class="field"><label for="t-budget">Monthly budget ($)</label><input class="input" id="t-budget" name="budget_usd" type="number" min="0" step="0.01" value="${esc(t.budget_usd ?? '')}" placeholder="None"><span class="help">${t.kind === 'local' ? 'Plan usage has no per-token price, so a budget only applies if you log costs.' : 'Drives the limit bar and budget alerts.'}</span></div>
+        <div class="form-actions"><button class="btn" type="submit">Save budget</button></div><div class="error-text" data-error></div></form>`}
+      ${t.kind === 'api' ? `<form class="form" data-form="secret" data-id="${t.id}">
+        <div class="field"><label for="t-secret">Replace key</label><input class="input" id="t-secret" name="secret" type="password" autocomplete="off" required><span class="help">It is tested before it replaces the saved key.</span></div>
+        <div class="form-actions"><button class="btn" type="submit">Test and save</button></div><div class="error-text" data-error></div></form>` : ''}
+      ${t.capabilities.usage === 'manual' ? `<form class="form" data-form="manual-usage" data-id="${t.id}">
+        <div class="form-row"><div class="field"><label for="m-day">Day (UTC)</label><input class="input" id="m-day" name="day" type="date" value="${utcToday()}" required></div>
+          <div class="field"><label for="m-cost">Cost ($)</label><input class="input" id="m-cost" name="cost_usd" type="number" min="0" step="0.01"></div></div>
+        <div class="form-row"><div class="field"><label for="m-req">Requests</label><input class="input" id="m-req" name="requests" type="number" min="0"></div>
+          <div class="field"><label for="m-in">Input tokens</label><input class="input" id="m-in" name="input_tokens" type="number" min="0"></div>
+          <div class="field"><label for="m-out">Output tokens</label><input class="input" id="m-out" name="output_tokens" type="number" min="0"></div></div>
+        <span class="help">Saving the same day again replaces that day’s figures. For a subscription, log the plan price on the day it renews.</span>
+        <div class="form-actions"><button class="btn" type="submit">Save usage</button></div><div class="error-text" data-error></div></form>` : ''}
+      ${t.kind === 'builtin' || t.kind === 'local' ? '' : `<div class="form" id="ingest-section"><label class="field-label">Report tasks from your scripts</label>${ingestHelp(t)}
+        <div class="form-actions"><button class="btn" data-action="rotate-token" data-id="${t.id}">Create new ingest token</button></div></div>`}
+    </div>
+    <div class="form-actions manage-actions">
+      <button class="btn" data-action="toggle-tool" data-id="${t.id}" data-enabled="${t.enabled ? 0 : 1}">${t.enabled ? 'Turn off' : 'Turn on'}</button>
+      ${confirm ? `<span class="callout err inline">Remove ${esc(t.name)}? Its usage history${t.kind === 'local' ? ' and sessions' : ', tasks and ingest token'} are deleted here. ${t.kind === 'local' ? `${esc(t.adapter_name)} itself stays installed and signed in.` : 'This can’t be undone.'}</span>
+        <button class="btn danger" data-action="confirm-remove" data-id="${t.id}">Remove</button><button class="btn ghost" data-action="cancel-remove">Cancel</button>`
+        : `<button class="btn danger" data-action="remove-tool" data-id="${t.id}">Remove</button>`}
+    </div>
+  </section>`;
+}
 
 // ── Charts ───────────────────────────────────────────────────────────────
 function palette() {
@@ -833,10 +1184,28 @@ function autosize(el) {
   el.style.overflowY = el.scrollHeight > 200 ? 'auto' : 'hidden';
 }
 
+function chartBase(text, grid) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { stacked: true, grid: { display: false }, ticks: { color: text, maxTicksLimit: 8, maxRotation: 0 } },
+      y: { stacked: true, beginAtZero: true, grid: { color: grid }, border: { display: false }, ticks: { color: text } },
+    },
+  };
+}
+
 const AFTER = {
+  dashboard() {
+    const tools = S.data.tools.filter((t) => t.kind !== 'builtin');
+    if ((!tools.length || !S.data.engine) && !S.demo && S.local === null) loadLocal().then(() => S.page === 'dashboard' && renderPage());
+  },
   assistant() {
     const d = S.data;
-    if (d.demo || !d.settings.summary_key_set) return;
+    if (d.demo || !d.engine) return;
     renderMsgs();
     autosize($('#chat-input'));
     const ready = S.chat.loaded ? Promise.resolve() : loadThreads();
@@ -856,42 +1225,49 @@ const AFTER = {
         .catch((err) => toast(err.message, true));
     }
   },
+  tool() {
+    const series = S.data.usage.series.find((x) => x.id === S.toolId);
+    if (!window.Chart || !series || !$('#ch-tool')) return;
+    const { series: colors, text, grid } = palette();
+    const base = chartBase(text, grid);
+    S.charts.push(new window.Chart($('#ch-tool'), {
+      type: 'bar',
+      data: { labels: S.data.usage.days.map(shortDay), datasets: [{ label: 'Tokens', data: series.tokens, backgroundColor: colors[0], borderRadius: 3, maxBarThickness: 16 }] },
+      options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `Tokens: ${c.raw == null ? 'not reported' : fmtNum(c.raw)}` } } },
+        scales: { ...base.scales, y: { ...base.scales.y, ticks: { color: text, callback: (v) => fmtNum(v) } } } },
+    }));
+  },
   usage() {
     if (!window.Chart || !S.data.usage.series.length) return;
     const { series, text, grid } = palette();
     const labels = S.data.usage.days.map(shortDay);
-    const base = {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { stacked: true, grid: { display: false }, ticks: { color: text, maxTicksLimit: 8, maxRotation: 0 } },
-        y: { stacked: true, beginAtZero: true, grid: { color: grid }, border: { display: false }, ticks: { color: text } },
-      },
-    };
+    const base = chartBase(text, grid);
     const sets = S.data.usage.series;
-    S.charts.push(new window.Chart($('#ch-cost'), {
-      type: 'bar',
-      data: { labels, datasets: sets.map((s, i) => ({ label: s.name, data: s.cost, backgroundColor: series[i % series.length], borderRadius: 2, maxBarThickness: 18 })) },
-      options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtUsd(c.raw)}` } } },
-        scales: { ...base.scales, y: { ...base.scales.y, ticks: { color: text, callback: (v) => `$${v}` } } } },
-    }));
-    S.charts.push(new window.Chart($('#ch-tokens'), {
-      type: 'line',
-      data: { labels, datasets: sets.map((s, i) => ({ label: s.name, data: s.tokens, borderColor: series[i % series.length], backgroundColor: series[i % series.length], borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.3, spanGaps: false })) },
-      options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtNum(c.raw)}` } } },
-        scales: { x: base.scales.x, y: { ...base.scales.y, stacked: false, ticks: { color: text, callback: (v) => fmtNum(v) } } } },
-    }));
-    $('#lg-cost').innerHTML = sets.map((s, i) => `<span><i style="background:${series[i % series.length]}"></i>${esc(s.name)}</span>`).join('');
+    if ($('#ch-tokens')) {
+      S.charts.push(new window.Chart($('#ch-tokens'), {
+        type: 'bar',
+        data: { labels, datasets: sets.map((s, i) => ({ label: s.name, data: s.tokens, backgroundColor: series[i % series.length], borderRadius: 2, maxBarThickness: 18 })) },
+        options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtNum(c.raw)}` } } },
+          scales: { ...base.scales, y: { ...base.scales.y, ticks: { color: text, callback: (v) => fmtNum(v) } } } },
+      }));
+      $('#lg-tokens').innerHTML = sets.map((s, i) => `<span><i style="background:${series[i % series.length]}"></i>${esc(s.name)}</span>`).join('');
+    }
+    if ($('#ch-cost')) {
+      const costSets = sets.map((s, i) => ({ s, i })).filter(({ s }) => s.cost.some((v) => v != null));
+      S.charts.push(new window.Chart($('#ch-cost'), {
+        type: 'bar',
+        data: { labels, datasets: costSets.map(({ s, i }) => ({ label: s.name, data: s.cost, backgroundColor: series[i % series.length], borderRadius: 2, maxBarThickness: 18 })) },
+        options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtUsd(c.raw)}` } } },
+          scales: { ...base.scales, y: { ...base.scales.y, ticks: { color: text, callback: (v) => `$${v}` } } } },
+      }));
+    }
   },
 };
 
 // ── Modals ───────────────────────────────────────────────────────────────
-function openPanel(title, body, { center = false } = {}) {
+function openPanel(title, body, { center = false, wide = false } = {}) {
   $('#modal-root').innerHTML = `<div class="overlay ${center ? 'center' : ''}" data-action="overlay">
-    <div class="panel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    <div class="panel ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="panel-head"><h2>${esc(title)}</h2><button class="btn icon-btn ghost" data-action="close" aria-label="Close">${ICON.close}</button></div>
       <div class="panel-body">${body}</div></div></div>`;
   $('#modal-root .panel-body input, #modal-root .panel-body button')?.focus();
@@ -908,59 +1284,16 @@ function ingestHelp(t, token) {
   -H "Content-Type: application/json" \\
   -d '{"task": {"id": "run-42", "name": "Nightly report", "status": "running", "progress": 40}}'`;
   return `${token ? `<div class="field"><label>Ingest token (shown once)</label><div class="secret-box"><code id="ingest-token">${esc(token)}</code><button class="btn" data-action="copy" data-target="ingest-token">Copy</button></div><span class="help">Store it in your script’s environment. Creating a new token stops the old one working.</span></div>` : ''}
-    <p class="muted" style="margin:0;font-size:13px">Send task updates to <code>${esc(url)}</code>. Status is one of running, queued, scheduled, completed or failed. You can also send <code>usage</code> rows with day, model, tokens, requests and cost_usd; each row sets that day’s totals.</p>
+    <p class="muted small">Send task updates to <code>${esc(url)}</code>. Status is one of running, queued, scheduled, completed or failed. Send <code>progress</code> with running tasks so the app can estimate when they’ll finish. You can also send <code>usage</code> rows; each row sets that day’s totals.</p>
     <pre class="code" id="ingest-example">${esc(example)}</pre>`;
 }
 
-function openTool(id) {
-  const t = S.data.tools.find((x) => x.id === Number(id));
-  if (!t) return;
-  const st = toolStatus(t);
-  const demo = S.data.demo;
-  const capRows = Object.entries(t.capabilities).map(([k, v]) => `<tr><td><b>${CAP_NAME[k]}</b><div class="faint" style="font-size:12px">${esc(k === 'limits' && v === 'manual' ? 'The monthly budget you set below' : CAP_LONG[v])}</div></td><td>${pill(v === 'none' ? 's-queued' : v === 'api' ? 's-ok' : 's-info', capShort(k, v))}</td></tr>`).join('');
-  const body = `
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${pill(st.cls, st.label)}<span class="faint" style="font-size:12.5px">${esc(t.adapter_name)} · ${esc(t.vendor)}${t.secret_hint ? ` · key ${esc(t.secret_hint)}` : ''}</span></div>
-    ${t.last_error ? `<div class="callout err">${esc(t.last_error)}</div>` : ''}
-    ${t.status === 'pending' ? '<div class="callout info">The first sync hasn’t finished yet.</div>' : ''}
-    <div class="section"><h4>This month</h4><dl class="detail-grid">
-      <dt>Spend</dt><dd>${or(fmtUsd(t.cost_mtd))}</dd>
-      <dt>Tokens</dt><dd>${or(fmtNum(t.tokens_mtd))}${t.input_tokens_mtd != null ? ` <span class="faint">(${esc(fmtNum(t.input_tokens_mtd))} in, ${esc(fmtNum(t.output_tokens_mtd))} out)</span>` : ''}</dd>
-      <dt>Requests</dt><dd>${or(t.requests_mtd?.toLocaleString())}</dd>
-      <dt>Budget</dt><dd>${t.budget_usd ? `${esc(fmtUsd(t.budget_usd))}${t.budget_pct != null ? ` · ${esc(fmtPct(t.budget_pct))} used` : ''}` : '<span class="faint">Not set</span>'}</dd>
-      ${t.can_sync ? `<dt>Last sync</dt><dd>${or(t.last_sync_at && when(t.last_sync_at), 'Not yet')}</dd>` : ''}
-      ${t.data_refreshed_at ? `<dt>Data complete to</dt><dd>${esc(when(t.data_refreshed_at))}</dd>` : ''}
-    </dl></div>
-    <div class="section"><h4>What this integration can see</h4><table class="cap-table"><tbody>${capRows}</tbody></table></div>
-    <div class="section"><h4>Limitations</h4><ul class="notes">${t.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>
-    ${demo ? '<div class="callout warn">Demo data is read-only.</div>' : `
-    ${t.kind === 'builtin' ? '' : `<div class="section"><h4>Monthly budget</h4><form class="form" data-form="budget" data-id="${t.id}">
-      <div class="field"><label for="t-budget">Budget in dollars</label><input class="input" id="t-budget" name="budget_usd" type="number" min="0" step="0.01" value="${esc(t.budget_usd ?? '')}" placeholder="None"><span class="help">Drives the limit bar and budget alerts. Leave empty for none.</span></div>
-      <div class="form-actions"><button class="btn primary" type="submit">Save budget</button></div><div class="error-text" data-error></div></form></div>`}
-    ${t.kind === 'api' ? `<div class="section"><h4>Replace key</h4><form class="form" data-form="secret" data-id="${t.id}">
-      <div class="field"><label for="t-secret">New key</label><input class="input" id="t-secret" name="secret" type="password" autocomplete="off" required><span class="help">It is tested before it replaces the saved key.</span></div>
-      <div class="form-actions"><button class="btn" type="submit">Test and save</button></div><div class="error-text" data-error></div></form></div>` : ''}
-    ${t.capabilities.usage === 'manual' ? `<div class="section"><h4>Log usage</h4><form class="form" data-form="manual-usage" data-id="${t.id}">
-      <div class="form-row"><div class="field"><label for="m-day">Day (UTC)</label><input class="input" id="m-day" name="day" type="date" value="${utcToday()}" required></div>
-        <div class="field"><label for="m-cost">Cost ($)</label><input class="input" id="m-cost" name="cost_usd" type="number" min="0" step="0.01"></div></div>
-      <div class="form-row"><div class="field"><label for="m-req">Requests</label><input class="input" id="m-req" name="requests" type="number" min="0"></div>
-        <div class="field"><label for="m-in">Input tokens</label><input class="input" id="m-in" name="input_tokens" type="number" min="0"></div>
-        <div class="field"><label for="m-out">Output tokens</label><input class="input" id="m-out" name="output_tokens" type="number" min="0"></div></div>
-      <span class="help">Saving the same day again replaces that day’s figures. For a subscription, log the plan price on the day it renews.</span>
-      <div class="form-actions"><button class="btn" type="submit">Save usage</button></div><div class="error-text" data-error></div></form></div>` : ''}
-    ${t.kind === 'builtin' ? '' : `<div class="section"><h4>Report tasks from your scripts</h4><div class="form" id="ingest-section">${ingestHelp(t)}
-      <div class="form-actions"><button class="btn" data-action="rotate-token" data-id="${t.id}">Create new ingest token</button></div></div></div>`}
-    <div class="section"><h4>Manage</h4><div class="form-actions" id="manage-actions">
-      ${t.can_sync ? `<button class="btn" data-action="sync" data-id="${t.id}">Sync now</button>` : ''}
-      <button class="btn" data-action="toggle-tool" data-id="${t.id}" data-enabled="${t.enabled ? 0 : 1}">${t.enabled ? 'Turn off' : 'Turn on'}</button>
-      <button class="btn danger" data-action="remove-tool" data-id="${t.id}">Remove</button></div></div>`}`;
-  openPanel(t.name, body);
-}
-
 function taskPrompt(t) {
-  const what = t.status === 'failed' ? 'why it failed and what I can do about it'
-    : t.status === 'running' ? 'how it is going and when it should finish'
-      : t.status === 'completed' ? 'what it did and anything I should follow up on'
-        : 'when it will run and whether anything is blocking it';
+  const what = t.kind === 'session' ? 'what it was about and how much it used'
+    : t.status === 'failed' ? 'why it failed and what I can do about it'
+      : t.status === 'running' ? 'how it is going and when it should finish'
+        : t.status === 'completed' ? 'what it did and anything I should follow up on'
+          : 'when it will run and whether anything is blocking it';
   return `Look at task #${t.id} (“${t.name}” on ${t.tool_name}) and tell me ${what}.`;
 }
 
@@ -970,32 +1303,35 @@ async function openTask(id) {
   const row = (k, v) => (v ? `<dt>${k}</dt><dd>${v}</dd>` : '');
   const at = (iso) => iso && `${esc(when(iso))} <span class="faint">(${esc(rel(iso))})</span>`;
   const e = etaInfo(t);
-  const claudeTask = t.runner === 'claude';
-  const canAsk = !S.data.demo && S.data.settings.summary_key_set;
-  const controls = claudeTask && !S.data.demo
-    ? `<div class="form-actions">${t.controls.includes('cancel') ? `<button class="btn danger" data-action="task-cancel" data-id="${t.id}">Cancel task</button>` : ''}
+  const session = t.kind === 'session';
+  const mine = Boolean(t.runner);
+  const canAsk = !S.data.demo && S.data.engine;
+  const st = session ? SESSION_STATUS[t.status] ?? SESSION_STATUS.completed : TASK_STATUS[t.status];
+  const controls = session
+    ? `<p class="muted small">This is a ${esc(t.tool_name)} session on this computer, read from its logs. Open ${esc(t.tool_name)} to continue it.</p>`
+    : mine && !S.data.demo
+      ? `<div class="form-actions">${t.controls.includes('cancel') ? `<button class="btn danger" data-action="task-cancel" data-id="${t.id}">Cancel task</button>` : ''}
         ${t.controls.includes('retry') ? `<button class="btn" data-action="task-retry" data-id="${t.id}">Run again</button>` : ''}</div>`
-    : `<div class="form-actions"><button class="btn" disabled>Pause</button><button class="btn" disabled>Cancel</button><button class="btn" disabled>Restart</button></div>
-       <p class="faint" style="font-size:12.5px;margin:8px 0 0">${esc(t.tool_name)} doesn’t offer task controls through this app. Stop or restart the task where it runs.</p>`;
+      : `<div class="form-actions"><button class="btn" disabled>Pause</button><button class="btn" disabled>Cancel</button><button class="btn" disabled>Restart</button></div>
+       <p class="faint small">${esc(t.tool_name)} doesn’t offer task controls through this app. Stop or restart the task where it runs.</p>`;
   openPanel(t.name, `
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${pill(TASK_STATUS[t.status].pill, TASK_STATUS[t.status].label)}${claudeTask ? '<span class="by-claude">Run by Claude</span>' : ''}</div>
+    <div class="pill-row">${pill(st.pill, st.label)}${session ? '<span class="tag">Session</span>' : ''}${mine ? `<span class="tag accent">Run by ${esc(t.runner_label)}</span>` : ''}</div>
     ${t.error ? `<div class="callout err">${esc(t.error)}</div>` : ''}
-    ${t.step && t.status === 'running' ? `<p style="margin:0"><span class="faint">Now:</span> ${esc(t.step)}</p>` : ''}
-    ${t.progress != null ? `<div class="meter" style="padding:0"><div class="meter-top"><span class="muted">Progress</span><b>${Math.round(t.progress)}%</b></div>${bar(t.progress, t.stalled ? 'err' : 'info')}</div>` : ''}
+    ${t.step && t.status === 'running' ? `<p class="now-step"><span class="faint">Now:</span> ${esc(t.step)}</p>` : ''}
+    ${t.progress != null ? `<div class="meter flat"><div class="meter-top"><span class="muted">Progress</span><b>${Math.round(t.progress)}%</b></div>${bar(t.progress, t.stalled ? 'err' : 'info')}</div>` : ''}
     ${e ? `<div class="callout ${e.cls === 'err' ? 'err' : e.cls === 'warn' ? 'warn' : 'info'}"><b>${esc(e.text)}</b>${e.basis ? `, ${esc(e.basis)}` : ''}.</div>` : ''}
     <dl class="detail-grid">
       ${row('Tool', esc(t.tool_name))}
       ${row('Started', at(t.started_at))}
-      ${row('Expected finish', t.status === 'running' && t.eta_at && `${at(t.eta_at)}<div class="faint" style="font-size:12px">${esc(ETA_BASIS[t.eta_source] ?? '')}</div>`)}
+      ${row('Expected finish', t.status === 'running' && t.eta_at && `${at(t.eta_at)}<div class="faint small">${esc(ETA_BASIS[t.eta_source] ?? '')}</div>`)}
       ${row('Usually takes', t.typical_ms && esc(dur(t.typical_ms)))}
       ${row('Scheduled for', t.scheduled_for && esc(when(t.scheduled_for)))}
-      ${row('Finished', t.finished_at && esc(when(t.finished_at)))}
-      ${row('Took', t.finished_at && t.started_at && esc(dur(Date.parse(t.finished_at) - Date.parse(t.started_at))))}
-      ${row('Last update', esc(when(t.updated_at)))}
-      ${row('Task ID', `<code>${esc(t.external_id)}</code>`)}
+      ${row(session ? 'Last active' : 'Finished', (session ? t.updated_at : t.finished_at) && esc(when(session ? t.updated_at : t.finished_at)))}
+      ${row(session ? 'Length' : 'Took', (session ? t.started_at : t.finished_at && t.started_at) && esc(dur(Date.parse(session ? t.updated_at : t.finished_at) - Date.parse(t.started_at))))}
+      ${session ? '' : row('Last update', esc(when(t.updated_at)))}
     </dl>
-    <div class="section" id="task-detail">${t.description ? `<h4>${claudeTask ? 'Instructions' : 'Description'}</h4><p style="margin:0;white-space:pre-wrap">${esc(t.description)}</p>` : ''}</div>
-    ${canAsk ? `<div class="form-actions"><button class="btn" data-action="ask-task" data-id="${t.id}">${ICON.claude}Ask Claude about this task</button></div>` : ''}
+    <div class="section" id="task-detail">${t.description ? `<h4>${mine ? 'Instructions' : session ? 'Details' : 'Description'}</h4><p class="pre">${esc(t.description)}</p>` : ''}</div>
+    ${canAsk ? `<div class="form-actions"><button class="btn" data-action="ask-task" data-id="${t.id}">${ICON.chat}Ask the assistant about this</button></div>` : ''}
     <div class="section"><h4>Controls</h4>${controls}</div>`);
   if (S.data.demo || !t.has_result) return;
   try {
@@ -1005,45 +1341,73 @@ async function openTask(id) {
     box.insertAdjacentHTML('afterend', `<div class="section"><h4>Result</h4>
       <div class="result md" id="task-result">${md(detail.result)}</div>
       <pre id="task-result-raw" hidden>${esc(detail.result)}</pre>
-      <div class="form-actions" style="margin-top:8px"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button></div></div>`);
+      <div class="form-actions"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button></div></div>`);
   } catch (err) {
     toast(err.message, true);
   }
 }
 
-function openNewClaudeTask(preset = {}) {
-  openPanel('New Claude task', `
+function openNewTask(preset = {}) {
+  const e = S.data.engine;
+  openPanel('New assistant task', `
     <form class="form" data-form="claude-task">
-      <p class="muted" style="margin:0;font-size:13px">Claude works on this in the background and reports its progress, so you can see how far along it is and when it should finish. The result is saved on the task. It can read your dashboard data${S.data.settings.assistant_web_search ? ' and search the web' : ''}.</p>
+      <p class="muted small">${esc(e.label)} works on this in the background and reports its progress, so you can see how far along it is and when it should finish. The result is saved on the task. It can read your dashboard data.</p>
       <div class="field"><label for="ct-name">Name</label><input class="input" id="ct-name" name="name" maxlength="80" required value="${esc(preset.name ?? '')}" placeholder="Monthly usage report"></div>
-      <div class="field"><label for="ct-ins">What should Claude do?</label><textarea class="input" id="ct-ins" name="instructions" rows="6" maxlength="2000" required placeholder="Summarize this month’s spending by tool, flag anything close to budget, and suggest where to cut back.">${esc(preset.instructions ?? '')}</textarea>
-        <span class="help">Be specific about what you want back. Uses your Claude API key.</span></div>
+      <div class="field"><label for="ct-ins">What should it do?</label><textarea class="input" id="ct-ins" name="instructions" rows="6" maxlength="2000" required placeholder="Summarize this month’s usage by tool, flag anything close to a budget or limit, and suggest where to cut back.">${esc(preset.instructions ?? '')}</textarea>
+        <span class="help">Be specific about what you want back. Runs with ${esc(e.via)}.</span></div>
       <div class="form-actions"><button class="btn primary" type="submit">Start task</button></div>
       <div class="error-text" data-error></div>
     </form>`, { center: true });
   $('#ct-name')?.focus();
 }
 
+/** Finds Claude Code, Codex and Gemini CLI on this computer. */
+function loadLocal({ fresh = false } = {}) {
+  if (S.demo) return Promise.resolve(null);
+  if (!S.localLoading || fresh) {
+    S.localLoading = api(`/api/local${fresh ? '?fresh=1' : ''}`)
+      .then((r) => (S.local = r))
+      .catch(() => (S.local = []))
+      .finally(() => (S.localLoading = null));
+  }
+  return S.localLoading;
+}
+
 async function openAddTool() {
   if (S.data?.demo) return toast('Demo data is read-only. Exit demo to add a tool.', true);
-  try {
-    S.catalog ??= await api('/api/catalog');
-  } catch (err) {
-    return toast(err.message, true);
-  }
   S.add = { step: 'pick' };
   renderAdd();
+  try {
+    S.catalog ??= await api('/api/catalog');
+    if (S.add?.step === 'pick') renderAdd();
+    await loadLocal({ fresh: true });
+    if (S.add?.step === 'pick') renderAdd();
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
 function renderAdd() {
   const a = S.add;
+  if (!a) return;
   if (a.step === 'pick') {
-    const item = (c) => `<button class="cat-item" data-action="pick-adapter" data-id="${esc(c.id)}"><div class="logo">${initials(c.name)}</div><div style="min-width:0">
-      <b>${esc(c.name)}</b> <span class="faint" style="font-size:12px">${esc(c.vendor)}</span><p>${esc(c.description)}</p>
-      <div class="caps">${Object.entries(c.capabilities).map(([k, v]) => `<span class="cap ${v === 'none' ? 'none' : ''}">${CAP_NAME[k]}: <b>${esc(capShort(k, v))}</b></span>`).join('')}</div></div></button>`;
-    openPanel('Add a tool', `
-      <div class="section"><h4>Connect with an API</h4><div class="catalog">${S.catalog.filter((c) => c.kind === 'api').map(item).join('')}</div></div>
-      <div class="section"><h4>Track without an API</h4><div class="catalog">${S.catalog.filter((c) => c.kind !== 'api').map(item).join('')}</div></div>`, { center: true });
+    const caps = (c) => `<div class="caps">${Object.entries(c.capabilities).filter(([, v]) => v !== 'none').map(([k, v]) => `<span class="cap">${CAP_NAME[k]}: <b>${esc(capShort(k, v))}</b></span>`).join('')}</div>`;
+    const item = (c) => `<button class="cat-item" data-action="pick-adapter" data-id="${esc(c.id)}">${logo(c)}<div class="min0">
+      <b>${esc(c.name)}</b> <span class="faint small">${esc(c.vendor)}</span><p>${esc(c.description)}</p>${caps(c)}</div></button>`;
+    const localItem = (c) => {
+      const l = S.local?.find((x) => x.id === c.id);
+      const state = !l ? '<span class="faint small"><span class="spin"></span> Checking this computer…</span>'
+        : l.connected_id ? '<span class="state ok">Already connected</span>'
+          : !l.installed ? '<span class="state warn">Not installed yet</span>'
+            : l.signed_in ? `<span class="state ok">Installed and signed in${l.account?.email ? ` as ${esc(l.account.email)}` : ''}</span>` : '<span class="state warn">Installed, not signed in yet</span>';
+      const action = l?.connected_id ? `<a class="btn small" href="#tool-${l.connected_id}" data-action="close">Open</a>` : `<button class="btn small ${l?.installed ? 'primary' : ''}" data-action="connect-local" data-id="${esc(c.id)}" ${l ? '' : 'disabled'}>Connect</button>`;
+      return `<div class="cat-item local">${logo(c)}<div class="min0"><b>${esc(c.name)}</b> <span class="faint small">${esc(c.account)}</span><p>${esc(c.description)}</p>${state}</div>${action}</div>`;
+    };
+    openPanel('Connect a tool', `
+      <div class="section"><h4>${ICON.signin} Sign in with your account · no API key</h4><div class="catalog">${S.catalog ? S.catalog.filter((c) => c.kind === 'local').map(localItem).join('') : '<div class="faint small"><span class="spin"></span> Loading…</div>'}</div>
+        <p class="fine">These use the app on this computer and the account it’s signed in with. If one isn’t installed or signed in yet, connect it anyway and its page walks you through it.</p></div>
+      ${S.catalog ? `<div class="section"><h4>${ICON.key} Connect with an API key</h4><div class="catalog">${S.catalog.filter((c) => c.kind === 'api').map(item).join('')}</div></div>
+      <div class="section"><h4>${ICON.pencil} Track without a connection</h4><div class="catalog">${S.catalog.filter((c) => c.kind === 'manual').map(item).join('')}</div></div>` : ''}`, { center: true, wide: true });
     return;
   }
   const c = a.adapter;
@@ -1053,7 +1417,7 @@ function renderAdd() {
         <div class="field"><label for="a-name">Name</label><input class="input" id="a-name" name="name" value="${esc(c.name)}" maxlength="80" required><span class="help">Use a different name if you connect more than one account.</span></div>
         ${c.credential ? `<div class="field"><label for="a-secret">${esc(c.credential.label)}</label><input class="input" id="a-secret" name="secret" type="password" autocomplete="off" placeholder="${esc(c.credential.placeholder)}" required><span class="help">${esc(c.credential.help)} It is stored encrypted and never shown again.</span></div>` : ''}
         <div class="field"><label for="a-budget">Monthly budget ($, optional)</label><input class="input" id="a-budget" name="budget_usd" type="number" min="0" step="0.01"></div>
-        <div class="callout info"><ul class="notes" style="padding-left:16px">${c.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>
+        <div class="callout info"><ul class="notes">${c.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>
         <div class="form-actions"><button class="btn primary" type="submit">${c.credential ? 'Test and connect' : 'Add tool'}</button><button class="btn ghost" type="button" data-action="add-back">Back</button></div>
         <div class="error-text" data-error></div>
       </form>`, { center: true });
@@ -1062,14 +1426,35 @@ function renderAdd() {
   }
   openPanel(`${c.name} added`, `
     ${a.result.test?.detail ? `<div class="callout info">${esc(a.result.test.detail)}</div>` : ''}
-    <div class="form">${ingestHelp({ id: a.result.id }, a.result.ingest_token)}</div>
-    <div class="form-actions"><button class="btn primary" data-action="close">Done</button></div>`, { center: true });
+    <p class="muted small">${esc(c.name)} is now in the sidebar.</p>
+    ${a.result.ingest_token ? `<div class="form">${ingestHelp({ id: a.result.id }, a.result.ingest_token)}</div>` : ''}
+    <div class="form-actions"><a class="btn primary" href="#tool-${a.result.id}" data-action="close">Open ${esc(c.name)}</a></div>`, { center: true });
+}
+
+/** After the app opens a sign-in or install window, checks back until it's done (or gives up quietly). */
+async function waitForLocal(adapterId, kind) {
+  const done = (v) => (kind === 'install' ? v.installed : v.signed_in);
+  S.waiting[adapterId] = kind;
+  if (S.page === 'tool') renderPage();
+  const end = Date.now() + (kind === 'install' ? 10 : 4) * 60_000;
+  try {
+    while (Date.now() < end && S.user && S.waiting[adapterId] === kind) {
+      await sleep(kind === 'install' ? 8000 : 5000);
+      const v = await api(`/api/local/${adapterId}/check`, { method: 'POST' }).catch(() => null);
+      if (v && done(v)) {
+        toast(kind === 'install' ? `${v.name} is installed. Next, sign in.` : `${v.name} is signed in and ready`);
+        return v;
+      }
+    }
+    return null;
+  } finally {
+    delete S.waiting[adapterId];
+    await load({ force: true });
+  }
 }
 
 // ── Events ───────────────────────────────────────────────────────────────
-function numOrNull(v) {
-  return v === '' || v == null ? null : Number(v);
-}
+const numOrNull = (v) => (v === '' || v == null ? null : Number(v));
 
 const FORMS = {
   async setup(fd) {
@@ -1089,20 +1474,18 @@ const FORMS = {
     const body = { summary_interval_hours: fd.summary_interval_hours };
     if (fd.summary_key) body.summary_key = fd.summary_key;
     await api('/api/settings', { method: 'PUT', body });
-    toast('Summary settings saved');
+    toast(fd.summary_key ? 'Claude API key saved' : 'Saved');
     await load({ force: true });
   },
   async budget(fd, form) {
     await api(`/api/integrations/${form.dataset.id}`, { method: 'PATCH', body: { budget_usd: numOrNull(fd.budget_usd) } });
     toast('Budget saved');
     await load({ force: true });
-    openTool(form.dataset.id);
   },
   async secret(fd, form) {
     await api(`/api/integrations/${form.dataset.id}`, { method: 'PATCH', body: { secret: fd.secret } });
     toast('Key replaced');
     await load({ force: true });
-    openTool(form.dataset.id);
   },
   async 'manual-usage'(fd, form) {
     const body = { day: fd.day };
@@ -1110,31 +1493,50 @@ const FORMS = {
     await api(`/api/integrations/${form.dataset.id}/manual-usage`, { method: 'POST', body });
     toast('Usage saved');
     await load({ force: true });
-    openTool(form.dataset.id);
   },
   async 'claude-task'(fd) {
     const r = await api('/api/claude-tasks', { method: 'POST', body: { name: fd.name, instructions: fd.instructions } });
     closeModal();
-    toast(r.status === 'queued' ? 'Task queued. It starts when a running Claude task finishes.' : 'Task started');
+    toast(r.status === 'queued' ? 'Task queued. It starts when a running assistant task finishes.' : 'Task started');
     S.taskFilter = 'all';
     await load({ force: true });
   },
   async 'add-tool'(fd) {
     const result = await api('/api/integrations', { method: 'POST', body: { adapter: S.add.adapter.id, ...fd, budget_usd: numOrNull(fd.budget_usd) } });
     S.add = { ...S.add, step: 'done', result };
+    flash(result.id);
     renderAdd();
     load({ force: true });
   },
 };
 
+function flash(id) {
+  S.flashTool = id;
+  setTimeout(() => {
+    if (S.flashTool === id) {
+      S.flashTool = null;
+      navTools();
+    }
+  }, 2600);
+}
+
 async function onSubmit(e) {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   e.preventDefault();
-  if (form.dataset.form === 'ask' || form.dataset.form === 'chat') {
+  const kind = form.dataset.form;
+  if (kind === 'ask' || kind === 'chat' || kind === 'ask-tool') {
     const text = String(new FormData(form).get('text') ?? '').trim();
     if (!text) return;
-    if (form.dataset.form === 'ask') return askClaude(text);
+    if (kind === 'ask') return askAssistant(text);
+    if (kind === 'ask-tool') {
+      try {
+        await useEngine(form.dataset.engine, { quiet: true });
+      } catch (err) {
+        return toast(err.message, true);
+      }
+      return askAssistant(text);
+    }
     if (S.chat.streaming) return;
     form.reset();
     autosize($('#chat-input'));
@@ -1142,32 +1544,43 @@ async function onSubmit(e) {
   }
   const btn = form.querySelector('button[type="submit"]');
   const errEl = form.querySelector('[data-error]');
-  const label = btn?.textContent;
+  const label = btn?.innerHTML;
   if (errEl) errEl.textContent = '';
   if (btn) {
     btn.disabled = true;
-    btn.textContent = form.dataset.form === 'add-tool' || form.dataset.form === 'secret' ? 'Testing connection…' : 'Saving…';
+    btn.textContent = kind === 'add-tool' || kind === 'secret' ? 'Testing connection…' : 'Saving…';
   }
   try {
-    await FORMS[form.dataset.form](Object.fromEntries(new FormData(form)), form);
+    await FORMS[kind](Object.fromEntries(new FormData(form)), form);
   } catch (err) {
     if (errEl?.isConnected) errEl.textContent = err.message;
     else toast(err.message, true);
   } finally {
     if (btn?.isConnected) {
       btn.disabled = false;
-      btn.textContent = label;
+      btn.innerHTML = label;
     }
   }
 }
 
 async function toggleDemo() {
   S.demo = !S.demo;
-  writeDemo(S.demo);
+  writeStore('acc-demo', S.demo ? '1' : '0');
   closeModal();
   S.data = null;
   renderPage();
   await load({ force: true });
+}
+
+function setTheme(v) {
+  if (v === 'system') {
+    writeStore('acc-theme', null);
+    delete document.documentElement.dataset.theme;
+  } else {
+    writeStore('acc-theme', v);
+    document.documentElement.dataset.theme = v;
+  }
+  renderPage();
 }
 
 const ACTIONS = {
@@ -1183,19 +1596,78 @@ const ACTIONS = {
     S.add = { step: 'pick' };
     renderAdd();
   },
-  'open-tool': (el) => openTool(el.dataset.id),
-  'open-task': (el) => openTask(el.dataset.id),
+  async 'connect-local'(el) {
+    if (S.demo) return toast('Demo data is read-only. Exit demo to connect a tool.', true);
+    el.disabled = true;
+    const label = el.innerHTML;
+    el.textContent = 'Connecting…';
+    try {
+      const r = await api('/api/integrations', { method: 'POST', body: { adapter: el.dataset.id } });
+      closeModal();
+      S.local = null;
+      flash(r.id);
+      await load({ force: true });
+      location.hash = `#tool-${r.id}`;
+      const t = S.data.tools.find((x) => x.id === r.id);
+      toast(r.status === 'ok' ? `${t?.name ?? 'It'} is connected and ready` : `${t?.name ?? 'It'} is in the sidebar. Finish setting it up there.`);
+    } finally {
+      if (el.isConnected) {
+        el.disabled = false;
+        el.innerHTML = label;
+      }
+    }
+  },
+  async 'local-login'(el) {
+    el.disabled = true;
+    const r = await api(`/api/local/${el.dataset.id}/login`, { method: 'POST' });
+    if (r.opened) {
+      toast('A sign-in window opened. Follow it to sign in with your account.');
+      waitForLocal(el.dataset.id, 'signin');
+    } else {
+      el.disabled = false;
+      openPanel('Sign in', `<p class="muted">Run this in a terminal, then come back and choose Check again:</p><div class="secret-box"><code id="cmd-login">${esc(r.command)}</code><button class="btn" data-action="copy" data-target="cmd-login">Copy</button></div><p class="faint small">${esc(r.help ?? '')}</p>`, { center: true });
+    }
+  },
+  async 'local-install'(el) {
+    el.disabled = true;
+    const r = await api(`/api/local/${el.dataset.id}/install`, { method: 'POST' });
+    if (r.opened) {
+      toast('An install window opened. It closes its work when done; you can then sign in.');
+      waitForLocal(el.dataset.id, 'install');
+    } else {
+      el.disabled = false;
+      openPanel('Install', `<p class="muted">Run this in a terminal, then come back and choose Check again:</p><div class="secret-box"><code id="cmd-install">${esc(r.command)}</code><button class="btn" data-action="copy" data-target="cmd-install">Copy</button></div>`, { center: true });
+    }
+  },
+  async 'local-check'(el) {
+    el.disabled = true;
+    el.textContent = 'Checking…';
+    const v = await api(`/api/local/${el.dataset.id}/check`, { method: 'POST' });
+    await load({ force: true });
+    toast(!v.installed ? `${v.name} isn’t installed yet` : v.signed_in ? `${v.name} is signed in` : `${v.name} isn’t signed in yet`, !v.signed_in);
+  },
+  async 'chat-with'(el) {
+    await useEngine(el.dataset.engine);
+    S.chat.thread = null;
+    location.hash = '#assistant';
+  },
+  async 'ask-tool'(el) {
+    await useEngine(el.dataset.engine, { quiet: true });
+    askAssistant(el.dataset.prompt);
+  },
   'task-filter': (el) => {
     S.taskFilter = el.dataset.filter;
     renderPage();
   },
   'toggle-demo': toggleDemo,
-  ask: (el) => askClaude(el.dataset.prompt),
+  'set-theme': (el) => setTheme(el.dataset.theme),
+  ask: (el) => askAssistant(el.dataset.prompt),
   'ask-here': (el) => sendChat(el.dataset.prompt),
+  'open-task': (el) => openTask(el.dataset.id),
   'ask-task'(el) {
     const t = S.data.tasks.find((x) => x.id === Number(el.dataset.id));
     closeModal();
-    if (t) askClaude(taskPrompt(t));
+    if (t) askAssistant(taskPrompt(t));
   },
   'new-chat'() {
     S.chat.thread = null;
@@ -1204,7 +1676,7 @@ const ACTIONS = {
     $('#chat-input')?.focus();
   },
   'delete-chat'(el) {
-    el.closest('.chat-bar').innerHTML = `<span class="muted" style="flex:1;font-size:13px">Delete “${esc(S.chat.thread.title)}”? This can’t be undone.</span>
+    el.closest('.chat-bar').innerHTML = `<span class="muted small grow">Delete “${esc(S.chat.thread.title)}”? This can’t be undone.</span>
       <button class="btn danger" data-action="confirm-delete-chat">Delete</button><button class="btn ghost" data-action="cancel-delete-chat">Cancel</button>`;
   },
   'cancel-delete-chat': () => renderPage(),
@@ -1219,7 +1691,7 @@ const ACTIONS = {
   async 'stop-chat'() {
     if (S.chat.thread) await api(`/api/assistant/threads/${S.chat.thread.id}/stop`, { method: 'POST' });
   },
-  'new-claude-task': () => openNewClaudeTask(),
+  'new-claude-task': () => openNewTask(),
   async 'task-cancel'(el) {
     el.disabled = true;
     await api(`/api/tasks/${el.dataset.id}/cancel`, { method: 'POST' });
@@ -1241,16 +1713,20 @@ const ACTIONS = {
     await showAuth();
   },
   async 'refresh-summary'(el) {
+    const label = el.textContent;
     el.disabled = true;
     el.textContent = 'Generating…';
     try {
-      await api('/api/summary/refresh', { method: 'POST' });
+      const r = await api('/api/summary/refresh', { method: 'POST' });
       await load({ force: true });
-      toast('Summary updated');
+      toast(r.error ? r.error : 'Summary updated', Boolean(r.error));
     } catch (err) {
       toast(err.message, true);
-      el.disabled = false;
-      el.textContent = 'Generate now';
+    } finally {
+      if (el.isConnected) {
+        el.disabled = false;
+        el.textContent = label;
+      }
     }
   },
   async 'remove-summary-key'() {
@@ -1273,28 +1749,30 @@ const ACTIONS = {
     const r = await api(`/api/integrations/${el.dataset.id}/sync`, { method: 'POST' });
     toast(r.ok ? 'Sync finished' : r.error, !r.ok);
     await load({ force: true });
-    openTool(el.dataset.id);
   },
   async 'toggle-tool'(el) {
     await api(`/api/integrations/${el.dataset.id}`, { method: 'PATCH', body: { enabled: el.dataset.enabled === '1' } });
     await load({ force: true });
-    openTool(el.dataset.id);
   },
   'remove-tool'(el) {
-    const t = S.data.tools.find((x) => x.id === Number(el.dataset.id));
-    $('#manage-actions').innerHTML = `<div class="callout err" style="flex-basis:100%">Remove ${esc(t.name)}? Its usage history, tasks and ingest token are deleted. This can’t be undone.</div>
-      <button class="btn danger" data-action="confirm-remove" data-id="${t.id}">Remove ${esc(t.name)}</button><button class="btn ghost" data-action="cancel-remove" data-id="${t.id}">Cancel</button>`;
+    S.confirmRemove = Number(el.dataset.id);
+    renderPage();
   },
-  'cancel-remove': (el) => openTool(el.dataset.id),
+  'cancel-remove'() {
+    S.confirmRemove = null;
+    renderPage();
+  },
   async 'confirm-remove'(el) {
     await api(`/api/integrations/${el.dataset.id}`, { method: 'DELETE' });
-    closeModal();
+    S.confirmRemove = null;
+    S.local = null;
     toast('Tool removed');
+    location.hash = '#tools';
     await load({ force: true });
   },
   async 'rotate-token'(el) {
     const { ingest_token } = await api(`/api/integrations/${el.dataset.id}/ingest-token`, { method: 'POST' });
-    $('#ingest-section').innerHTML = ingestHelp({ id: Number(el.dataset.id) }, ingest_token);
+    $('#ingest-section').innerHTML = `<label class="field-label">Report tasks from your scripts</label>${ingestHelp({ id: Number(el.dataset.id) }, ingest_token)}`;
     toast('New ingest token created. The old one no longer works.');
   },
   async copy(el) {
@@ -1315,19 +1793,32 @@ const ACTIONS = {
 async function onClick(e) {
   const el = e.target.closest('[data-action]');
   if (!el || !ACTIONS[el.dataset.action]) return;
-  if (el.tagName === 'A') e.preventDefault();
+  // Links that also close a dialog keep their navigation.
+  if (el.tagName === 'A' && el.dataset.action !== 'close') e.preventDefault();
   try {
     await ACTIONS[el.dataset.action](el, e);
   } catch (err) {
     toast(err.message, true);
+    if (el.isConnected && el.disabled) el.disabled = false;
   }
 }
 
 async function onChange(e) {
   const el = e.target;
-  if (el.dataset.actionChange === 'toggle-demo') return toggleDemo();
-  if (el.dataset.actionChange === 'pick-thread') {
+  const act = el.dataset.actionChange;
+  if (act === 'toggle-demo') return toggleDemo();
+  if (act === 'pick-thread') {
     if (el.value) openThread(el.value).catch((err) => toast(err.message, true));
+    return;
+  }
+  if (act === 'pick-engine' || act === 'set-engine') {
+    try {
+      await useEngine(el.value);
+      renderPage();
+    } catch (err) {
+      toast(err.message, true);
+      renderPage();
+    }
     return;
   }
   if (el.dataset.setting) {
@@ -1358,7 +1849,8 @@ async function boot() {
   if (!wired) {
     wired = true;
     window.addEventListener('hashchange', () => {
-      S.page = pageFromHash();
+      Object.assign(S, routeFromHash());
+      S.confirmRemove = null;
       closeModal();
       updateChrome();
       renderPage();
@@ -1375,18 +1867,15 @@ async function boot() {
         return;
       }
       if (e.key === 'Escape') closeModal();
-      if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('[role="button"][data-action]')) {
-        e.preventDefault();
-        e.target.click();
-      }
     });
     document.addEventListener('visibilitychange', () => !document.hidden && S.user && load());
+    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => S.data && renderPage());
   }
   let st;
   try {
     st = await api('/api/auth/status');
   } catch (err) {
-    $('#root').innerHTML = `<div class="auth"><div class="card"><div class="callout err">Can’t reach the server: ${esc(err.message)}</div></div></div>`;
+    $('#root').innerHTML = `<div class="auth"><div class="auth-card"><div class="callout err">Can’t reach the server: ${esc(err.message)}</div></div></div>`;
     return;
   }
   if (!st.user) return showAuth();

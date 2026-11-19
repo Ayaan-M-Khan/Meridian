@@ -1,21 +1,41 @@
 import { db, getSettings, getRaw } from './db.js';
 import { adapters } from './adapters/index.js';
 import { estimate, pastDurations, progressHistory } from './eta.js';
+import { listEngines } from './engine-list.js';
 import { lastNDays, nowIso, rowTokens, startOfUtcMonth, sumField, sumNullable, utcDay } from './util.js';
 
 const ACTIVE_WINDOW_MS = 15 * 60_000;
 
 const sumTokens = (rows) => sumNullable(rows.map(rowTokens));
+const parseMeta = (s) => {
+  try {
+    return s ? JSON.parse(s) : null;
+  } catch {
+    return null;
+  }
+};
 
 export function publicSettings() {
   const enc = getRaw('summary_key_enc');
   return { ...getSettings(), summary_key_set: Boolean(enc), summary_key_hint: getRaw('summary_key_hint') ?? null };
 }
 
+/** The assistant engines and which one is in use, as the UI shows them. */
+export function engineState(settings = getSettings()) {
+  const engines = listEngines();
+  const want = settings.assistant_engine ?? 'auto';
+  const current = want === 'auto' ? engines.find((e) => e.ready) ?? null : engines.find((e) => e.id === want && e.ready) ?? null;
+  return { engines, engine: current, engine_choice: want };
+}
+
 /** One task as the UI and the assistant see it, with its finish estimate and the controls this app can offer. */
 export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
   const builtin = adapterOf.get(t.integration_id) === 'claude-assistant';
-  const est = estimate(t, history.get(t.id) ?? [], durations.get(`${t.integration_id}|${t.name}`) ?? [], now.getTime());
+  const session = t.kind === 'session';
+  // An interactive CLI session has no set end, so it never gets a finish estimate.
+  const est = session
+    ? estimate({ ...t, status: 'completed' })
+    : estimate(t, history.get(t.id) ?? [], durations.get(`${t.integration_id}|${t.name}`) ?? [], now.getTime());
   return {
     id: t.id,
     integration_id: t.integration_id,
@@ -34,7 +54,9 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
     error: t.error,
     has_result: Boolean(t.result),
     updated_at: t.updated_at,
-    runner: builtin ? 'claude' : null,
+    kind: session ? 'session' : 'task',
+    runner: builtin ? t.runner ?? 'claude-api' : null,
+    runner_label: builtin ? adapters[t.runner]?.engine?.label ?? 'Claude API' : null,
     controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry'],
   };
 }
@@ -57,8 +79,8 @@ export function buildState(now = new Date()) {
     .all();
   const notifications = db.prepare('SELECT id, kind, severity, title, body, read, created_at FROM notifications ORDER BY id DESC LIMIT 100').all();
 
-  const history = progressHistory(tasks.filter((t) => t.status === 'running').map((t) => t.id));
-  const durations = pastDurations(tasks);
+  const history = progressHistory(tasks.filter((t) => t.status === 'running' && t.kind !== 'session').map((t) => t.id));
+  const durations = pastDurations(tasks.filter((t) => t.kind !== 'session'));
   const adapterOf = new Map(ints.map((i) => [i.id, i.adapter]));
 
   const tools = ints.map((i) => {
@@ -71,6 +93,8 @@ export function buildState(now = new Date()) {
     const lastTask = own[0];
     const lastUsageDay = rows.filter((r) => (rowTokens(r) ?? 0) > 0 || (r.requests ?? 0) > 0).map((r) => r.day).sort().pop() ?? null;
     const costMtd = sumField(mtd, 'cost_usd');
+    const meta = parseMeta(i.meta);
+    const sessionsRunning = own.filter((t) => t.kind === 'session' && t.status === 'running').length;
     return {
       id: i.id,
       name: i.name,
@@ -78,6 +102,13 @@ export function buildState(now = new Date()) {
       adapter_name: a?.name ?? i.adapter,
       vendor: a?.vendor ?? 'Unknown',
       kind: a?.kind ?? 'manual',
+      account: meta?.account ?? null,
+      account_kind: a?.account ?? null,
+      version: meta?.version ?? null,
+      limits: meta?.limits ?? null,
+      engine: a?.engine ? { id: a.id, label: a.engine.label, via: a.engine.via } : null,
+      cli: a?.cli ? { install: a.cli.install.text, install_url: a.cli.install.url, login: a.cli.login.text, login_help: a.cli.login.help } : null,
+      sessions_running: sessionsRunning,
       can_sync: Boolean(a?.sync),
       enabled: Boolean(i.enabled),
       status: !i.enabled ? 'disabled' : a?.sync ? i.status : 'tracked',
@@ -119,8 +150,9 @@ export function buildState(now = new Date()) {
     running: count('running'),
     queued: count('queued'),
     scheduled: count('scheduled'),
-    completed_today: tasks.filter((t) => t.status === 'completed' && isToday(t.finished_at)).length,
+    completed_today: tasks.filter((t) => t.status === 'completed' && t.kind !== 'session' && isToday(t.finished_at)).length,
     failed_today: tasks.filter((t) => t.status === 'failed' && isToday(t.finished_at)).length,
+    sessions_running: tasks.filter((t) => t.kind === 'session' && t.status === 'running' && enabledIds.has(t.integration_id)).length,
     cost_today: sumNullable(enabled.map((t) => t.cost_today)),
     cost_mtd: sumNullable(enabled.map((t) => t.cost_mtd)),
     tokens_today: sumNullable(counted.map((t) => t.tokens_today)),
@@ -171,5 +203,6 @@ export function buildState(now = new Date()) {
     unread: notifications.filter((n) => !n.read).length,
     summary: getRaw('summary_cache') ?? null,
     settings: publicSettings(),
+    ...engineState(settings),
   };
 }

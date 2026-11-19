@@ -1,5 +1,7 @@
 /**
- * The Claude assistant: a chat that can read the dashboard and act on it with the tools in assistant-tools.js.
+ * The assistant: a chat that can read the dashboard and act on it with the tools in assistant-tools.js. It runs
+ * through the Claude API (with the key from Settings) or through a signed-in CLI (Claude Code, Codex, Gemini CLI).
+ * Either way the transcript is stored in Messages API form, so a conversation can move between them.
  * Replies stream to the browser as newline-delimited JSON events:
  *   {type:'text', delta}  {type:'tool', label}  {type:'tool_done', label, ok, error?}  {type:'searching'}
  *   {type:'notice', text}  {type:'error', message}  {type:'done', thread}
@@ -7,13 +9,18 @@
 import { db, getSettings } from './db.js';
 import { ACTION_TOOLS, READ_TOOLS, definition, labelFor, runTool } from './assistant-tools.js';
 import { claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
+import { chooseEngine } from './engine-list.js';
+import { runCliEngine } from './engines.js';
 import { HttpError, nowIso } from './util.js';
 
 const MAX_TURNS = 16;
 const MAX_THREADS = 50;
 const running = new Map(); // thread id -> AbortController
 
-const SYSTEM = `You are Claude, the assistant built into AI Command Center: a dashboard where one person tracks their AI tools (API integrations, subscriptions and their own agents), what those tools are running, scheduled work, spending, budgets and alerts.
+/** Added for CLI engines, which otherwise know they are a coding agent on someone's computer. */
+export const CLI_NOTE = `The only tools you have are this app's functions (from the "acc" server). Don't run commands, read or write files, or browse; this conversation is not about code on this computer.`;
+
+const SYSTEM = `You are the assistant built into AI Command Center: a dashboard where one person tracks their AI tools (API integrations, subscriptions, AI apps signed in with their own accounts, and their own agents), what those tools are running, scheduled work, spending, budgets and alerts.
 
 Help them understand and act on what is happening. Use the tools to look things up rather than guessing, and answer from what they return. A null figure means the tool does not report it: say it is not available, never estimate it or treat it as zero. API spending can lag by several hours. Times from the tools are UTC; say "UTC" when you quote one.
 
@@ -75,7 +82,84 @@ export function threadView(id) {
       }
     }
   }
-  return { id: row.id, title: row.title, updated_at: row.updated_at, items, busy: running.has(row.id) };
+  return { id: row.id, title: row.title, updated_at: row.updated_at, engine: row.engine ?? null, items, busy: running.has(row.id) };
+}
+
+/** The conversation so far as plain text, for engines that take one prompt per reply. */
+function transcriptText(messages, limit = 12_000) {
+  const lines = [];
+  for (const m of messages) {
+    const blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content;
+    const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+    if (m.role === 'user') {
+      if (text) lines.push(`Person: ${text}`);
+      continue;
+    }
+    const acts = blocks.filter((b) => b.type === 'tool_use' || b.type === 'server_tool_use').map((b) => labelFor(b.name, b.input));
+    if (acts.length) lines.push(`(You used: ${acts.join('; ')})`);
+    if (text) lines.push(`You: ${text}`);
+  }
+  let out = lines.join('\n\n');
+  if (out.length > limit) out = `[earlier messages left out]\n…${out.slice(-limit)}`;
+  return out;
+}
+
+/**
+ * Collects a CLI engine's events into Messages API blocks: text and tool_use in an assistant message, the results in
+ * the user message after it. Forwards what the browser needs to `emit`.
+ */
+function cliRecorder(messages, emit, save) {
+  let cur = null;
+  const pending = [];
+  const open = new Set(); // tool calls started but not answered yet
+  const flush = () => {
+    if (!pending.length) return;
+    messages.push({ role: 'user', content: pending.splice(0).map((p) => ({ type: 'tool_result', tool_use_id: p.id, content: p.content, ...(p.error ? { is_error: true } : {}) })) });
+    cur = null;
+  };
+  const assistant = () => {
+    if (!cur) {
+      cur = { role: 'assistant', content: [] };
+      messages.push(cur);
+    }
+    return cur;
+  };
+  return {
+    emit(ev) {
+      if (ev.type === 'text') {
+        flush();
+        const m = assistant();
+        const last = m.content.at(-1);
+        if (last?.type === 'text') last.text += ev.delta;
+        else m.content.push({ type: 'text', text: ev.delta });
+        emit(ev);
+      } else if (ev.type === 'tool') {
+        assistant().content.push({ type: 'tool_use', id: ev.call.id, name: ev.call.name, input: ev.call.input });
+        open.add(ev.call.id);
+        emit({ type: 'tool', label: ev.label });
+      } else if (ev.type === 'tool_done') {
+        open.delete(ev.call.id);
+        pending.push({ id: ev.call.id, content: ev.result.content, error: !ev.ok });
+        emit({ type: 'tool_done', label: ev.label, ok: ev.ok, error: ev.error });
+        save();
+      } else if (ev.type === 'turn') {
+        flush();
+        emit(ev);
+      } else {
+        emit(ev);
+      }
+    },
+    /** Leaves the transcript valid: every tool call answered, ending with an assistant message. */
+    finish(finalText) {
+      for (const id of open) pending.push({ id, content: 'Interrupted.', error: true });
+      open.clear();
+      flush();
+      if (messages.at(-1)?.role === 'user' && Array.isArray(messages.at(-1).content)) {
+        messages.push({ role: 'assistant', content: [{ type: 'text', text: finalText || '(Done.)' }] });
+      }
+      for (const m of messages) if (m.role === 'assistant' && !m.content.length) m.content.push({ type: 'text', text: '…' });
+    },
+  };
 }
 
 export function stopThread(id) {
@@ -83,25 +167,53 @@ export function stopThread(id) {
 }
 
 /** Sends one message and streams the reply. Keeps going after the browser disconnects, so the reply is saved either way. */
-export async function sendMessage(id, text, emit) {
+export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
   const row = threadRow(id);
-  if (running.has(row.id)) throw new HttpError(409, 'Claude is still answering in this conversation.');
-  const client = claudeClient();
+  if (running.has(row.id)) throw new HttpError(409, 'The assistant is still answering in this conversation.');
+  const engine = chooseEngine(engineId);
   const messages = JSON.parse(row.messages);
   const before = messages.length;
+  const history = messages.slice();
   messages.push({ role: 'user', content: text });
   const title = row.title === 'New conversation' ? text.replace(/\s+/g, ' ').trim().slice(0, 70) : row.title;
 
   const tools = [...READ_TOOLS, ...ACTION_TOOLS];
-  const defs = tools.map(definition);
-  if (getSettings().assistant_web_search) defs.push({ type: 'web_search_20260209', name: 'web_search', max_uses: 5 });
   const system = `${SYSTEM}\n\nThe current time is ${nowIso().slice(0, 16)} UTC.`;
 
   const ctrl = new AbortController();
   running.set(row.id, ctrl);
   const save = () =>
-    db.prepare('UPDATE assistant_threads SET title = ?, messages = ?, updated_at = ? WHERE id = ?')
-      .run(messages.length > before ? title : row.title, JSON.stringify(messages), nowIso(), row.id);
+    db.prepare('UPDATE assistant_threads SET title = ?, messages = ?, engine = ?, updated_at = ? WHERE id = ?')
+      .run(messages.length > before ? title : row.title, JSON.stringify(messages), engine.id, nowIso(), row.id);
+
+  if (engine.kind === 'cli') {
+    const rec = cliRecorder(messages, emit, save);
+    try {
+      const prompt = history.length ? `Earlier in this conversation:\n\n${transcriptText(history)}\n\n---\n\nThe person’s new message:\n${text}` : text;
+      const out = await runCliEngine(engine.id, { system: `${system}\n\n${CLI_NOTE}`, prompt, tools, emit: rec.emit, signal: ctrl.signal });
+      rec.finish(out.text);
+      save();
+    } catch (err) {
+      rec.finish(isAbort(err) ? '(Stopped.)' : '(The reply was interrupted.)');
+      const gotReply = messages.length > before + 1;
+      if (!gotReply) messages.pop();
+      save();
+      const unsent = gotReply ? undefined : text;
+      if (isAbort(err)) emit({ type: 'notice', text: 'Stopped.', unsent });
+      else {
+        console.error(`[acc] assistant (${engine.id}):`, err.message);
+        emit({ type: 'error', message: err.message, unsent });
+      }
+    } finally {
+      running.delete(row.id);
+    }
+    emit({ type: 'done', thread: threadView(row.id) });
+    return;
+  }
+
+  const client = claudeClient();
+  const defs = tools.map(definition);
+  if (getSettings().assistant_web_search) defs.push({ type: 'web_search_20260209', name: 'web_search', max_uses: 5 });
 
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {

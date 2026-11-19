@@ -1,7 +1,8 @@
 /**
- * Background tasks that Claude carries out inside the app. Each one is a normal task row under the built-in
- * "Claude assistant" tool, so it shows on the Tasks page with progress, an expected finish and its result.
- * Claude reports its own progress with the report_progress tool; the ETA watcher works from those reports.
+ * Background tasks the assistant carries out inside the app. Each one is a normal task row under the built-in
+ * assistant tool, so it shows on the Tasks page with progress, an expected finish and its result. It runs through
+ * the assistant's current engine (a signed-in CLI or the Claude API), recorded in tasks.runner.
+ * The AI reports its own progress with the report_progress tool; the ETA watcher works from those reports.
  */
 import { db, getSettings } from './db.js';
 import { announce } from './ingest.js';
@@ -9,13 +10,18 @@ import { recordProgress } from './eta.js';
 import { evaluateAlerts } from './alerts.js';
 import { READ_TOOLS, ToolInputError, definition, runTool } from './assistant-tools.js';
 import { assistantIntegration, claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
+import { chooseEngine } from './engine-list.js';
+import { runCliEngine } from './engines.js';
 import { randomToken } from './crypto.js';
 import { HttpError, nowIso } from './util.js';
 
 const MAX_PARALLEL = 2;
 const MAX_TURNS = 24;
+const CLI_TIMEOUT_MS = 30 * 60_000;
 const active = new Map(); // task id -> AbortController
 const queue = [];
+
+const CLI_NOTE = 'The only tools you have are this app’s functions (from the "acc" server). Don’t run commands, read or write files, or browse.';
 
 const SYSTEM = `You are carrying out a background task for the person who uses AI Command Center, a dashboard that tracks their AI tools, spending and tasks. Nobody is watching live, so work through the task to the end without asking questions; if something is ambiguous, make a sensible choice and say what you assumed.
 
@@ -68,17 +74,17 @@ function setStatus(id, status, fields = {}) {
 const CANCELLED = 'Cancelled from AI Command Center.';
 
 /** Creates the task and starts it, or queues it when two are already running. */
-export function startClaudeTask({ name, instructions }) {
-  claudeClient(); // fails early, with a readable message, when no key is set
+export function startClaudeTask({ name, instructions, engine: engineId }) {
+  const engine = chooseEngine(engineId); // fails early, with a readable message, when nothing is ready
   const integ = assistantIntegration();
-  if (!integ.enabled) throw new HttpError(409, 'The Claude assistant tool is turned off on the AI Tools page.');
+  if (!integ.enabled) throw new HttpError(409, 'The built-in assistant tool is turned off on the AI Tools page.');
   const now = nowIso();
   const { lastInsertRowid } = db
     .prepare(
-      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, created_at, updated_at)
-       VALUES(?, ?, ?, ?, 'queued', NULL, ?, ?)`,
+      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, created_at, updated_at)
+       VALUES(?, ?, ?, ?, 'queued', NULL, ?, ?, ?)`,
     )
-    .run(integ.id, `claude-${randomToken(6)}`, name, instructions, now, now);
+    .run(integ.id, `task-${randomToken(6)}`, name, instructions, engine.id, now, now);
   const id = Number(lastInsertRowid);
   announce(integ, id, taskRow(id));
   queue.push(id);
@@ -103,9 +109,32 @@ async function execute(id) {
   }
   recordProgress(id, 0);
   const tools = [...READ_TOOLS, progressTool(id)];
+  const brief = `Task: ${task.name}\n\nInstructions:\n${task.description}`;
+
+  if (task.runner && task.runner !== 'claude-api') {
+    try {
+      const out = await runCliEngine(task.runner, {
+        system: `${SYSTEM}\n\n${CLI_NOTE}\n\nThe current time is ${nowIso().slice(0, 16)} UTC.`,
+        prompt: brief,
+        tools,
+        signal: ctrl.signal,
+        timeoutMs: CLI_TIMEOUT_MS,
+      });
+      const finalText = out.text.trim();
+      if (!finalText) throw new Error('The assistant finished without writing a result.');
+      setStatus(id, 'completed', { progress: 100, step: null, result: finalText.slice(0, 100_000), finished_at: nowIso(), error: null });
+    } catch (err) {
+      setStatus(id, 'failed', { step: null, finished_at: nowIso(), error: isAbort(err) ? CANCELLED : err.message });
+    } finally {
+      active.delete(id);
+      pump();
+    }
+    return;
+  }
+
   const defs = tools.map(definition);
   if (getSettings().assistant_web_search) defs.push({ type: 'web_search_20260209', name: 'web_search', max_uses: 5 });
-  const messages = [{ role: 'user', content: `Task: ${task.name}\n\nInstructions:\n${task.description}` }];
+  const messages = [{ role: 'user', content: brief }];
 
   try {
     const client = claudeClient();
@@ -143,7 +172,7 @@ async function execute(id) {
 function ownTask(id) {
   const t = taskRow(id);
   const integ = assistantIntegration();
-  if (!t || t.integration_id !== integ.id) throw new ToolInputError('Only tasks that Claude runs in this app can be controlled here.');
+  if (!t || t.integration_id !== integ.id) throw new ToolInputError('Only background tasks the assistant runs in this app can be controlled here.');
   return t;
 }
 
@@ -165,7 +194,12 @@ export function cancelClaudeTask(id) {
 export function retryClaudeTask(id) {
   const t = ownTask(id);
   if (t.status === 'running' || t.status === 'queued') throw new ToolInputError(`“${t.name}” is still ${t.status}.`);
-  const next = startClaudeTask({ name: t.name, instructions: t.description ?? '' });
+  let next;
+  try {
+    next = startClaudeTask({ name: t.name, instructions: t.description ?? '' });
+  } catch (err) {
+    throw new ToolInputError(err.message);
+  }
   return { ok: true, task_id: next.id, status: next.status };
 }
 

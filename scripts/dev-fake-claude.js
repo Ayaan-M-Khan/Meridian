@@ -26,6 +26,19 @@ function reply(params) {
 }
 
 setClaudeClientForTests({
+  beta: {
+    messages: {
+      async create() {
+        await sleep(300);
+        return {
+          model: 'claude-opus-5-5',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 600, output_tokens: 80 },
+          content: [{ type: 'text', text: 'This summary came from the development stand-in, not Claude. Your connected tools and tasks are listed below.' }],
+        };
+      },
+    },
+  },
   messages: {
     stream(params, { signal } = {}) {
       const msg = reply(params);

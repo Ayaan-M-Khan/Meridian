@@ -33,6 +33,8 @@ const text = (v, field, max) => {
 function toolBrief(t) {
   return {
     id: t.id, name: t.name, type: t.adapter_name, status: t.status, problem: t.last_error, enabled: t.enabled,
+    signed_in_account: t.kind === 'local' ? t.account ?? null : undefined, plan_limits: t.limits ?? undefined,
+    running_sessions: t.kind === 'local' ? t.sessions_running : undefined,
     spend_this_month_usd: t.cost_mtd, spend_today_usd: t.cost_today, tokens_this_month: t.tokens_mtd, requests_this_month: t.requests_mtd,
     budget_usd: t.budget_usd, budget_used_pct: t.budget_pct == null ? null : Math.round(t.budget_pct),
     running_now: t.current_activity, last_activity_at: t.last_activity_at, provider_data_complete_up_to: t.data_refreshed_at,
@@ -47,7 +49,8 @@ export function taskBrief(t) {
     stalled: t.stalled || undefined, overdue: t.overdue || undefined, longer_than_usual: t.longer_than_usual || undefined,
     typical_duration_min: t.typical_ms == null ? undefined : Math.round(t.typical_ms / 60_000),
     scheduled_for: t.scheduled_for, finished_at: t.finished_at, error: t.error, has_result: t.has_result,
-    run_by_claude: t.runner === 'claude', last_update: t.updated_at,
+    kind: t.kind === 'session' ? 'interactive session (no set end, so no finish estimate)' : undefined,
+    run_by_assistant: t.runner ? t.runner_label : undefined, last_update: t.updated_at,
   };
 }
 
@@ -208,7 +211,7 @@ export const ACTION_TOOLS = [
   },
   {
     name: 'start_claude_task',
-    description: 'Start a background task that Claude carries out on its own, such as drafting a report, writing or rewriting text, analysing the usage data, or planning work. It appears on the Tasks page with live progress and an expected finish time, and its result is saved there. Use it for work that takes more than a quick answer, or when the person asks for a task. Each task uses the Claude API key in Settings and costs tokens.',
+    description: 'Start a background task that the assistant carries out on its own, such as drafting a report, writing or rewriting text, analysing the usage data, or planning work. It appears on the Tasks page with live progress and an expected finish time, and its result is saved there. Use it for work that takes more than a quick answer, or when the person asks for a task. It runs through the same AI as this chat and uses that account or key.',
     input_schema: obj({
       name: { type: 'string', description: 'Short task name, under 80 characters.' },
       instructions: { type: 'string', description: 'Complete, self-contained instructions. The background task cannot see this chat.' },
@@ -221,14 +224,14 @@ export const ACTION_TOOLS = [
   },
   {
     name: 'cancel_claude_task',
-    description: 'Stop a background task Claude is running or has queued. Tasks reported by other tools cannot be stopped from here.',
+    description: 'Stop a background task the assistant is running or has queued. Tasks reported by other tools, and sessions in Claude Code, Codex or Gemini CLI, cannot be stopped from here.',
     input_schema: obj({ task_id: { type: 'integer' } }, ['task_id']),
     label: (i) => `Cancelled task #${i.task_id}`,
     run: (input) => cancelClaudeTask(id(input.task_id, 'task_id')),
   },
   {
     name: 'retry_claude_task',
-    description: 'Run a finished or failed Claude background task again with the same instructions.',
+    description: 'Run a finished or failed background task of the assistant again with the same instructions.',
     input_schema: obj({ task_id: { type: 'integer' } }, ['task_id']),
     label: (i) => `Restarted task #${i.task_id}`,
     run: (input) => retryClaudeTask(id(input.task_id, 'task_id')),

@@ -6,6 +6,7 @@ import { apiRoutes } from './routes.js';
 import { ingestHandler } from './ingest.js';
 import { startScheduler } from './sync.js';
 import { recoverRuns } from './runner.js';
+import { bridgeHandler, setBridgeBase } from './engines.js';
 import { HttpError } from './util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,14 +30,16 @@ function createApp() {
   app.use('/api', express.json({ limit: '256kb' }));
 
   // Browsers can't send a custom header cross-site without CORS preflight, which this server never grants.
+  // Ingest and the MCP bridge authenticate with their own bearer tokens instead of the session cookie.
   app.use('/api', (req, res, next) => {
-    if (req.method === 'GET' || req.path.startsWith('/ingest/')) return next();
+    if (req.method === 'GET' || req.path.startsWith('/ingest/') || req.path.startsWith('/bridge/')) return next();
     if (req.get('x-acc-request') !== '1') return next(new HttpError(403, 'Request blocked: missing app header.'));
     next();
   });
 
   authRoutes(app);
   app.post('/api/ingest/:id', ingestHandler);
+  app.post('/api/bridge/:run', bridgeHandler);
   app.use('/api', requireAuth);
   apiRoutes(app);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
@@ -66,6 +69,7 @@ export function startServer({ host = '127.0.0.1', port = 4317 } = {}) {
     const server = createApp().listen(port, host);
     server.once('error', reject);
     server.once('listening', () => {
+      setBridgeBase(`http://127.0.0.1:${server.address().port}`);
       if (!schedulerStarted) {
         schedulerStarted = true;
         recoverRuns();

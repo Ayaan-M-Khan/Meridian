@@ -22,11 +22,20 @@ export function demoState(now = new Date()) {
     adapter_name: adapters[adapter].name,
     vendor: adapters[adapter].vendor,
     kind: adapters[adapter].kind,
+    account: null,
+    account_kind: adapters[adapter].account ?? null,
+    version: null,
+    limits: null,
+    engine: adapters[adapter].engine ? { id: adapter, label: adapters[adapter].engine.label, via: adapters[adapter].engine.via } : null,
+    cli: adapters[adapter].cli
+      ? { install: adapters[adapter].cli.install.text, install_url: adapters[adapter].cli.install.url, login: adapters[adapter].cli.login.text, login_help: adapters[adapter].cli.login.help }
+      : null,
+    sessions_running: 0,
     can_sync: Boolean(adapters[adapter].sync),
     enabled: true,
     capabilities: adapters[adapter].capabilities,
     notes: adapters[adapter].notes,
-    has_ingest: true,
+    has_ingest: adapters[adapter].kind !== 'local',
     last_error: null, data_refreshed_at: null, secret_hint: null, last_sync_at: null,
     active: false, current_activity: null, last_activity_at: null, last_usage_day: null,
     cost_mtd: null, cost_today: null, tokens_mtd: null, tokens_today: null,
@@ -35,7 +44,24 @@ export function demoState(now = new Date()) {
   });
 
   const claudeMtd = mtd(claudeCost), openaiMtd = mtd(openaiCost), agentMtd = mtd(agentCost);
+  const ccTokens = days.map((_, i) => Math.round(wave(5.2, 2.6, i, 4) * 1_000_000));
+  const cxTokens = days.map((_, i) => (i % 3 === 0 ? null : Math.round(wave(1.4, 0.8, i, 5) * 1_000_000)));
+  const sumMtd = (arr) => arr.reduce((a, v, i) => (days[i] >= monthStart && v != null ? a + v : a), 0);
   const tools = [
+    base(7, 'claude-code', 'Claude Code', {
+      status: 'ok', last_sync_at: ago(1), data_refreshed_at: ago(1), version: '2.1.96',
+      account: { email: 'you@example.com', plan: 'max', method: 'claude.ai', org: null },
+      active: true, current_activity: 'Refactor billing module', last_activity_at: ago(1), last_usage_day: days[29], sessions_running: 1,
+      tokens_mtd: sumMtd(ccTokens), tokens_today: ccTokens[29], input_tokens_mtd: Math.round(sumMtd(ccTokens) * 0.02), output_tokens_mtd: Math.round(sumMtd(ccTokens) * 0.03),
+      requests_mtd: Math.round(sumMtd(ccTokens) / 90_000),
+    }),
+    base(8, 'codex', 'Codex', {
+      status: 'ok', last_sync_at: ago(1), data_refreshed_at: ago(1), version: '0.58.0',
+      account: { email: null, plan: null, method: 'ChatGPT', org: null },
+      limits: { primary: { used_percent: 38, window_minutes: 300, resets_at: ahead(130) }, secondary: { used_percent: 61, window_minutes: 10080, resets_at: ahead(60 * 52) }, plan: 'plus', observed_at: ago(25) },
+      last_activity_at: ago(25), last_usage_day: days[28],
+      tokens_mtd: sumMtd(cxTokens), tokens_today: null, requests_mtd: Math.round(sumMtd(cxTokens) / 60_000),
+    }),
     base(1, 'anthropic', 'Claude API', {
       status: 'ok', secret_hint: 'sk-ant-…8f2c', last_sync_at: ago(12), data_refreshed_at: ago(190),
       active: true, current_activity: 'Summarize support tickets', last_activity_at: ago(2), last_usage_day: days[28],
@@ -68,9 +94,11 @@ export function demoState(now = new Date()) {
     description: null, progress: null, step: null, started_at: null, eta: null,
     eta_at: null, eta_source: null, stalled: false, overdue: false, longer_than_usual: false, typical_ms: null,
     scheduled_for: null, finished_at: null, error: null, has_result: false,
-    updated_at: ago(5), runner: null, controls: [], ...extra,
+    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, controls: [], ...extra,
   });
   const tasks = [
+    T(10, 7, 'Refactor billing module', 'running', { kind: 'session', description: 'in billing-service · claude-opus-5-5 · 3,412,880 tokens', started_at: ago(42), updated_at: ago(1) }),
+    T(11, 8, 'Write migration for invoices table', 'completed', { kind: 'session', description: 'in billing-service · gpt-5-codex · 812,400 tokens', started_at: ago(70), finished_at: ago(25), updated_at: ago(25) }),
     T(1, 3, 'Weekly competitor digest', 'running', { description: 'Collect pricing pages from 14 competitors and summarize changes since last week.', progress: 64, step: 'Comparing pricing pages', started_at: ago(18), eta: ahead(9), eta_at: ahead(9), eta_source: 'reported', updated_at: ago(1) }),
     T(2, 1, 'Summarize support tickets', 'running', { description: 'Group yesterday’s 212 tickets by theme and draft a summary for the support lead.', progress: 30, started_at: ago(6), eta_at: ahead(14), eta_source: 'progress', updated_at: ago(2) }),
     T(3, 2, 'Classify inbound leads', 'running', { description: 'Score new sign-ups by company size and intent.', progress: 45, started_at: ago(50), stalled: true, typical_ms: 30 * 60_000, longer_than_usual: true, updated_at: ago(24) }),
@@ -83,6 +111,8 @@ export function demoState(now = new Date()) {
   ];
 
   const series = [
+    { id: 7, name: 'Claude Code', cost: days.map(() => null), tokens: ccTokens },
+    { id: 8, name: 'Codex', cost: days.map(() => null), tokens: cxTokens },
     { id: 1, name: 'Claude API', cost: claudeCost, tokens: tokensOf(claudeCost, 210_000) },
     { id: 2, name: 'OpenAI API', cost: openaiCost, tokens: tokensOf(openaiCost, 380_000) },
     { id: 3, name: 'Nightly research agent', cost: agentCost, tokens: tokensOf(agentCost, 250_000) },
@@ -112,7 +142,7 @@ export function demoState(now = new Date()) {
     generated_at: now.toISOString(),
     stats: {
       connected: tools.length, active: tools.filter((t) => t.active).length, needs_attention: 1,
-      running: 3, queued: 1, scheduled: 2, completed_today: 2, failed_today: 1,
+      running: 4, queued: 1, scheduled: 2, completed_today: 2, failed_today: 1, sessions_running: 1,
       cost_today: sum('cost_today'), cost_mtd: sum('cost_mtd'), tokens_today: sum('tokens_today'), tokens_mtd: sum('tokens_mtd'),
       requests_mtd: sum('requests_mtd'), tools_reporting_cost: 4, ceiling_usd: 300,
     },
@@ -138,5 +168,13 @@ export function demoState(now = new Date()) {
       text: 'Three tasks are running: the competitor digest is about two-thirds done and should finish in under ten minutes. Two tasks finished today and the partner directory scrape failed after the site rate-limited it. The OpenAI API is at 82% of its monthly budget, and the side-project Claude key was rejected, so that account is not syncing. Today’s Claude spending is not reported yet, which is normal for a few hours.',
     },
     settings: { ...DEFAULT_SETTINGS, monthly_ceiling_usd: 300, summary_key_set: false, summary_key_hint: null },
+    engines: [
+      { id: 'claude-code', label: 'Claude Code', via: 'your Claude account', vendor: 'Anthropic', kind: 'cli', integration_id: 7, ready: true, reason: null },
+      { id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', integration_id: null, ready: false, reason: 'Add a Claude API key in Settings.' },
+      { id: 'codex', label: 'Codex', via: 'your ChatGPT account', vendor: 'OpenAI', kind: 'cli', integration_id: 8, ready: true, reason: null },
+      { id: 'gemini-cli', label: 'Gemini CLI', via: 'your Google account', vendor: 'Google', kind: 'cli', integration_id: null, ready: false, reason: 'Connect Gemini CLI first.' },
+    ],
+    engine: { id: 'claude-code', label: 'Claude Code', via: 'your Claude account', vendor: 'Anthropic', kind: 'cli', integration_id: 7, ready: true, reason: null },
+    engine_choice: 'auto',
   };
 }

@@ -10,8 +10,42 @@ import { parseUsage, upsertUsage } from './ingest.js';
 import { AdapterError, HttpError, nowIso } from './util.js';
 import { startClaudeTask, cancelClaudeTask, retryClaudeTask } from './runner.js';
 import { ToolInputError } from './assistant-tools.js';
-import { claudeClient } from './claude.js';
+import { chooseEngine, listEngines } from './engine-list.js';
+import { LOCAL_ADAPTERS } from './adapters/local.js';
+import { openConsole, forgetResolved } from './local/cli.js';
 import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
+
+const ENGINE_CHOICES = ['auto', 'claude-code', 'codex', 'gemini-cli', 'claude-api'];
+
+function localAdapter(id) {
+  const a = LOCAL_ADAPTERS.find((x) => x.id === id);
+  if (!a) throw new HttpError(404, 'That app isn’t supported.');
+  return a;
+}
+
+const connectedRow = (adapterId) => db.prepare('SELECT * FROM integrations WHERE adapter = ? ORDER BY id LIMIT 1').get(adapterId);
+
+/** What the add-tool screen and the sidebar need to know about an app on this computer. */
+async function localView(a, { fresh = false } = {}) {
+  const st = await a.status({ fresh });
+  const row = connectedRow(a.id);
+  return {
+    id: a.id,
+    name: a.name,
+    vendor: a.vendor,
+    account_kind: a.account,
+    installed: st.installed,
+    signed_in: st.signed_in,
+    version: st.version,
+    account: st.account,
+    detail: st.detail,
+    install: a.cli.install.text,
+    install_url: a.cli.install.url,
+    login: a.cli.login.text,
+    login_help: a.cli.login.help,
+    connected_id: row?.id ?? null,
+  };
+}
 
 function getIntegration(id) {
   const row = db.prepare('SELECT * FROM integrations WHERE id = ?').get(Number(id));
@@ -59,11 +93,50 @@ export function apiRoutes(app) {
   app.get('/api/state', (req, res) => res.json(buildState()));
   app.get('/api/demo', (req, res) => res.json(demoState()));
   app.get('/api/catalog', (req, res) => res.json(catalog()));
+  app.get('/api/engines', (req, res) => res.json(listEngines()));
+
+  // ── Apps on this computer, signed in with your account ──
+  app.get('/api/local', async (req, res) => {
+    const fresh = req.query.fresh === '1';
+    if (fresh) forgetResolved();
+    res.json(await Promise.all(LOCAL_ADAPTERS.map((a) => localView(a, { fresh }))));
+  });
+
+  /** Checks the app again (after signing in or installing) and refreshes its connection. */
+  app.post('/api/local/:adapter/check', async (req, res) => {
+    const a = localAdapter(req.params.adapter);
+    forgetResolved();
+    a.forgetStatus();
+    const view = await localView(a, { fresh: true });
+    if (view.connected_id) {
+      await syncIntegration(view.connected_id);
+      evaluateAlerts();
+    }
+    res.json(view);
+  });
+
+  /** Opens the app's own sign-in in a console window. It signs in with your account in the browser. */
+  app.post('/api/local/:adapter/login', async (req, res) => {
+    const a = localAdapter(req.params.adapter);
+    const cli = a.resolve();
+    if (!cli) throw new HttpError(400, `${a.name} isn’t installed yet. Install it first.`);
+    a.forgetStatus();
+    const opened = openConsole(cli.command, [...cli.prefix, ...a.cli.login.args], { title: `Sign in to ${a.name}` });
+    res.json({ opened, command: a.cli.login.text, help: a.cli.login.help });
+  });
+
+  app.post('/api/local/:adapter/install', async (req, res) => {
+    const a = localAdapter(req.params.adapter);
+    const { command, args, text } = a.cli.install;
+    const opened = openConsole(command, args, { title: `Installing ${a.name}` });
+    res.json({ opened, command: text });
+  });
 
   app.post('/api/integrations', async (req, res) => {
     const { adapter: adapterId, name, secret, budget_usd } = req.body ?? {};
     const adapter = adapters[adapterId];
-    if (!adapter) throw new HttpError(400, 'Choose a tool from the list.');
+    if (!adapter || adapter.kind === 'builtin') throw new HttpError(400, 'Choose a tool from the list.');
+    if (adapter.kind === 'local' && connectedRow(adapter.id)) throw new HttpError(409, `${adapter.name} is already connected. It’s in the sidebar.`);
     const clean = { name: cleanName(name ?? adapter.name), budget: cleanBudget(budget_usd) };
     let key = null;
     let test = null;
@@ -79,12 +152,14 @@ export function apiRoutes(app) {
       if (key) setSecret(newId, key);
       return newId;
     });
-    const ingestToken = issueIngestToken(id);
+    // Local apps report on their own; they don't take task reports from scripts, so they get no ingest token.
+    const ingestToken = adapter.kind === 'local' ? null : issueIngestToken(id);
     addEvent(id, 'connection', `${clean.name} was added`);
-    if (adapter.sync) await syncIntegration(id);
+    let sync = null;
+    if (adapter.sync) sync = await syncIntegration(id);
     evaluateAlerts();
     refreshSummary().catch((err) => console.error('[acc] summary:', err));
-    res.status(201).json({ id, ingest_token: ingestToken, test });
+    res.status(201).json({ id, ingest_token: ingestToken, test, status: sync?.status ?? null });
   });
 
   app.patch('/api/integrations/:id', async (req, res) => {
@@ -162,6 +237,10 @@ export function apiRoutes(app) {
       s.spike_multiplier = n;
     }
     if ('assistant_web_search' in body) s.assistant_web_search = Boolean(body.assistant_web_search);
+    if ('assistant_engine' in body) {
+      if (!ENGINE_CHOICES.includes(body.assistant_engine)) throw new HttpError(400, 'Choose one of the listed assistants.');
+      s.assistant_engine = body.assistant_engine;
+    }
     if (body.notify && typeof body.notify === 'object') {
       for (const k of Object.keys(s.notify)) if (k in body.notify) s.notify[k] = Boolean(body.notify[k]);
     }
@@ -195,7 +274,7 @@ export function apiRoutes(app) {
     if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) throw new HttpError(400, 'Give the task a name of 1–80 characters.');
     if (typeof instructions !== 'string' || !instructions.trim() || instructions.length > 2000) throw new HttpError(400, 'Write the instructions, up to 2,000 characters.');
     const t = startClaudeTask({ name: name.trim(), instructions: instructions.trim() });
-    res.status(201).json({ id: t.id, status: t.status });
+    res.status(201).json({ id: t.id, status: t.status, runner: t.runner });
   });
 
   const control = (fn) => (req, res) => {
@@ -226,14 +305,16 @@ export function apiRoutes(app) {
     if (typeof text !== 'string' || !text.trim()) throw new HttpError(400, 'Type a message first.');
     if (text.length > 8000) throw new HttpError(400, 'Keep messages under 8,000 characters.');
     threadView(req.params.id); // 404 before streaming starts
-    claudeClient(); // readable error before streaming starts when no key is set
+    const engine = req.body?.engine;
+    if (engine != null && !ENGINE_CHOICES.includes(engine)) throw new HttpError(400, 'Choose one of the listed assistants.');
+    chooseEngine(engine ?? undefined); // a readable error before streaming starts when nothing is ready
     res.status(200).set({ 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
     res.flushHeaders();
     const emit = (ev) => {
       if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(ev)}\n`);
     };
     try {
-      await sendMessage(req.params.id, text.trim(), emit);
+      await sendMessage(req.params.id, text.trim(), emit, { engine: engine ?? undefined });
     } catch (err) {
       emit({ type: 'error', message: err instanceof HttpError ? err.message : 'Something went wrong on the server.', unsent: text });
       if (!(err instanceof HttpError)) console.error('[acc] assistant:', err);

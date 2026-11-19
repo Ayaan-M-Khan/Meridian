@@ -1,6 +1,8 @@
 import { getRaw, setRaw, getSettings } from './db.js';
 import { buildState } from './state.js';
-import { claudeClient, claudeErrorMessage, claudeKey, recordUsage, MODEL, CLAUDE_KEY_AAD as SUMMARY_KEY_AAD } from './claude.js';
+import { claudeClient, claudeErrorMessage, recordUsage, MODEL, CLAUDE_KEY_AAD as SUMMARY_KEY_AAD } from './claude.js';
+import { currentEngine } from './engine-list.js';
+import { runCliEngine } from './engines.js';
 import { nowIso } from './util.js';
 
 /** The facts a summary may mention. Nulls mean "not available", and the summary must say so rather than guess. */
@@ -58,7 +60,17 @@ const SYSTEM = `You write the daily status summary at the top of a dashboard tha
 Write 3 to 5 plain sentences, no lists, no headings, no greeting. Cover what is running, what finished or failed today, what is scheduled next, and any connection problems, budgets near their limit, or spending worth knowing about.
 Use only the facts in the JSON. A null value means the data is not available: say so briefly when it matters, and never estimate it. Spending figures may lag by up to a day for API providers; mention this only if spending is the main point.`;
 
-async function aiSummary(facts) {
+async function aiSummary(facts, engine) {
+  if (engine.kind === 'cli') {
+    const out = await runCliEngine(engine.id, {
+      system: `${SYSTEM}\nReply with the summary text only.`,
+      prompt: `Current state:\n${JSON.stringify(facts)}`,
+      timeoutMs: 3 * 60_000,
+    });
+    const text = out.text.trim();
+    if (!text) throw new Error(`${engine.label} returned an empty summary.`);
+    return text;
+  }
   const res = await claudeClient().beta.messages.create({
     model: MODEL,
     max_tokens: 4000,
@@ -75,35 +87,53 @@ async function aiSummary(facts) {
   return text;
 }
 
-export const summaryKey = claudeKey;
+let refreshing = null;
 
-export async function refreshSummary() {
-  const facts = buildFacts(buildState());
-  const key = summaryKey();
-  let result;
-  if (key && facts.tools.length) {
-    try {
-      result = { text: await aiSummary(facts), source: 'ai', generated_at: nowIso() };
-    } catch (err) {
-      result = { text: ruleSummary(facts), source: 'rules', generated_at: nowIso(), error: `AI summary unavailable: ${claudeErrorMessage(err)}` };
+/** Rebuilds the summary: written by the assistant's AI when one is ready, otherwise from fixed rules. */
+export function refreshSummary() {
+  refreshing ??= (async () => {
+    const facts = buildFacts(buildState());
+    const engine = currentEngine();
+    let result;
+    if (engine && facts.tools.length) {
+      setRaw('summary_ai_attempt', { at: nowIso(), engine: engine.id });
+      try {
+        result = { text: await aiSummary(facts, engine), source: 'ai', by: engine.label, generated_at: nowIso() };
+      } catch (err) {
+        result = { text: ruleSummary(facts), source: 'rules', generated_at: nowIso(), error: `AI summary unavailable: ${claudeErrorMessage(err)}` };
+      }
+    } else {
+      result = { text: ruleSummary(facts), source: 'rules', generated_at: nowIso() };
     }
-  } else {
-    result = { text: ruleSummary(facts), source: 'rules', generated_at: nowIso() };
-  }
-  setRaw('summary_cache', result);
-  return result;
+    setRaw('summary_cache', result);
+    return result;
+  })().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
 }
 
 export function getSummary() {
   return getRaw('summary_cache') ?? null;
 }
 
-/** The rule-based summary is free, so it is rebuilt every tick; AI summaries follow the configured interval. */
+/**
+ * Runs every minute. An AI summary is written once per interval, or when the assistant's AI changes. A failed attempt
+ * also waits for the interval, so a broken sign-in or key doesn't retry every minute. In between, the free
+ * rule-based summary is kept current unless the latest summary came from the AI.
+ */
 export async function maybeRefreshSummary() {
   const cached = getSummary();
-  const hours = getSettings().summary_interval_hours;
-  const stale = !cached || Date.now() - Date.parse(cached.generated_at) >= hours * 3_600_000;
-  if (!summaryKey() || cached?.source !== 'ai' || stale) await refreshSummary();
+  const intervalMs = getSettings().summary_interval_hours * 3_600_000;
+  const engine = currentEngine();
+  const last = getRaw('summary_ai_attempt');
+  if (engine && (!last || last.engine !== engine.id || Date.now() - Date.parse(last.at) >= intervalMs)) {
+    await refreshSummary();
+    return;
+  }
+  if (cached?.source === 'ai' && engine) return;
+  const text = ruleSummary(buildFacts(buildState()));
+  setRaw('summary_cache', { text, source: 'rules', generated_at: nowIso(), ...(engine && cached?.error ? { error: cached.error } : {}) });
 }
 
 export { SUMMARY_KEY_AAD };

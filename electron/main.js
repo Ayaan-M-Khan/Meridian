@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, shell } from 'electron';
+import { app, BrowserWindow, Menu, dialog, nativeTheme, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,7 +39,7 @@ if (!app.requestSingleInstanceLock()) {
       minHeight: 560,
       title: 'AI Command Center',
       icon: ICON,
-      backgroundColor: '#0b0b0e',
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#090a0f' : '#f4f5fa', // matches the page, so there's no flash
       show: false,
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
     });

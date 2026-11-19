@@ -18,6 +18,9 @@ let testClient = null;
 /** Tests replace the client with a scripted fake, so no request leaves the machine. */
 export const setClaudeClientForTests = (c) => { testClient = c; };
 
+/** True when the Claude API engine can be used: a key is saved (or a test client is installed). */
+export const hasClaudeApi = () => Boolean(testClient) || Boolean(getRaw('summary_key_enc'));
+
 export function claudeClient() {
   if (testClient) return testClient;
   const key = claudeKey();

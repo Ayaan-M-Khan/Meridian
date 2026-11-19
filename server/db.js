@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS integrations (
   created_at TEXT NOT NULL
 );
 
--- One row per integration, UTC day, model and source. source: api | manual | webhook.
+-- One row per integration, UTC day, model and source. source: api | local | manual | webhook | app.
 -- NULL means "not reported", which the UI shows as unavailable rather than zero.
 CREATE TABLE IF NOT EXISTS usage_daily (
   integration_id INTEGER NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
@@ -121,10 +121,18 @@ CREATE INDEX IF NOT EXISTS idx_progress_task ON task_progress(task_id, at);
 `);
 
 // Columns added after the first release.
-const taskCols = new Set(db.prepare('PRAGMA table_info(tasks)').all().map((c) => c.name));
-for (const [col, type] of [['step', 'TEXT'], ['result', 'TEXT']]) {
-  if (!taskCols.has(col)) db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${type}`);
+//   tasks.kind     'session' for a CLI session read from its logs; NULL for reported tasks
+//   tasks.runner   which AI ran a background task (claude-code, codex, gemini-cli, claude-api)
+//   integrations.meta  JSON: signed-in account, CLI version and plan limits for local tools
+//   assistant_threads.engine  which AI answered the conversation last
+function addColumns(table, cols) {
+  const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [col, type] of cols) if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 }
+addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT']]);
+addColumns('integrations', [['meta', 'TEXT']]);
+addColumns('assistant_threads', [['engine', 'TEXT']]);
+db.prepare("UPDATE integrations SET name = 'Assistant (built in)' WHERE adapter = 'claude-assistant' AND name = 'Claude assistant'").run();
 
 export function tx(fn) {
   db.exec('BEGIN');
@@ -145,6 +153,7 @@ export const DEFAULT_SETTINGS = {
   summary_interval_hours: 6,
   spike_multiplier: 2,
   assistant_web_search: false,
+  assistant_engine: 'auto',
   notify: {
     task_failed: true,
     task_completed: false,
