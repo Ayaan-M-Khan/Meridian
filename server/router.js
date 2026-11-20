@@ -13,7 +13,7 @@
  *
  * STRENGTHS are starting points from what each AI is generally best at. Reliability learns from your own runs.
  */
-import { db } from './db.js';
+import { db, getSettings } from './db.js';
 import { listEngines } from './engine-list.js';
 import { nowIso, utcDay } from './util.js';
 
@@ -168,9 +168,11 @@ export function rankEngines(text, { needsTools = false, needsFiles = false, excl
     const strength = mix.reduce((a, [k, w]) => a + (st[k] ?? 3) * w, 0) / mix.reduce((a, [, w]) => a + w, 0);
     const notes = [];
     let score = strength;
+    let blocked = false;
     for (const f of [headroom(e.id, metas), reliability(e.id, rel)]) {
       score *= f.factor;
       if (f.note) notes.push(f.note);
+      if (f.factor <= 0.2) blocked = true; // at its limit, or its last run just failed
     }
     if (e.kind === 'api') {
       score *= 0.85;
@@ -183,10 +185,25 @@ export function rankEngines(text, { needsTools = false, needsFiles = false, excl
     score *= 1 - 0.06 * ((today.get(e.id) ?? 0) / maxToday); // spread: a little less for the busiest today
     const strong = mix.map(([k]) => k).filter((k) => (st[k] ?? 0) >= 5);
     const reasons = strong.length ? [`one of the strongest for ${strong.map((k) => STRONGEST[k]).join(' and ')}`] : [`good at ${STRONGEST[mix[0][0]]}`];
-    return { engine: e, score: Math.round(score * 100) / 100, reasons, notes };
+    return { engine: e, score: Math.round(score * 100) / 100, reasons, notes, blocked };
   });
   ranking.sort((a, b) => b.score - a.score);
-  return { ...c, ranking };
+
+  // Your preferred AI for this kind of task goes first, unless it's at its limit or just failed.
+  let pref = null;
+  if (mix.length === 1) {
+    const want = getSettings().route_prefs?.[mix[0][0]];
+    if (want && want !== 'auto') {
+      const i = ranking.findIndex((x) => x.engine.id === want);
+      if (i < 0) pref = { id: want, label: listEngines().find((e) => e.id === want)?.label ?? want, skipped: 'it isn’t ready' };
+      else if (ranking[i].blocked) pref = { id: want, label: ranking[i].engine.label, skipped: ranking[i].notes[0] };
+      else {
+        const [p] = ranking.splice(i, 1);
+        ranking.unshift({ ...p, preferred: true, reasons: [`your choice for ${STRONGEST[mix[0][0]]}`] });
+      }
+    }
+  }
+  return { ...c, ranking, pref };
 }
 
 /** The best AI for a request, with a one-line reason, or null when none is ready. */
@@ -195,8 +212,9 @@ export function routeTask(text, opts = {}) {
   const top = r.ranking[0];
   if (!top) return null;
   // Name only the AIs that would have won on strength alone, so the reason says what changed the choice.
-  const skipped = r.ranking.slice(1).filter((x) => x.notes.length && (STRENGTHS[x.engine.id]?.[r.category] ?? 0) > (STRENGTHS[top.engine.id]?.[r.category] ?? 0));
-  const why = `${r.label}: ${top.engine.label} is ${top.reasons[0]}${top.notes.length ? ` (${top.notes.join('; ')})` : ''}.`
+  const skipped = top.preferred ? [] : r.ranking.slice(1).filter((x) => x.notes.length && (STRENGTHS[x.engine.id]?.[r.category] ?? 0) > (STRENGTHS[top.engine.id]?.[r.category] ?? 0));
+  const why = `${r.label}: ${top.engine.label}${top.preferred ? `, ${top.reasons[0]}` : ` is ${top.reasons[0]}`}${top.notes.length && !top.preferred ? ` (${top.notes.join('; ')})` : ''}.`
+    + (r.pref ? ` Your choice, ${r.pref.label}, was skipped for now: ${r.pref.skipped}.` : '')
     + (skipped.length ? ` Skipped ${skipped.map((x) => `${x.engine.label}: ${x.notes[0]}`).join('; ')}.` : '');
   return { engine: top.engine, category: r.category, label: r.label, why, ranking: r.ranking.map((x) => ({ id: x.engine.id, label: x.engine.label, score: x.score, notes: x.notes })) };
 }

@@ -1217,6 +1217,18 @@ const VIEWS = {
           <label class="switch summary-switch"><span><span class="switch-label">Write the daily summary with AI</span><span class="faint small">One short request to the AI above every ${esc(st.summary_interval_hours)} hours. Off: the summary is built from your data by fixed rules, with no AI use.</span></span><input type="checkbox" data-summary-mode ${st.summary_mode !== 'rules' ? 'checked' : ''} ${dis}></label>
         </section>
 
+        <section class="card span-2"><div class="card-head">${ICON.pulse}<h3>Smart routing</h3></div>
+          <p class="muted small">On Automatic, each request goes to the AI best suited to its kind of task, using your plans before any API key and passing over AIs at their limit or failing. Pick an AI here to always use it for that kind of task; Automatic still steps in if it’s at its limit or its last run failed.</p>
+          <div class="role-grid">${Object.entries(d.task_kinds ?? {}).map(([kind, label]) => {
+            const cur = st.route_prefs?.[kind] ?? 'auto';
+            return `<label class="role-opt"><span class="min0"><b>${esc(label)}</b></span>
+              <select class="input" data-route-pref="${kind}" ${dis} aria-label="Preferred AI for ${esc(label)}">
+                <option value="auto" ${cur === 'auto' ? 'selected' : ''}>Automatic</option>
+                ${d.engines.map((e) => `<option value="${e.id}" ${cur === e.id ? 'selected' : ''} ${e.ready || cur === e.id ? '' : 'disabled'}>${esc(e.label)}${e.ready ? '' : ` · ${esc(e.reason)}`}</option>`).join('')}
+              </select></label>`;
+          }).join('')}</div>
+        </section>
+
         <section class="card span-2"><div class="card-head">${ICON.team}<h3>AI team</h3></div>
           <p class="muted small">For AI team tasks, your connected AIs split the work by role. Automatic gives each role to the best-suited AI that’s ready: Codex plans and reviews, Claude Code builds and fixes, and Gemini CLI debugs, with the others filling in. The reviewer is a different AI from the builder whenever one is available.</p>
           <div class="role-grid">${TEAM_ORDER.map(([role]) => {
@@ -2326,6 +2338,17 @@ async function onChange(e) {
     } catch (err) {
       el.checked = !el.checked;
       toast(err.message, true);
+    }
+    return;
+  }
+  if (el.dataset.routePref) {
+    try {
+      await api('/api/settings', { method: 'PUT', body: { route_prefs: { [el.dataset.routePref]: el.value } } });
+      toast(el.value === 'auto' ? 'Automatic picks the AI for this kind of task' : `${el.selectedOptions[0].textContent.split(' · ')[0]} is now your choice for this kind of task`);
+      await load({ force: true });
+    } catch (err) {
+      toast(err.message, true);
+      renderPage();
     }
     return;
   }

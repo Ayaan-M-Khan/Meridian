@@ -173,6 +173,8 @@ export const DEFAULT_SETTINGS = {
   team_roles: { planner: 'auto', builder: 'auto', reviewer: 'auto', debugger: 'auto' },
   // The model each AI app uses for runs the app starts, by connection id ('claude-code': 'sonnet'). Empty: its default.
   engine_models: {},
+  // Smart routing: your preferred AI per kind of task ('planning': 'codex'). Missing or 'auto': routing decides.
+  route_prefs: {},
   // Desktop app only: keep running in the tray when the window closes, start at sign-in, show Windows notifications.
   desktop: { keep_running: false, open_at_login: false, notifications: true },
   notify: {
@@ -213,6 +215,7 @@ export function getSettings() {
     team_roles: { ...DEFAULT_SETTINGS.team_roles, ...(saved.team_roles ?? {}) },
     desktop: { ...DEFAULT_SETTINGS.desktop, ...(saved.desktop ?? {}) },
     engine_models: { ...(saved.engine_models ?? {}) },
+    route_prefs: { ...(saved.route_prefs ?? {}) },
   };
 }
 

@@ -231,6 +231,7 @@ export function demoState(now = new Date()) {
     },
     settings: { ...DEFAULT_SETTINGS, monthly_ceiling_usd: 300, summary_key_set: false, summary_key_hint: null },
     desktop_app: Boolean(globalThis.accDesktop),
+    task_kinds: { code: 'Coding', debug: 'Debugging', writing: 'Writing', research: 'Research', analysis: 'Analysis', planning: 'Planning', quick: 'Quick question', general: 'General' },
     engines: [
       { id: 'claude-code', label: 'Claude Code', via: 'your Claude account', vendor: 'Anthropic', kind: 'cli', integration_id: 7, ready: true, reason: null },
       { id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', integration_id: null, ready: false, reason: 'Add a Claude API key in Settings.' },

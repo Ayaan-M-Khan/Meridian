@@ -16,7 +16,7 @@ import { openConsole, forgetResolved } from './local/cli.js';
 import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
 import { ROLES, lineupView, startTeamTask } from './team.js';
 import { makeBackup, restoreBackup } from './backup.js';
-import { classify, routeTask } from './router.js';
+import { CATEGORIES, classify, routeTask } from './router.js';
 import { buildStats } from './stats.js';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -264,6 +264,13 @@ export function apiRoutes(app) {
         if (m && !/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,79}$/.test(m)) throw new HttpError(400, 'A model name has only letters, numbers, dots, dashes, slashes and colons.');
         if (m) s.engine_models[id] = m;
         else delete s.engine_models[id];
+      }
+    }
+    if (body.route_prefs && typeof body.route_prefs === 'object') {
+      for (const [kind, v] of Object.entries(body.route_prefs)) {
+        if (!CATEGORIES[kind] || !ENGINE_CHOICES.includes(v)) throw new HttpError(400, 'Choose one of the listed AIs for each kind of task.');
+        if (v === 'auto') delete s.route_prefs[kind];
+        else s.route_prefs[kind] = v;
       }
     }
     if ('summary_mode' in body) {

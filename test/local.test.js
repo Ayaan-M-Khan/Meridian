@@ -513,3 +513,28 @@ test('statistics come from real usage, runs and routing decisions', async () => 
   assert.ok(s.cache.some((x) => x.adapter === 'claude-code' && x.cache_pct > 0 && x.cache_pct <= 100));
   assert.equal(s.daily.length, 30);
 });
+
+test('a preferred AI for a kind of task goes first, unless it’s at its limit', async () => {
+  const { routeTask, forgetReliability } = await import('../server/router.js');
+  const { setRaw, getSettings } = await import('../server/db.js');
+  setClaudeClientForTests(fakeApi([]));
+  const now = new Date().toISOString();
+  try {
+    forgetReliability();
+    setRaw('settings', { ...getSettings(), route_prefs: { writing: 'claude-api' } });
+    const r = routeTask('Write a blog post about our launch');
+    assert.equal(r.engine.id, 'claude-api', 'your choice beats the default');
+    assert.match(r.why, /your choice for writing/);
+
+    const codexId = Number(db.prepare("INSERT INTO integrations(adapter, name, status, meta, created_at) VALUES('codex', 'Codex', 'ok', ?, ?)")
+      .run(JSON.stringify({ limits: { primary: { used_percent: 99, window_minutes: 300 }, observed_at: now } }), now).lastInsertRowid);
+    setRaw('settings', { ...getSettings(), route_prefs: { planning: 'codex' } });
+    const p = routeTask('Plan the roadmap for the launch');
+    assert.notEqual(p.engine.id, 'codex');
+    assert.match(p.why, /Your choice, Codex, was skipped for now: 99% of its plan limit used/);
+    db.prepare('DELETE FROM integrations WHERE id = ?').run(codexId);
+  } finally {
+    setRaw('settings', { ...getSettings(), route_prefs: {} });
+    setClaudeClientForTests(null);
+  }
+});
