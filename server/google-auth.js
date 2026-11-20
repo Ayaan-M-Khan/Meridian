@@ -124,7 +124,7 @@ export async function verifyIdToken(idToken, { clientId, nonce, now = Date.now()
 /** Google sends the browser here. Completes the flow; the waiting app window picks up the result. */
 export async function finishGoogleFlow({ state, code, error }) {
   const f = flows.get(String(state ?? ''));
-  if (!f || f.status !== 'pending' || Date.now() - f.created > FLOW_TTL_MS) return { ok: false, message: 'This sign-in link has expired or was already used. Start again from AI Command Center.' };
+  if (!f || f.status !== 'pending' || Date.now() - f.created > FLOW_TTL_MS) return { ok: false, message: 'This sign-in link has expired or was already used. Start again from Meridian.' };
   const fail = (message) => {
     Object.assign(f, { status: 'error', error: message });
     return { ok: false, message };
@@ -147,12 +147,12 @@ export async function finishGoogleFlow({ state, code, error }) {
       if (taken) return fail('That Google account is already linked to another account here.');
       db.prepare('UPDATE users SET google_sub = ?, google_email = ? WHERE id = ?').run(who.sub, who.email, f.userId);
       Object.assign(f, { status: 'done', email: who.email });
-      return { ok: true, message: `Linked ${who.email ?? 'your Google account'}. You can close this tab and return to AI Command Center.` };
+      return { ok: true, message: `Linked ${who.email ?? 'your Google account'}. You can close this tab and return to Meridian.` };
     }
     const user = db.prepare('SELECT id FROM users WHERE google_sub = ?').get(who.sub);
-    if (!user) return fail(`${who.email ?? 'That Google account'} isn’t linked to AI Command Center. Sign in with your password, then link it in Sign-in & security.`);
+    if (!user) return fail(`${who.email ?? 'That Google account'} isn’t linked to Meridian. Sign in with your password, then link it in Sign-in & security.`);
     Object.assign(f, { status: 'done', userId: user.id, email: who.email });
-    return { ok: true, message: 'You’re signed in. You can close this tab and return to AI Command Center.' };
+    return { ok: true, message: 'You’re signed in. You can close this tab and return to Meridian.' };
   } catch (err) {
     return fail(err.name === 'TimeoutError' ? 'Google didn’t answer in time. Try again.' : err.message);
   }
@@ -177,7 +177,7 @@ export function cancelGoogleFlow(key) {
 /** The page the browser shows when Google sends it back. No scripts, nothing to keep. */
 export function callbackPage({ ok, message }) {
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${ok ? 'Signed in' : 'Sign-in didn’t finish'} · AI Command Center</title>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${ok ? 'Signed in' : 'Sign-in didn’t finish'} · Meridian</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f5f8;color:#14161f;font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:420px;margin:24px;padding:32px;border:1px solid #dcdfe8;border-radius:12px;background:#fff;box-shadow:0 8px 30px rgba(20,22,31,.08)}
 h1{font-size:19px;margin:0 0 8px}p{margin:0;color:#4a5068}.mark{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;margin-bottom:16px;color:#fff;font-weight:700;background:${ok ? '#1f7a4d' : '#b3261e'}}

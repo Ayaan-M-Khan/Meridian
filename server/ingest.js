@@ -124,7 +124,7 @@ export function ingestHandler(req, res) {
   const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
   if (!integration?.ingest_hash || !token || !safeEqual(sha256(token), integration.ingest_hash))
     throw new HttpError(401, 'Ingest token is missing or wrong.');
-  if (!integration.enabled) throw new HttpError(409, 'This tool is turned off in AI Command Center.');
+  if (!integration.enabled) throw new HttpError(409, 'This tool is turned off in Meridian.');
 
   const body = req.body ?? {};
   const tasks = Array.isArray(body.tasks) ? body.tasks : body.task ? [body.task] : [];

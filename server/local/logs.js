@@ -77,7 +77,7 @@ function addRow(rows, day, model, u) {
   rows.set(key, r);
 }
 
-/** Runs started by AI Command Center itself (any copy of it), which aren't your sessions. */
+/** Runs started by Meridian itself (any copy of it), which aren't your sessions. */
 const appRun = (cwd) => typeof cwd === 'string' && /[\\/](assistant-workspace|bridge[\\/]run-[^\\/]+)[\\/]?$/i.test(cwd);
 
 const under = (child, parent) => {

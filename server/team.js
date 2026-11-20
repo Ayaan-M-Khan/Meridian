@@ -145,7 +145,7 @@ function setStatus(id, status, fields = {}) {
 
 export const teamRunningCount = () => active.size + queue.length;
 
-const CANCELLED = 'Cancelled from AI Command Center.';
+const CANCELLED = 'Cancelled from Meridian.';
 
 const MAX_COMPARE = 6;
 
@@ -223,7 +223,7 @@ function pump() {
 
 // ── Prompts ────────────────────────────────────────────────────────────────
 const TEAM = (role, folder) =>
-  `You are the ${role} in an AI team working for one person through AI Command Center. Several AIs share the work: a planner, a builder, a reviewer and a debugger, each from a different provider where possible. Do only your own part, and write for the next team member in plain text with simple Markdown. Nobody is watching live, so don't ask questions: make sensible assumptions and say what you assumed.${folder ? `\n\nYou are working in the person’s folder ${folder}. ${role === 'Builder' ? 'You may read, create and change files in it. Don’t run shell commands.' : 'You may read files in it but must not change anything.'}` : '\n\nThere is no folder to work in: everything happens in your reply.'}`;
+  `You are the ${role} in an AI team working for one person through Meridian. Several AIs share the work: a planner, a builder, a reviewer and a debugger, each from a different provider where possible. Do only your own part, and write for the next team member in plain text with simple Markdown. Nobody is watching live, so don't ask questions: make sensible assumptions and say what you assumed.${folder ? `\n\nYou are working in the person’s folder ${folder}. ${role === 'Builder' ? 'You may read, create and change files in it. Don’t run shell commands.' : 'You may read files in it but must not change anything.'}` : '\n\nThere is no folder to work in: everything happens in your reply.'}`;
 
 const ROLE_TASK = {
   plan: (f) => `Write a short, concrete plan the builder can follow to reach the goal: numbered steps, what the finished result must include, and how to check it is right.${f ? ' Look at the relevant files first and name the files to create or change.' : ''} Don’t do the work yourself.`,
@@ -357,7 +357,7 @@ async function execute(id) {
   }
 }
 
-const ANSWER_SYSTEM = `You are one of several AIs answering the same request for one person through AI Command Center. Each answers on its own, then one of you combines the answers. Give your best complete answer in plain text with simple Markdown. Nobody is watching live, so don't ask questions: make sensible assumptions and say what you assumed. There is no folder to work in: everything happens in your reply.`;
+const ANSWER_SYSTEM = `You are one of several AIs answering the same request for one person through Meridian. Each answers on its own, then one of you combines the answers. Give your best complete answer in plain text with simple Markdown. Nobody is watching live, so don't ask questions: make sensible assumptions and say what you assumed. There is no folder to work in: everything happens in your reply.`;
 const MERGE_SYSTEM = `Several AIs answered the same request for one person, each on its own. Combine their answers into the single best answer: keep what is correct and useful from each, drop what is wrong or repeated, and where they disagree on something that matters, say which view you took and why in a sentence. Reply with the combined answer itself, ready to use, in plain text with simple Markdown. Don't describe the process beyond that.`;
 
 /** "Ask all": every answer runs at the same time, then the builder combines them. */

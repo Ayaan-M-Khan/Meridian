@@ -1,14 +1,41 @@
-# AI Command Center
+<p align="center">
+  <img src="public/icon-512.png" width="112" height="112" alt="Meridian">
+</p>
+
+<h1 align="center">Meridian</h1>
+
+<p align="center"><b>Your AI command center.</b><br>Every AI tool you use, its usage and limits, the work it's doing, and a map of how it all connects, in one private desktop app.</p>
+
+<p align="center">
+  <a href="../../releases/latest">Download for Windows</a> ·
+  <a href="#the-map">The map</a> ·
+  <a href="#sign-in--security">Sign-in &amp; security</a> ·
+  <a href="#privacy--data">Privacy &amp; data</a>
+</p>
+
+---
 
 One dashboard for your AI tools: what's running, what's next, what you've spent, and what needs attention. It shows only data a tool actually reports. Anything a provider doesn't expose is marked as unavailable, never filled in.
 
+**Highlights**
+
+- **Your accounts, no API keys:** connect Claude Code, Codex, Gemini, GitHub Copilot and Cursor with the accounts you already use.
+- **Smart routing and teams:** each request goes to the AI best suited to it. An **AI team** splits work into plan, build, review and fix, and **Ask all** compares every AI's answer.
+- **Automations:** prompts that run on a schedule. Background tasks show live progress and an estimated finish.
+- **The map:** your command center in the middle, your AI tools around it, and the routes your work takes.
+- **A workbench that feels like a code editor:** tabs, an explorer, a status bar, a command palette (Ctrl+P) and a chat side panel (Ctrl+L).
+- **Private by design:** everything stays on your computer, with no tracking. You get two-step verification, Sign in with Google, retention controls and one-click export or erase.
+- **Updates itself:** it checks for new versions and installs them in place, keeping your data.
+
+> Meridian was called **AI Command Center** up to version 1.1. Updating moves your data folder to the new name automatically, and you stay signed in.
+
 ## Desktop app (Windows)
 
-Download `AI-Command-Center-Setup-<version>.exe` from the Releases page, or build it yourself (below), and run it. It installs AI Command Center with a Start Menu entry and a desktop shortcut. Open it like any other app. On first launch, choose a username and password.
+Download `Meridian-Setup-<version>.exe` from the Releases page, or build it yourself (below), and run it. It installs Meridian with a Start Menu entry and a desktop shortcut. Open it like any other app. On first launch, choose a username and password.
 
 The app isn't code-signed yet, so Windows SmartScreen may warn you the first time. Choose **More info → Run anyway**.
 
-The desktop app keeps its data in `%APPDATA%\AI Command Center\data`. It syncs, raises alerts, runs tasks and accepts task reports only while it's running. Its local server listens on port 4317, or a free port if 4317 is taken.
+The desktop app keeps its data in `%APPDATA%\Meridian\data`. It syncs, raises alerts, runs tasks and accepts task reports only while it's running. Its local server listens on port 4317, or a free port if 4317 is taken.
 
 - **Closing the window** quits the app, unless tasks are running: then it asks whether to keep them going in the background. **Settings → Desktop app** can keep it running in the system tray every time, and start it in the tray when you sign in to Windows.
 - **Windows notifications** show new alerts while the app isn't in front, including "AI team finished" and "Task failed" for tasks you started. Click one to open it.
@@ -67,7 +94,7 @@ The sign-in page asks for your username and password, or offers **Continue with 
   - The authenticator secret is encrypted on this computer.
 - **Sign in with Google.** Google needs to know which app is asking, so you register the app once in your own Google Cloud account (free):
   1. Open [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials) and pick or create a project.
-  2. If asked, set up the consent screen: app name "AI Command Center", audience **External**, your email as the contact. Add the Google account you'll use under **Audience → Test users**.
+  2. If asked, set up the consent screen: app name "Meridian", audience **External**, your email as the contact. Add the Google account you'll use under **Audience → Test users**.
   3. **Create credentials → OAuth client ID**, type **Desktop app**.
   4. Paste the client ID and secret into **Sign-in & security**, then **Link a Google account**.
 - **How Google sign-in works:**
@@ -86,7 +113,7 @@ The sign-in page asks for your username and password, or offers **Continue with 
 
 ## Privacy & data
 
-AI Command Center keeps everything in one folder on your computer. There's no analytics, tracking or advertising, and nothing goes to the makers of this app. **Privacy & data** in the sidebar shows:
+Meridian keeps everything in one folder on your computer. There's no analytics, tracking or advertising, and nothing goes to the makers of this app. **Privacy & data** in the sidebar shows:
 
 - **What's kept here:** counts of everything stored, the folder, and the database size. Only counts are shown, never the content.
 - **Where data goes:**

@@ -31,11 +31,11 @@ function post(body) {
         } catch {
           json = null;
         }
-        if (res.statusCode !== 200 || !json) reject(new Error(json?.error || `AI Command Center returned HTTP ${res.statusCode}`));
+        if (res.statusCode !== 200 || !json) reject(new Error(json?.error || `Meridian returned HTTP ${res.statusCode}`));
         else resolve(json);
       });
     });
-    req.on('error', (err) => reject(new Error(`Can’t reach AI Command Center: ${err.message}`)));
+    req.on('error', (err) => reject(new Error(`Can’t reach Meridian: ${err.message}`)));
     req.end(data);
   });
 }
@@ -54,8 +54,8 @@ async function handle(msg) {
         return reply(id, {
           protocolVersion: typeof params?.protocolVersion === 'string' ? params.protocolVersion : '2025-06-18',
           capabilities: { tools: {} },
-          serverInfo: { name: 'ai-command-center', version: '1.0.0' },
-          instructions: 'Functions of AI Command Center, the dashboard the person uses to track their AI tools.',
+          serverInfo: { name: 'meridian', version: '1.0.0' },
+          instructions: 'Functions of Meridian, the dashboard the person uses to track their AI tools.',
         });
       case 'ping':
         return reply(id, {});

@@ -145,5 +145,5 @@ test('backups leave out every secret, and restoring brings tools, tasks and conv
   assert.equal(db.prepare('SELECT budget_usd FROM integrations WHERE id = ?').get(agent).budget_usd, 12);
   assert.equal(db.prepare("SELECT result FROM tasks WHERE external_id = 'b1'").get().result, 'Crawled 40 pages');
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM assistant_threads WHERE title = 'Budget chat'").get().n, 1);
-  assert.throws(() => restoreBackup({ format: 'something-else' }), /isn’t an AI Command Center backup/);
+  assert.throws(() => restoreBackup({ format: 'something-else' }), /isn’t an Meridian backup/);
 });

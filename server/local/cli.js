@@ -208,7 +208,7 @@ const quoteWin = (s) => (/[\s"&|<>^()]/.test(s) ? `"${s.replace(/"/g, '""')}"` :
  * Opens a console window running a command, for sign-in and install steps that need the person to interact.
  * Windows only. The window stays open afterwards so any message can be read. Returns false elsewhere.
  */
-export function openConsole(command, args, { title = 'AI Command Center', cwd = os.homedir() } = {}) {
+export function openConsole(command, args, { title = 'Meridian', cwd = os.homedir() } = {}) {
   if (!IS_WIN) return false;
   const line = [command, ...args].map(quoteWin).join(' ');
   const script = `title ${title.replace(/[&|<>^"]/g, '')} & ${line} & echo. & echo You can close this window now.`;

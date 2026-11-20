@@ -34,7 +34,7 @@ export const DATA_FLOWS = [
   },
   {
     to: 'GitHub',
-    what: 'A request for the latest release of AI Command Center. Nothing about you or your data.',
+    what: 'A request for the latest release of Meridian. Nothing about you or your data.',
     when: 'Every few hours in the desktop app, or when you press Check now. You can turn it off.',
     terms: 'While the releases are private, it goes through your GitHub CLI sign-in.',
   },

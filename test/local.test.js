@@ -612,15 +612,15 @@ test('updates: versions compare by number, a newer release is offered once, and 
   const body = (tag, assets) => ({ tag_name: tag, html_url: `https://github.com/Ayaan-M-Khan/ai-command-center/releases/tag/${tag}`, body: '## New\n- Things', assets });
   const publicRelease = (tag, assets) => async (url, opts) => {
     assert.match(url, /^https:\/\/api\.github\.com\/repos\/Ayaan-M-Khan\/ai-command-center\/releases\/latest$/);
-    assert.equal(opts.headers['user-agent'], 'AI-Command-Center-updater', 'a generic client name, nothing about the person');
+    assert.equal(opts.headers['user-agent'], 'Meridian-updater', 'a generic client name, nothing about the person');
     return new Response(JSON.stringify(body(tag, assets)), { status: 200 });
   };
   const notFound = async () => new Response('{}', { status: 404 });
   const noGh = async () => null;
   const installer = Buffer.from('pretend installer');
   const sha = crypto.createHash('sha256').update(installer).digest('hex');
-  const good = { name: 'AI-Command-Center-Setup-9.0.0.exe', browser_download_url: `${DOWNLOAD_PREFIX}v9.0.0/AI-Command-Center-Setup-9.0.0.exe`, size: installer.length, digest: `sha256:${sha}` };
-  const foreign = { name: 'AI-Command-Center-Setup-9.0.0.exe', browser_download_url: 'https://example.com/AI-Command-Center-Setup-9.0.0.exe', size: 1 };
+  const good = { name: 'Meridian-Setup-9.0.0.exe', browser_download_url: `${DOWNLOAD_PREFIX}v9.0.0/Meridian-Setup-9.0.0.exe`, size: installer.length, digest: `sha256:${sha}` };
+  const foreign = { name: 'Meridian-Setup-9.0.0.exe', browser_download_url: 'https://example.com/Meridian-Setup-9.0.0.exe', size: 1 };
   const alerts = () => db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'update'").get().n;
   try {
     await checkForUpdate({ force: true, current: '0.8.0', fetchImpl: publicRelease('v9.0.0', [foreign]), gh: noGh });
@@ -650,7 +650,7 @@ test('updates: versions compare by number, a newer release is offered once, and 
     const file = await downloadInstaller(asset, { dir, fetchImpl: async () => new Response(installer) });
     assert.equal(fs.readFileSync(file, 'utf8'), 'pretend installer');
     await assert.rejects(downloadInstaller(asset, { dir, fetchImpl: async () => new Response('tampered!!!!!!!!!') }), /didn’t match the release/);
-    await assert.rejects(downloadInstaller({ ...asset, url: 'https://example.com/x.exe' }, { dir }), /isn’t from AI Command Center’s releases/);
+    await assert.rejects(downloadInstaller({ ...asset, url: 'https://example.com/x.exe' }, { dir }), /isn’t from Meridian’s releases/);
     const viaGh = await downloadInstaller({ ...asset, via: 'gh' }, { dir, gh: async (args) => {
       assert.deepEqual(args.slice(0, 5), ['release', 'download', 'v9.0.0', '--repo', 'Ayaan-M-Khan/ai-command-center']);
       fs.writeFileSync(path.join(args[args.indexOf('--dir') + 1], good.name), installer);

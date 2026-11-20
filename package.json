@@ -1,9 +1,9 @@
 {
   "name": "ai-command-center",
-  "productName": "AI Command Center",
-  "version": "1.1.0",
-  "description": "One dashboard for your AI tools: what's running, what's next, what you've spent, and what needs attention.",
-  "author": "AI Command Center",
+  "productName": "Meridian",
+  "version": "1.2.0",
+  "description": "Meridian: your AI command center. Usage, limits, tasks and a map of every AI tool you use, in one private desktop app.",
+  "author": "Meridian",
   "private": true,
   "type": "module",
   "main": "electron/main.js",
@@ -32,7 +32,7 @@
   },
   "build": {
     "appId": "com.aicommandcenter.desktop",
-    "productName": "AI Command Center",
+    "productName": "Meridian",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -55,8 +55,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AI Command Center",
-      "artifactName": "AI-Command-Center-Setup-${version}.exe"
+      "shortcutName": "Meridian",
+      "artifactName": "Meridian-Setup-${version}.exe"
     },
     "mac": {
       "target": "dmg",

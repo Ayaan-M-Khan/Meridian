@@ -1304,3 +1304,9 @@ a.wb-si:hover, button.wb-si:hover { background: var(--surface-2); color: var(--t
 .wb-tree.nav { min-height: 0; }
 .wb-tree a.wb-item { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 12px 0 22px; border-radius: 0; font-size: 13px; font-weight: 400; color: var(--text-2); }
 .wb-tree a.wb-item:hover { background: var(--surface-2); color: var(--text); }
+/* Meridian's mark: the north marker turns white where the mark sits on a colored background. */
+.map-hub-icon, .wb-logo, .si-mark { --brand-dot: #3d8bfd; }
+.map-hub-icon { --brand-dot: #ffffff; }
+.wb-logo svg { width: 17px; height: 17px; }
+.si-mark svg { width: 22px; height: 22px; }
+.si-name { letter-spacing: 0.32em; font-size: 12px; color: rgba(233, 236, 246, 0.85); }

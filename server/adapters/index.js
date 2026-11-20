@@ -42,7 +42,7 @@ function tracked(id, name, vendor, notes, capabilities = manual) {
 export const CLAUDE_ASSISTANT = {
   id: 'claude-assistant',
   name: 'Assistant (built in)',
-  vendor: 'AI Command Center',
+  vendor: 'Meridian',
   kind: 'builtin',
   description: 'The assistant working inside this app: the chat, background tasks and the AI summary.',
   credential: null,

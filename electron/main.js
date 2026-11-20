@@ -3,11 +3,47 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { moveAppFolder } from './migrate.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICON = path.join(root, 'public', 'icon-512.png');
 
+// The app ID stays the same through the rename to Meridian, so installs update in place and keep their taskbar pin.
 app.setAppUserModelId('com.aicommandcenter.desktop');
+
+/**
+ * Up to 1.1 the app was called "AI Command Center", and Electron names the data folder after the app. Move the old
+ * folder (your account, data, sign-in and window settings) to the new name the first time Meridian starts. If it
+ * can't be moved, keep using it where it is, so nothing is ever left behind.
+ */
+function moveDataFromOldName() {
+  const legacy = path.join(app.getPath('appData'), 'AI Command Center');
+  const current = app.getPath('userData');
+  // Only the installed app, using its normal folder: never a copy started with its own folder (--user-data-dir)
+  // or its own data folder (ACC_DATA_DIR), and never when running from source.
+  if (!app.isPackaged || process.env.ACC_DATA_DIR || process.argv.some((a) => a.startsWith('--user-data-dir'))) return;
+  if (path.resolve(current) !== path.resolve(path.join(app.getPath('appData'), app.getName()))) return;
+  if (moveAppFolder(legacy, current) === 'keep-legacy') app.setPath('userData', legacy);
+}
+moveDataFromOldName();
+
+/** Shortcuts named "AI Command Center" that now point at a program that no longer exists are removed. */
+function removeDeadOldShortcuts() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const links = [
+    path.join(app.getPath('desktop'), 'AI Command Center.lnk'),
+    path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'AI Command Center.lnk'),
+  ];
+  for (const lnk of links) {
+    try {
+      if (!fs.existsSync(lnk)) continue;
+      const { target } = shell.readShortcutLink(lnk);
+      if (target && !fs.existsSync(target)) fs.unlinkSync(lnk);
+    } catch {
+      /* leave anything we can't read alone */
+    }
+  }
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -33,9 +69,9 @@ if (!app.requestSingleInstanceLock()) {
   function updateTrayMenu() {
     if (!tray) return;
     const busy = busyCount();
-    tray.setToolTip(busy ? `AI Command Center · ${busy} task${busy === 1 ? '' : 's'} running` : 'AI Command Center');
+    tray.setToolTip(busy ? `Meridian · ${busy} task${busy === 1 ? '' : 's'} running` : 'Meridian');
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Open AI Command Center', click: () => showWindow() },
+      { label: 'Open Meridian', click: () => showWindow() },
       { label: busy ? `${busy} task${busy === 1 ? '' : 's'} running` : 'Nothing running', enabled: false },
       { label: 'Tasks', click: () => showWindow('#tasks') },
       { type: 'separator' },
@@ -62,7 +98,7 @@ if (!app.requestSingleInstanceLock()) {
     ensureTray();
     win.hide();
     if (firstTime && Notification.isSupported()) {
-      new Notification({ title: 'AI Command Center is still running', body: 'Tasks, syncs and alerts keep going. Open it again from the icon in the system tray.', icon: ICON, silent: true }).show();
+      new Notification({ title: 'Meridian is still running', body: 'Tasks, syncs and alerts keep going. Open it again from the icon in the system tray.', icon: ICON, silent: true }).show();
     }
   }
 
@@ -91,7 +127,7 @@ if (!app.requestSingleInstanceLock()) {
       height: 860,
       minWidth: 380,
       minHeight: 560,
-      title: 'AI Command Center',
+      title: 'Meridian',
       icon: ICON,
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#090a0f' : '#f4f5fa', // matches the page, so there's no flash
       show: false,
@@ -117,7 +153,7 @@ if (!app.requestSingleInstanceLock()) {
       if (!busy) return;
       const choice = dialog.showMessageBoxSync(win, {
         type: 'question',
-        title: 'AI Command Center',
+        title: 'Meridian',
         message: `${busy} task${busy === 1 ? ' is' : 's are'} still running`,
         detail: 'If you quit, they stop. In the background they keep going, and the app stays in the system tray until you quit it there.',
         buttons: ['Keep running in the background', 'Quit anyway', 'Cancel'],
@@ -190,8 +226,11 @@ if (!app.requestSingleInstanceLock()) {
     await win.loadURL(server.setupCode ? `${origin}/?setup=${encodeURIComponent(server.setupCode)}` : origin);
   }
 
-  app.whenReady().then(boot).catch((err) => {
-    dialog.showErrorBox('AI Command Center could not start', String(err?.stack ?? err));
+  app.whenReady().then(() => {
+    removeDeadOldShortcuts();
+    return boot();
+  }).catch((err) => {
+    dialog.showErrorBox('Meridian could not start', String(err?.stack ?? err));
     app.quit();
   });
 

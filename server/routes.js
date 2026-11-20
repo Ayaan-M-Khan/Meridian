@@ -357,7 +357,7 @@ export function apiRoutes(app) {
   // ── Backups ──
   app.get('/api/backup', (req, res) => {
     const b = makeBackup(APP_VERSION);
-    res.setHeader('Content-Disposition', `attachment; filename="ai-command-center-backup-${b.exported_at.slice(0, 10)}.json"`);
+    res.setHeader('Content-Disposition', `attachment; filename="meridian-backup-${b.exported_at.slice(0, 10)}.json"`);
     res.json(b);
   });
   app.post('/api/restore', (req, res) => {

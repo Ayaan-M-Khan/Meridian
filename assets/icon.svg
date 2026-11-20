@@ -1,16 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Meridian: a globe outline with a single meridian, and a marker at its north point. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#9d9dff"/>
-      <stop offset="1" stop-color="#4f4fe0"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232327"/>
+      <stop offset="1" stop-color="#0c0c0e"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
   </defs>
-  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bg)"/>
-  <circle cx="246" cy="266" r="170" fill="url(#glow)"/>
-  <path d="M246 104 C258 196 316 254 408 266 C316 278 258 336 246 428 C234 336 176 278 84 266 C176 254 234 196 246 104 Z" fill="#ffffff"/>
-  <path d="M388 88 C392 120 408 136 440 140 C408 144 392 160 388 192 C384 160 368 144 336 140 C368 136 384 120 388 88 Z" fill="#ffffff" fill-opacity="0.85"/>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
+  <rect x="16.75" y="16.75" width="478.5" height="478.5" rx="107.25" fill="url(#sheen)" stroke="#ffffff" stroke-opacity="0.09" stroke-width="1.5"/>
+  <g fill="none" stroke="#f2f2f4" stroke-width="22" stroke-linecap="round">
+    <circle cx="256" cy="268" r="148"/>
+    <ellipse cx="256" cy="268" rx="58" ry="148"/>
+  </g>
+  <circle cx="256" cy="120" r="30" fill="#3d8bfd" stroke="#0e0e10" stroke-width="10"/>
 </svg>

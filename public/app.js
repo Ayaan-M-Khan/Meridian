@@ -62,6 +62,8 @@ const ICON = {
   pulse: svg('<path d="M1.5 8.5h3l1.8-4.5 3.2 8 1.8-3.5h3.2"/>'),
   repeat: svg('<path d="M2.8 7A5.2 5.2 0 0 1 12.4 4.4M13.2 9a5.2 5.2 0 0 1-9.6 2.6"/><path d="M12.8 1.8v2.9H9.9M3.2 14.2v-2.9h2.9"/>'),
   search: svg('<circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4l3.6 3.6"/>'),
+  // Meridian's mark: a globe with one meridian, and a marker at its north point.
+  brand: svg('<circle cx="8" cy="8.7" r="5.5"/><ellipse cx="8" cy="8.7" rx="2.15" ry="5.5"/><circle cx="8" cy="3.2" r="1.55" style="fill: var(--brand-dot, #3d8bfd); stroke: none"/>', 'fill="none" stroke="currentColor" stroke-width="1.35"'),
   shield: svg('<path d="M8 1.6l5.2 2v4.1c0 3.2-2.2 5.6-5.2 6.7-3-1.1-5.2-3.5-5.2-6.7V3.6z"/><path d="M5.8 8l1.6 1.6 2.9-3"/>'),
   map: svg('<path d="M1.8 3.6l4-1.6 4.4 1.8 4-1.6v10.2l-4 1.6-4.4-1.8-4 1.6z"/><path d="M5.8 2v10.2M10.2 3.8V14"/>'),
   pause: svg('<path d="M5.5 3.5v9M10.5 3.5v9"/>', 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"'),
@@ -105,7 +107,7 @@ const CAP_LONG = {
 const NOTIFY_LABELS = {
   my_task_done: ['Your tasks', 'When an assistant or AI team task you started finishes or fails'],
   security: ['Sign-in and security', 'New sign-ins, password changes and two-step verification changes'],
-  update: ['App updates', 'When a new version of AI Command Center is available'],
+  update: ['App updates', 'When a new version of Meridian is available'],
   task_failed: ['Failed tasks', 'When a reported task fails'],
   task_completed: ['Completed tasks', 'When a reported task finishes'],
   task_stalled: ['Stalled tasks', 'When a task that reports progress stops updating'],
@@ -116,7 +118,7 @@ const NOTIFY_LABELS = {
   connection: ['Connection failures', 'When a tool can’t sync'],
   spike: ['Unusual spending', 'When a day costs far more than the previous week’s average'],
 };
-const HUE = { Anthropic: 'clay', OpenAI: 'mint', Google: 'blue', GitHub: 'slate', Anysphere: 'slate', 'Perplexity AI': 'teal', 'Your own': 'violet', 'AI Command Center': 'brand' };
+const HUE = { Anthropic: 'clay', OpenAI: 'mint', Google: 'blue', GitHub: 'slate', Anysphere: 'slate', 'Perplexity AI': 'teal', 'Your own': 'violet', 'Meridian': 'brand' };
 const KIND_LABEL = { local: 'Your account, no API key', api: 'API key', manual: 'Tracked manually', builtin: 'Built in' };
 
 const S = {
@@ -253,7 +255,7 @@ function renderAuth() {
     main = `<form class="si-form" data-form="setup" autocomplete="on">
       <div class="si-step">First run</div>
       <h1>Create your account</h1>
-      <p class="si-lead">This is the only account for AI Command Center on this computer. You’ll use it to sign in each time.</p>
+      <p class="si-lead">This is the only account for Meridian on this computer. You’ll use it to sign in each time.</p>
       <div class="si-field"><label for="f-user">Username</label><input class="si-input" id="f-user" name="username" autocomplete="username" required autocapitalize="off" spellcheck="false" maxlength="64"></div>
       ${passField('f-pass', 'Password', 'new-password', 'minlength="12" aria-describedby="pw-rules"')}
       <div class="si-meter" aria-hidden="true"><i id="pw-bar"></i></div>
@@ -269,7 +271,7 @@ function renderAuth() {
     main = `<form class="si-form" data-form="verify" autocomplete="off">
       <div class="si-step">Two-step verification</div>
       <h1>Enter your code</h1>
-      <p class="si-lead">Open your authenticator app and enter the 6-digit code for AI Command Center.</p>
+      <p class="si-lead">Open your authenticator app and enter the 6-digit code for Meridian.</p>
       <div class="si-field"><label for="f-code2">Verification code</label><input class="si-input si-code" id="f-code2" name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="12" spellcheck="false" placeholder="123 456"></div>
       <button class="si-btn primary" type="submit">Verify and sign in</button>
       ${errorBox}
@@ -289,7 +291,7 @@ function renderAuth() {
   } else {
     main = `<form class="si-form" data-form="login" autocomplete="on">
       <h1>Sign in</h1>
-      <p class="si-lead">Use your AI Command Center account on this computer.</p>
+      <p class="si-lead">Use your Meridian account on this computer.</p>
       <div class="si-field"><label for="f-user">Username</label><input class="si-input" id="f-user" name="username" autocomplete="username" required autocapitalize="off" spellcheck="false" maxlength="64"></div>
       ${passField('f-pass', 'Password', 'current-password')}
       <div class="si-caps" id="caps" hidden>Caps Lock is on</div>
@@ -302,9 +304,9 @@ function renderAuth() {
   }
   $('#root').innerHTML = `<div class="si">
     <div class="si-shell">
-      <aside class="si-brand" aria-label="About AI Command Center">
-        <div class="si-mark">${ICON.spark}</div>
-        <div class="si-name">AI Command Center</div>
+      <aside class="si-brand" aria-label="About Meridian">
+        <div class="si-mark">${ICON.brand}</div>
+        <div class="si-name">Meridian</div>
         <h2 class="si-tag">Your AI tools, usage and work, in one secure place.</h2>
         <ul class="si-points">
           <li>${ICON.shield}<span><b>Stays on this computer.</b> Your data leaves it only when you use an AI, under your own account.</span></li>
@@ -375,7 +377,7 @@ function renderShell() {
   <button class="skip-link" data-action="skip">Skip to content</button>
   <div class="wb">
     <nav class="wb-activity" aria-label="Main">
-      <a class="wb-logo" href="#dashboard" title="AI Command Center" aria-label="AI Command Center overview">${ICON.spark}</a>
+      <a class="wb-logo" href="#dashboard" title="Meridian" aria-label="Meridian overview">${ICON.brand}</a>
       ${['dashboard', 'map', 'assistant', 'tasks', 'automations', 'usage', 'stats', 'notifications'].map(act).join('')}
       <div class="wb-grow"></div>
       ${['tools', 'security', 'privacy', 'settings'].map(act).join('')}
@@ -397,7 +399,7 @@ function renderShell() {
     <div class="wb-main main">
       <div class="wb-tabs" id="wb-tabs" role="tablist" aria-label="Open pages"></div>
       <header class="wb-bar topbar">
-        <nav class="wb-crumbs topbar-title" aria-label="You are here"><span class="wb-crumb-root">AI Command Center</span><span class="wb-crumb-sep" aria-hidden="true">›</span><h1 id="page-title"></h1></nav>
+        <nav class="wb-crumbs topbar-title" aria-label="You are here"><span class="wb-crumb-root">Meridian</span><span class="wb-crumb-sep" aria-hidden="true">›</span><h1 id="page-title"></h1></nav>
         <button class="wb-search" data-action="open-palette" aria-label="Search or run a command">${ICON.search}<span>Search or run a command</span><kbd>Ctrl P</kbd></button>
         <button class="btn icon-btn ghost" data-action="toggle-dock" aria-pressed="false" aria-label="Chat panel" title="Chat panel (Ctrl+L)">${ICON.chat}</button>
         <a class="btn icon-btn ghost" href="#notifications" aria-label="Alerts" title="Alerts">${ICON.bell}<span class="dot-badge" id="bell-count" hidden></span></a>
@@ -553,7 +555,7 @@ function updateChrome() {
     else a.removeAttribute('aria-current');
   });
   $('#page-title').textContent = currentTitle();
-  document.title = `${currentTitle()} · AI Command Center`;
+  document.title = `${currentTitle()} · Meridian`;
   $('#demo-banner').hidden = !S.demo;
   $('#updated').textContent = S.loadError ? 'Couldn’t refresh' : d ? `Updated ${rel(d.generated_at)}` : '';
   const counts = d ? { tools: d.stats.needs_attention, tasks: d.stats.running, notifications: d.unread } : {};
@@ -1464,7 +1466,7 @@ const VIEWS = {
           <span class="auto-ico sm">${ICON[t.mode === 'team' ? 'team' : t.mode === 'compare' ? 'chat' : 'repeat']}</span>
           <span class="min0"><b>${esc(t.name)}</b><span class="faint small block">${esc(scheduleText(t.schedule))} · ${esc(MODE_LABEL[t.mode])}</span></span></button>`).join('')}</div>
       </section>` : ''}
-      <p class="fine">Times are this computer’s local time. Automations run while AI Command Center is open or in the tray. A run that was due while the app was closed is skipped rather than run late.</p>`;
+      <p class="fine">Times are this computer’s local time. Automations run while Meridian is open or in the tray. A run that was due while the app was closed is skipped rather than run late.</p>`;
   },
 
   notifications() {
@@ -1489,7 +1491,7 @@ const VIEWS = {
   security() {
     const d = S.data;
     const x = S.sec;
-    const head = `<div class="page-head"><div><h2>Sign-in &amp; security</h2><p>How you sign in to AI Command Center, and who is signed in.</p></div></div>`;
+    const head = `<div class="page-head"><div><h2>Sign-in &amp; security</h2><p>How you sign in to Meridian, and who is signed in.</p></div></div>`;
     if (d.demo) return `${head}<div class="callout warn">Exit the demo to change how you sign in.</div>`;
     if (!x) return `${head}<section class="card"><div class="empty">Loading…</div></section>`;
     const pwField = (id, name, label, auto, extra = '') => `<div class="field"><label for="${id}">${label}</label><div class="si-pass"><input class="input" id="${id}" name="${name}" type="password" autocomplete="${auto}" required maxlength="200" ${extra}><button type="button" class="si-eye" data-action="toggle-pass" data-target="${id}" aria-label="Show password" aria-pressed="false">${EYE}</button></div></div>`;
@@ -1511,7 +1513,7 @@ const VIEWS = {
     if (S.secCodes) {
       twoStep = `<div class="callout warn"><b>Save these recovery codes now.</b> Each signs you in once if you lose your phone. They won’t be shown again.</div>
         <ol class="sec-codes" id="sec-codes">${S.secCodes.map((c) => `<li><code>${esc(c)}</code></li>`).join('')}</ol>
-        <pre id="sec-codes-raw" hidden>${esc(`AI Command Center recovery codes for ${x.username}\nEach works once.\n\n${S.secCodes.join('\n')}`)}</pre>
+        <pre id="sec-codes-raw" hidden>${esc(`Meridian recovery codes for ${x.username}\nEach works once.\n\n${S.secCodes.join('\n')}`)}</pre>
         <div class="form-actions"><button class="btn" data-action="copy" data-target="sec-codes-raw">Copy</button><button class="btn" data-action="save-codes">${ICON.download}Save as file</button><button class="btn primary" data-action="codes-done">I’ve saved them</button></div>`;
     } else if (x.two_factor) {
       twoStep = `<p class="muted small">Signing in with your password also needs a code from your authenticator app. ${plural(x.recovery_left ?? 0, 'recovery code')} left.</p>
@@ -1542,10 +1544,10 @@ const VIEWS = {
     const g = x.google;
     let google;
     if (!g.configured) {
-      google = `<p class="muted small">Sign in with your Google account instead of your password. Google needs to know which app is asking, so you register AI Command Center in your own Google Cloud account first. It’s free and takes a few minutes:</p>
+      google = `<p class="muted small">Sign in with your Google account instead of your password. Google needs to know which app is asking, so you register Meridian in your own Google Cloud account first. It’s free and takes a few minutes:</p>
         <ol class="sec-steps">
           <li>Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console → APIs &amp; Services → Credentials</a> and pick or create a project.</li>
-          <li>If asked, set up the consent screen (Google Auth Platform): app name “AI Command Center”, audience <b>External</b>, your email as the contact. Under <b>Audience → Test users</b>, add the Google account you’ll sign in with.</li>
+          <li>If asked, set up the consent screen (Google Auth Platform): app name “Meridian”, audience <b>External</b>, your email as the contact. Under <b>Audience → Test users</b>, add the Google account you’ll sign in with.</li>
           <li>Choose <b>Create credentials → OAuth client ID</b>, application type <b>Desktop app</b>, name it, and create it.</li>
           <li>Copy the <b>Client ID</b> and <b>Client secret</b> into the boxes below.</li>
         </ol>
@@ -1583,7 +1585,7 @@ const VIEWS = {
   privacy() {
     const d = S.data;
     const p = S.privacyInfo;
-    const head = `<div class="page-head"><div><h2>Privacy &amp; data</h2><p>What AI Command Center keeps, where your data goes, and how to control or delete it.</p></div></div>`;
+    const head = `<div class="page-head"><div><h2>Privacy &amp; data</h2><p>What Meridian keeps, where your data goes, and how to control or delete it.</p></div></div>`;
     if (!p) return `${head}<section class="card"><div class="empty">Loading…</div></section>`;
     const dis = d.demo ? 'disabled' : '';
     const c = p.counts;
@@ -1632,7 +1634,7 @@ const VIEWS = {
         <div class="form-actions"><button class="btn" data-action="backup-download" ${dis}>${ICON.download}Download a copy</button>
           ${S.eraseOpen ? '' : `<button class="btn danger" data-action="erase-open" ${dis}>${ICON.trash}Delete everything…</button>`}</div>
         ${S.eraseOpen ? `<form class="pv-erase" data-form="erase">
-          <p><b>This permanently deletes everything AI Command Center keeps</b>: your account, tools and keys, usage, tasks and results, conversations, alerts, automations and settings. It can’t be undone. The AI apps you connected and their own history aren’t affected. The app then starts over as if newly installed.</p>
+          <p><b>This permanently deletes everything Meridian keeps</b>: your account, tools and keys, usage, tasks and results, conversations, alerts, automations and settings. It can’t be undone. The AI apps you connected and their own history aren’t affected. The app then starts over as if newly installed.</p>
           <div class="form-row"><div class="field"><label for="er-pass">Your password</label><input class="input" id="er-pass" name="password" type="password" autocomplete="current-password" required></div>
             <div class="field"><label for="er-confirm">Type DELETE to confirm</label><input class="input" id="er-confirm" name="confirm" autocomplete="off" required pattern="DELETE" spellcheck="false"></div></div>
           <div class="form-actions"><button class="btn danger" type="submit">${ICON.trash}Delete everything</button><button class="btn ghost" type="button" data-action="erase-cancel">Keep my data</button></div>
@@ -1641,7 +1643,7 @@ const VIEWS = {
       <section class="card pv-about"><div class="card-head">${ICON.info}<h3>About</h3><span class="aside">Version ${esc(d.update?.current ?? '')}</span></div>
         <p><b>AI-generated content.</b> Chat replies, task results, AI team work, merged answers and the daily summary are written by AI models from other companies, and each is labelled with the AI that wrote it. They can be wrong or out of date, so check anything important before relying on it.</p>
         <p><b>Your accounts.</b> Work you run here counts toward your plans and follows each provider’s terms and privacy policy. Only connect accounts you’re allowed to use, and only give an AI team folders you’re allowed to change.</p>
-        <p><b>Not affiliated.</b> AI Command Center isn’t made, endorsed or sponsored by Anthropic, OpenAI, Google, GitHub, Microsoft, Anysphere or Perplexity. Their product names are trademarks of their owners and appear only to identify the tools you connect. The coloured initials aren’t their logos.</p>
+        <p><b>Not affiliated.</b> Meridian isn’t made, endorsed or sponsored by Anthropic, OpenAI, Google, GitHub, Microsoft, Anysphere or Perplexity. Their product names are trademarks of their owners and appear only to identify the tools you connect. The coloured initials aren’t their logos.</p>
         <details class="pv-licenses"><summary>Open-source software in this app</summary>
           <ul>${[['Electron', 'MIT'], ['Express', 'MIT'], ['Chart.js', 'MIT'], ['Anthropic SDK for TypeScript', 'MIT'], ['Inter typeface', 'SIL Open Font License 1.1'], ['Node.js', 'MIT and others']].map(([n, l]) => `<li>${esc(n)} <span class="faint">· ${esc(l)}</span></li>`).join('')}</ul>
           <p class="fine">Each package’s licence ships with it in the app’s files.</p></details>
@@ -3174,7 +3176,7 @@ const ACTIONS = {
     toast('Two-step verification is on');
   },
   'save-codes'() {
-    saveFile('ai-command-center-recovery-codes.txt', new Blob([$('#sec-codes-raw').textContent], { type: 'text/plain' }));
+    saveFile('meridian-recovery-codes.txt', new Blob([$('#sec-codes-raw').textContent], { type: 'text/plain' }));
   },
   async 'sec-end'(el) {
     el.disabled = true;
@@ -3282,7 +3284,7 @@ const ACTIONS = {
     try {
       const r = await api('/api/update/install', { method: 'POST' });
       clearTimeout(S.timer);
-      openPanel('Updating', `<div class="updating"><span class="spin"></span><div><b>Installing version ${esc(r.version)}</b><p class="muted small">AI Command Center closes now and opens again by itself in a minute. Your data and settings stay as they are.</p></div></div>`, { center: true, focus: false });
+      openPanel('Updating', `<div class="updating"><span class="spin"></span><div><b>Installing version ${esc(r.version)}</b><p class="muted small">Meridian closes now and opens again by itself in a minute. Your data and settings stay as they are.</p></div></div>`, { center: true, focus: false });
     } catch (err) {
       if (el.isConnected) {
         el.disabled = false;
@@ -3461,7 +3463,7 @@ async function onChange(e) {
     if (!file) return;
     try {
       const b = JSON.parse(await file.text());
-      if (b?.format !== 'ai-command-center-backup') throw new Error('That file isn’t an AI Command Center backup.');
+      if (b?.format !== 'ai-command-center-backup') throw new Error('That file isn’t an Meridian backup.');
       S.pendingRestore = b;
       $('#restore-confirm').innerHTML = `<div class="callout warn restore-box">
         <b>Restore the backup from ${esc(String(b.exported_at ?? '').slice(0, 10) || 'an unknown date')}?</b>

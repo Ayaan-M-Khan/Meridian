@@ -100,7 +100,7 @@ test('setup, sign-in, two-step verification, recovery codes, sessions and passwo
   // Two-step verification.
   const start = await a.call('POST', '/api/security/2fa/start');
   assert.equal(start.status, 200);
-  assert.match(start.body.uri, /^otpauth:\/\/totp\/AI%20Command%20Center%3Aowner\?secret=[A-Z2-7]+&issuer=AI%20Command%20Center/);
+  assert.match(start.body.uri, /^otpauth:\/\/totp\/Meridian%3Aowner\?secret=[A-Z2-7]+&issuer=Meridian/);
   assert.match(start.body.qr, /^<svg/);
   const secret = start.body.secret.replace(/\s/g, '');
   const now = currentStep();

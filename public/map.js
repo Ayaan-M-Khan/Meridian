@@ -205,7 +205,7 @@ function worldSvg(m, layers, sel, h) {
   // The center: you and your command center.
   parts.push(`<g class="map-node map-hub ${sel === 'hub' ? 'sel' : ''}" data-key="hub" tabindex="0" role="button" aria-label="${esc(`Your command center: ${m.totals.tools} AI tools${m.totals.running ? `, ${m.totals.running} running now` : ''}`)}">
     <circle class="map-node-halo" r="${HUB_R + 9}"/><circle class="map-hub-glow" r="${HUB_R + 22}"/><circle class="map-hub-body" r="${HUB_R}"/>
-    <g class="map-hub-icon">${nested(h.ICON.spark, 30)}</g>
+    <g class="map-hub-icon">${nested(h.ICON.brand ?? h.ICON.spark, 30)}</g>
     <text class="map-node-name" y="${HUB_R + 19}" text-anchor="middle">Command center</text>
     <text class="map-node-sub" y="${HUB_R + 33}" text-anchor="middle">You are here</text></g>`);
 

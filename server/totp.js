@@ -77,7 +77,7 @@ export function verifyCode(secret, code, { now = Date.now(), after = -1 } = {}) 
 
 /** The link authenticator apps read from the QR code. */
 export const otpauthUri = (secret, account) =>
-  `otpauth://totp/${encodeURIComponent(`AI Command Center:${account}`)}?secret=${secret}&issuer=${encodeURIComponent('AI Command Center')}&algorithm=SHA1&digits=6&period=30`;
+  `otpauth://totp/${encodeURIComponent(`Meridian:${account}`)}?secret=${secret}&issuer=${encodeURIComponent('Meridian')}&algorithm=SHA1&digits=6&period=30`;
 
 /** The QR code as an SVG element, drawn on this computer (the secret never goes to a QR service). */
 export function qrSvg(text) {

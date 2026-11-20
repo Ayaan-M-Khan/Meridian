@@ -26,7 +26,7 @@ const queue = [];
 
 const CLI_NOTE = 'The only tools you have are this app’s functions (from the "acc" server). Don’t run commands, read or write files, or browse.';
 
-const SYSTEM = `You are carrying out a background task for the person who uses AI Command Center, a dashboard that tracks their AI tools, spending and tasks. Nobody is watching live, so work through the task to the end without asking questions; if something is ambiguous, make a sensible choice and say what you assumed.
+const SYSTEM = `You are carrying out a background task for the person who uses Meridian, a dashboard that tracks their AI tools, spending and tasks. Nobody is watching live, so work through the task to the end without asking questions; if something is ambiguous, make a sensible choice and say what you assumed.
 
 Report progress with report_progress: once at the start with your plan's first step, then after each meaningful step, with an honest overall percentage. The app uses these reports to show how far along you are and when you will finish.
 
@@ -76,7 +76,7 @@ function setStatus(id, status, fields = {}) {
   return t;
 }
 
-const CANCELLED = 'Cancelled from AI Command Center.';
+const CANCELLED = 'Cancelled from Meridian.';
 
 /** Creates the task and starts it, or queues it when two are already running. */
 export function startClaudeTask({ name, instructions, engine: engineId, previous = null }) {
@@ -267,7 +267,7 @@ export function recoverRuns() {
   const left = db
     .prepare(`SELECT id, detail FROM tasks WHERE status IN ('running', 'queued') AND integration_id IN (SELECT id FROM integrations WHERE adapter = 'claude-assistant')`)
     .all();
-  const upd = db.prepare(`UPDATE tasks SET status = 'failed', error = 'Stopped because AI Command Center was closed while it ran.', finished_at = ?, step = NULL, detail = ? WHERE id = ?`);
+  const upd = db.prepare(`UPDATE tasks SET status = 'failed', error = 'Stopped because Meridian was closed while it ran.', finished_at = ?, step = NULL, detail = ? WHERE id = ?`);
   for (const t of left) {
     // An AI team task's timeline would otherwise still show a stage as working.
     let detail = t.detail;

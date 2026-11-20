@@ -1,5 +1,5 @@
 /**
- * Updates: checks the project's GitHub releases for a newer version of AI Command Center.
+ * Updates: checks the project's GitHub releases for a newer version of Meridian.
  *
  * Only the release list is read, and nothing about you or your data is sent. Public releases are read directly. When
  * the repository is private, GitHub only shows them to an account with access, so the check and the download go
@@ -20,7 +20,7 @@ export const REPO = 'Ayaan-M-Khan/ai-command-center';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 /** Installers are only ever downloaded from this project's own releases. */
 export const DOWNLOAD_PREFIX = `https://github.com/${REPO}/releases/download/`;
-export const UPDATE_DIR = path.join(os.tmpdir(), 'ai-command-center-update');
+export const UPDATE_DIR = path.join(os.tmpdir(), 'meridian-update');
 const CHECK_EVERY_MS = 6 * 3_600_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
 
@@ -45,7 +45,7 @@ async function runGh(args, timeoutMs = 20_000) {
 /** The latest release, read directly when it's public or through the GitHub CLI's sign-in when it isn't. */
 async function latestRelease(fetchImpl, gh) {
   const res = await fetchImpl(RELEASES_API, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'AI-Command-Center-updater' },
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'Meridian-updater' },
     signal: AbortSignal.timeout(15_000),
   });
   if (res.ok) return { release: await res.json(), via: 'web' };
@@ -97,7 +97,7 @@ export function checkForUpdate({ force = false, fetchImpl = fetch, gh = runGh, c
     }
     setRaw('update_check', out);
     if (!out.error && out.latest && current && compareVersions(out.latest, current) > 0) {
-      notify({ kind: 'update', severity: 'info', title: `AI Command Center ${out.latest} is available`, body: `You have ${current}. Open Settings to see what’s new and install it.`, dedupe: `update:${out.latest}` });
+      notify({ kind: 'update', severity: 'info', title: `Meridian ${out.latest} is available`, body: `You have ${current}. Open Settings to see what’s new and install it.`, dedupe: `update:${out.latest}` });
     }
     return out;
   })().finally(() => {
@@ -135,7 +135,7 @@ export function updateView(current = APP_VERSION) {
  * lists one). Returns the file's path. Nothing is run here.
  */
 export async function downloadInstaller(a, { fetchImpl = fetch, gh = runGh, dir = UPDATE_DIR } = {}) {
-  if (!a?.url?.startsWith(DOWNLOAD_PREFIX) || !/^[\w.-]+$/.test(a.name ?? '') || !/^[\w.-]+$/.test(a.tag ?? '')) throw new Error('That download isn’t from AI Command Center’s releases.');
+  if (!a?.url?.startsWith(DOWNLOAD_PREFIX) || !/^[\w.-]+$/.test(a.name ?? '') || !/^[\w.-]+$/.test(a.tag ?? '')) throw new Error('That download isn’t from Meridian’s releases.');
   await fs.promises.rm(dir, { recursive: true, force: true });
   await fs.promises.mkdir(dir, { recursive: true });
   const file = path.join(dir, a.name);
