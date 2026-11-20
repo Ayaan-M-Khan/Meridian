@@ -3,7 +3,7 @@ import { adapters, catalog } from './adapters/index.js';
 import { encrypt, secretHint, sha256, randomToken } from './crypto.js';
 import { syncIntegration } from './sync.js';
 import { buildState, publicSettings } from './state.js';
-import { demoState } from './demo.js';
+import { demoState, demoStats } from './demo.js';
 import { refreshSummary, SUMMARY_KEY_AAD } from './summary.js';
 import { evaluateAlerts } from './alerts.js';
 import { parseUsage, upsertUsage } from './ingest.js';
@@ -17,6 +17,7 @@ import { createThread, deleteThread, listThreads, sendMessage, stopThread, threa
 import { ROLES, lineupView, startTeamTask } from './team.js';
 import { makeBackup, restoreBackup } from './backup.js';
 import { classify, routeTask } from './router.js';
+import { buildStats } from './stats.js';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -105,6 +106,8 @@ function issueIngestToken(id) {
 export function apiRoutes(app) {
   app.get('/api/state', (req, res) => res.json(buildState()));
   app.get('/api/demo', (req, res) => res.json(demoState()));
+  app.get('/api/stats', (req, res) => res.json(buildStats()));
+  app.get('/api/demo/stats', (req, res) => res.json(demoStats()));
   app.get('/api/catalog', (req, res) => res.json(catalog()));
   app.get('/api/engines', (req, res) => res.json(listEngines()));
 

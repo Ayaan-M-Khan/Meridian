@@ -2,6 +2,54 @@ import { adapters } from './adapters/index.js';
 import { DEFAULT_SETTINGS } from './db.js';
 import { lastNDays, startOfUtcMonth, utcDay } from './util.js';
 
+/** Sample statistics in the same shape as buildStats(), for demo mode. */
+export function demoStats(now = new Date()) {
+  const days = lastNDays(30, now);
+  const ago = (min) => new Date(now.getTime() - min * 60_000).toISOString();
+  const daily = days.map((day, i) => ({ day, tokens: Math.round((4 + 2.4 * Math.sin(i / 2.2) + (i % 4)) * 1_100_000), requests: 60 + ((i * 17) % 45) }));
+  const busiest = daily.reduce((a, b) => (b.tokens > a.tokens ? b : a));
+  return {
+    demo: true,
+    generated_at: now.toISOString(),
+    totals: { tokens_mtd: 167_500_000, requests_mtd: 40_016, runs_mtd: 46, success_pct: 91.3, team_runs: 9, team_median_ms: 11 * 60_000, busiest_day: busiest },
+    share: [
+      { id: 7, name: 'Claude Code', adapter: 'claude-code', vendor: 'Anthropic', tokens: 96_200_000, share: 57.4 },
+      { id: 8, name: 'Codex', adapter: 'codex', vendor: 'OpenAI', tokens: 31_400_000, share: 18.7 },
+      { id: 1, name: 'Claude API', adapter: 'anthropic', vendor: 'Anthropic', tokens: 22_100_000, share: 13.2 },
+      { id: 2, name: 'OpenAI API', adapter: 'openai', vendor: 'OpenAI', tokens: 12_600_000, share: 7.5 },
+      { id: 3, name: 'Nightly research agent', adapter: 'custom-agent', vendor: 'Your own', tokens: 5_200_000, share: 3.1 },
+    ],
+    cache: [
+      { id: 7, name: 'Claude Code', adapter: 'claude-code', vendor: 'Anthropic', cache_pct: 96.8, cache_read: 88_900_000 },
+      { id: 8, name: 'Codex', adapter: 'codex', vendor: 'OpenAI', cache_pct: 61.2, cache_read: 17_300_000 },
+      { id: 1, name: 'Claude API', adapter: 'anthropic', vendor: 'Anthropic', cache_pct: 42.5, cache_read: 8_100_000 },
+    ],
+    daily,
+    performance: [
+      { id: 'claude-code', label: 'Claude Code', vendor: 'Anthropic', runs: 24, ok: 23, failed: 1, reviews: 2, approved: 2, reviewed: 9, passed: 7, success_pct: 95.8, median_ms: 4.2 * 60_000, passed_review_pct: 77.8 },
+      { id: 'codex', label: 'Codex', vendor: 'OpenAI', runs: 19, ok: 18, failed: 1, reviews: 9, approved: 7, reviewed: 0, passed: 0, success_pct: 94.7, median_ms: 2.1 * 60_000, passed_review_pct: null },
+      { id: 'copilot-cli', label: 'GitHub Copilot', vendor: 'GitHub', runs: 8, ok: 8, failed: 0, reviews: 0, approved: 0, reviewed: 0, passed: 0, success_pct: 100, median_ms: 40_000, passed_review_pct: null },
+      { id: 'gemini-cli', label: 'Gemini CLI', vendor: 'Google', runs: 3, ok: 0, failed: 3, reviews: 0, approved: 0, reviewed: 0, passed: 0, success_pct: 0, median_ms: null, passed_review_pct: null },
+    ],
+    asks: {
+      total: 58,
+      by_category: [
+        { category: 'code', label: 'Coding', count: 21 }, { category: 'writing', label: 'Writing', count: 13 }, { category: 'planning', label: 'Planning', count: 9 },
+        { category: 'debug', label: 'Debugging', count: 7 }, { category: 'quick', label: 'Quick question', count: 5 }, { category: 'research', label: 'Research', count: 3 },
+      ],
+      by_engine: [
+        { id: 'claude-code', label: 'Claude Code', vendor: 'Anthropic', count: 31 }, { id: 'codex', label: 'Codex', vendor: 'OpenAI', count: 17 }, { id: 'copilot-cli', label: 'GitHub Copilot', vendor: 'GitHub', count: 10 },
+      ],
+    },
+    recent_routes: [
+      { at: ago(12), kind: 'chat', category: 'Debugging', engine: 'claude-code', engine_label: 'Claude Code', why: 'Debugging: Claude Code is one of the strongest for debugging.', preview: 'Why does the invoice export crash on empty rows?' },
+      { at: ago(55), kind: 'team', category: 'Planning', engine: 'claude-code', engine_label: 'Claude Code', why: 'Planning: Codex plans, Claude Code builds, Codex reviews, GitHub Copilot debugs.', preview: 'Plan and build the onboarding checklist' },
+      { at: ago(130), kind: 'chat', category: 'Quick question', engine: 'copilot-cli', engine_label: 'GitHub Copilot', why: 'Quick question: GitHub Copilot is one of the strongest for quick answers.', preview: 'What does HTTP 429 mean?' },
+      { at: ago(300), kind: 'task', category: 'Planning', engine: 'claude-code', engine_label: 'Claude Code', why: 'Planning: Claude Code is good at planning. Skipped Codex: 91% of its plan limit used.', preview: 'Draft the Q3 roadmap' },
+    ],
+  };
+}
+
 /** Sample data in the same shape as buildState(). Every payload carries demo: true and the UI labels it. */
 export function demoState(now = new Date()) {
   const ago = (min) => new Date(now.getTime() - min * 60_000).toISOString();

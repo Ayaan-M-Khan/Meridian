@@ -500,3 +500,16 @@ test('on Automatic, a new chat goes to the best AI and stays with it', async () 
     setClaudeClientForTests(null);
   }
 });
+
+test('statistics come from real usage, runs and routing decisions', async () => {
+  const { buildStats } = await import('../server/stats.js');
+  const s = buildStats();
+  const cc = s.performance.find((p) => p.id === 'claude-code');
+  assert.ok(cc && cc.runs > 0, 'Claude Code’s runs here are counted');
+  assert.ok(cc.success_pct >= 0 && cc.success_pct <= 100);
+  assert.ok(s.asks.total > 0 && s.asks.by_category.length > 0, 'routing decisions are counted');
+  assert.ok(s.recent_routes[0].engine_label);
+  assert.ok(s.share.some((x) => x.adapter === 'claude-code' && x.tokens > 0), 'usage share comes from reported tokens');
+  assert.ok(s.cache.some((x) => x.adapter === 'claude-code' && x.cache_pct > 0 && x.cache_pct <= 100));
+  assert.equal(s.daily.length, 30);
+});

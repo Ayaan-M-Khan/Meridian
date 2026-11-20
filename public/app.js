@@ -57,6 +57,7 @@ const ICON = {
   bolt: svg('<path d="M9 1.5L3.5 9h4L7 14.5 12.5 7h-4z"/>'),
   team: svg('<circle cx="8" cy="3.6" r="2"/><circle cx="3.4" cy="11.6" r="2"/><circle cx="12.6" cy="11.6" r="2"/><path d="M7 5.4L4.4 9.8M9 5.4l2.6 4.4M5.4 11.6h5.2"/>'),
   folder: svg('<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>'),
+  pulse: svg('<path d="M1.5 8.5h3l1.8-4.5 3.2 8 1.8-3.5h3.2"/>'),
 };
 ICON.claude = ICON.spark;
 
@@ -65,6 +66,7 @@ const PAGES = {
   assistant: { title: 'Assistant', icon: 'chat', short: 'Assistant' },
   tasks: { title: 'Tasks', icon: 'tasks', short: 'Tasks' },
   usage: { title: 'Usage & Costs', icon: 'chart', short: 'Usage' },
+  stats: { title: 'Statistics', icon: 'pulse', short: 'Stats' },
   notifications: { title: 'Alerts', icon: 'bell', short: 'Alerts' },
   tools: { title: 'AI Tools', icon: 'tools', short: 'Tools' },
   settings: { title: 'Settings', icon: 'gear', short: 'Settings' },
@@ -228,7 +230,7 @@ function renderShell() {
     <aside class="sidebar">
       <a class="brand" href="#dashboard"><div class="brand-mark">${ICON.spark}</div><div><div class="brand-name">AI Command Center</div><div class="brand-sub">All your AI, one place</div></div></a>
       <nav class="nav" aria-label="Main">
-        ${nav('dashboard')}${nav('assistant')}${nav('tasks')}${nav('usage')}${nav('notifications')}
+        ${nav('dashboard')}${nav('assistant')}${nav('tasks')}${nav('usage')}${nav('stats')}${nav('notifications')}
         <div class="nav-label nav-label-row"><span>Connected</span><button class="nav-add" data-action="add-tool" aria-label="Connect a tool" title="Connect a tool">${ICON.plus}</button></div>
         <div class="nav-tools" id="nav-tools"></div>
         <div class="nav-label">Manage</div>
@@ -248,7 +250,7 @@ function renderShell() {
         <button class="btn small" data-action="toggle-demo">Exit demo</button>
       </div>
       <main class="content" id="content"></main>
-      <nav class="tabbar" aria-label="Main">${['dashboard', 'assistant', 'tasks', 'tools', 'usage'].map(tab).join('')}</nav>
+      <nav class="tabbar" aria-label="Main">${['dashboard', 'assistant', 'tasks', 'tools', 'stats'].map(tab).join('')}</nav>
     </div>
   </div>`;
 }
@@ -1114,6 +1116,64 @@ const VIEWS = {
         <p class="fine">Anthropic usually publishes usage within 4 hours (up to 24). OpenAI cost data is daily. Apps on this computer are read every 2 minutes.</p></section>` : ''}`;
   },
 
+  stats() {
+    const st = S.stats;
+    const head = `<div class="page-head"><div><h2>Statistics</h2><p>This month and the last 30 days, from what your tools report and the work your AIs did here. Nothing is estimated.</p></div>
+      <a class="btn" href="#usage">${ICON.chart}Usage & Costs</a></div>`;
+    if (!st) return `${head}<div class="card">${emptyBlock('Loading statistics…', '')}</div>`;
+    const t = st.totals;
+    const pct = (n) => (n == null ? null : `${Math.round(n)}%`);
+    const perfRows = st.performance.map((p) => `<tr>
+      <td><span class="cell-tool">${engineById(p.id, p.label)}<b>${esc(p.label)}</b></span></td>
+      <td class="r">${p.runs}</td>
+      <td class="r"><span class="${p.success_pct < 60 ? 'err-text' : p.success_pct < 90 ? 'warn-text' : ''}">${esc(pct(p.success_pct))}</span></td>
+      <td class="r">${or(p.median_ms == null ? null : dur(p.median_ms), '—')}</td>
+      <td class="r">${or(p.passed_review_pct == null ? null : `${pct(p.passed_review_pct)} of ${p.reviewed}`, '—')}</td>
+      <td class="r">${or(p.reviews ? `${p.approved} of ${p.reviews}` : null, '—')}</td></tr>`).join('');
+    const maxCat = Math.max(1, ...st.asks.by_category.map((c) => c.count));
+    const maxEng = Math.max(1, ...st.asks.by_engine.map((c) => c.count));
+    return `${head}
+      <div class="tiles tiles-5">
+        ${tile('Tokens this month', fmtNum(t.tokens_mtd), 'Input, output and cache, all tools')}
+        ${tile('Requests this month', t.requests_mtd?.toLocaleString() ?? null, 'Where tools report them')}
+        ${tile('AI runs this month', t.runs_mtd, t.success_pct == null ? 'Tasks your AIs ran here' : `${pct(t.success_pct)} finished successfully`)}
+        ${tile('AI team tasks', t.team_runs, t.team_median_ms == null ? 'Last 30 days' : `Usually take ${dur(t.team_median_ms)}`)}
+        ${tile('Busiest day', t.busiest_day ? fmtNum(t.busiest_day.tokens) : null, t.busiest_day ? `${shortDay(t.busiest_day.day)}, in tokens` : 'No usage yet', { na: 'No usage yet' })}
+      </div>
+      <div class="grid-2">
+        <section class="card"><div class="card-head"><h3>Share of usage</h3><span class="aside">This month, by tokens</span></div>
+          ${st.share.length ? `<div class="share"><div class="share-chart"><canvas id="ch-share" aria-label="Share of tokens by tool"></canvas></div>
+            <div class="share-list">${st.share.map((s, i) => `<div class="share-row"><i style="background:var(--c${(i % 6) + 1})"></i><span class="grow min0">${esc(s.name)}</span><span class="num faint">${esc(fmtNum(s.tokens))}</span><b class="num">${esc(pct(s.share))}</b></div>`).join('')}</div></div>`
+            : emptyBlock('No token usage yet', 'Shares appear once tools report tokens.')}
+        </section>
+        <section class="card"><div class="card-head"><h3>Usage over 30 days</h3><span class="aside">Tokens per day, all tools</span></div>
+          ${st.daily.some((x) => x.tokens != null) ? '<div class="chart"><canvas id="ch-daily" aria-label="Tokens per day"></canvas></div>' : emptyBlock('No usage yet', 'Daily totals appear once tools report tokens.')}
+        </section>
+      </div>
+      <section class="card"><div class="card-head"><h3>How your AIs perform</h3><span class="aside">Work they did here, last 30 days</span></div>
+        ${perfRows ? `<div class="table-wrap"><table><thead><tr><th>AI</th><th class="r">Runs</th><th class="r">Succeeded</th><th class="r">Typical time</th><th class="r">Its work approved</th><th class="r">Approvals it gave</th></tr></thead><tbody>${perfRows}</tbody></table></div>
+          <p class="fine">Runs count assistant tasks, AI team stages and Ask all answers. “Its work approved” is how often the first review approved what it built; “approvals it gave” is how often it approved as the reviewer. Smart routing uses recent failures here to send work elsewhere.</p>`
+          : emptyBlock('No runs yet', 'Start an assistant task, an AI team task or Ask all to see how each AI does.')}
+      </section>
+      <div class="grid-2">
+        <section class="card"><div class="card-head"><h3>What you ask for</h3><span class="aside">${plural(st.asks.total, 'request')} routed</span></div>
+          ${st.asks.by_category.length ? `<div class="hbars">${st.asks.by_category.map((c) => `<div class="hbar"><span>${esc(c.label)}</span><div class="bar thin"><i style="width:${(100 * c.count) / maxCat}%"></i></div><b class="num">${c.count}</b></div>`).join('')}</div>
+            <div class="lineup-label">Where Automatic sent it</div>
+            <div class="hbars">${st.asks.by_engine.map((c) => `<div class="hbar"><span class="cell-tool">${engineById(c.id, c.label)}${esc(c.label)}</span><div class="bar thin"><i style="width:${(100 * c.count) / maxEng}%"></i></div><b class="num">${c.count}</b></div>`).join('')}</div>`
+            : emptyBlock('Nothing routed yet', 'With the assistant on Automatic, every request is sorted by kind and sent to the best AI for it.')}
+        </section>
+        <section class="card"><div class="card-head"><h3>Cache reuse</h3><span class="aside">This month</span></div>
+          ${st.cache.length ? `<div class="hbars">${st.cache.map((c) => `<div class="hbar"><span class="cell-tool">${logo({ vendor: c.vendor, name: c.name, adapter: c.adapter }, 'xs')}${esc(c.name)}</span><div class="bar thin ok"><i style="width:${c.cache_pct}%"></i></div><b class="num">${esc(pct(c.cache_pct))}</b></div>`).join('')}</div>
+            <p class="fine">The share of input read back from the provider’s cache instead of sent fresh. Higher is better: cached input is cheaper and counts less toward limits.</p>`
+            : emptyBlock('No cache figures yet', 'Shown for tools that report cache reads, such as Claude Code.')}
+        </section>
+      </div>
+      <section class="card"><div class="card-head"><h3>Recent routing decisions</h3></div>
+        ${st.recent_routes.length ? `<div class="rows">${st.recent_routes.map((r) => `<div class="row">${engineById(r.engine, r.engine_label)}<div class="row-main"><div class="row-title">${esc(r.preview || r.category)}</div><div class="row-sub">${esc(r.why ?? '')}</div></div><div class="row-time">${esc(rel(r.at))}</div></div>`).join('')}</div>`
+          : emptyBlock('No decisions yet', 'They appear here when Automatic picks an AI for a chat, task or team.')}
+      </section>`;
+  },
+
   tasks() {
     const d = S.data;
     const { groups, labels } = taskGroups(d);
@@ -1347,6 +1407,49 @@ function chartBase(text, grid) {
 }
 
 const AFTER = {
+  stats() {
+    const fresh = S.stats && S.stats.demo === S.demo && Date.now() - S.statsAt < 60_000;
+    if (!fresh) {
+      if (S.statsLoading) return;
+      S.statsLoading = true;
+      api(S.demo ? '/api/demo/stats' : '/api/stats')
+        .then((r) => {
+          S.stats = { ...r, demo: S.demo };
+          S.statsAt = Date.now();
+          if (S.page === 'stats') renderPage();
+        })
+        .catch((err) => toast(err.message, true))
+        .finally(() => (S.statsLoading = false));
+      if (!S.stats || S.stats.demo !== S.demo) return;
+    }
+    if (!window.Chart) return;
+    const { series: colors, text, grid } = palette();
+    const st = S.stats;
+    if ($('#ch-share') && st.share.length) {
+      S.charts.push(new window.Chart($('#ch-share'), {
+        type: 'doughnut',
+        data: { labels: st.share.map((s) => s.name), datasets: [{ data: st.share.map((s) => s.tokens), backgroundColor: st.share.map((_, i) => colors[i % colors.length]), borderWidth: 0, hoverOffset: 4 }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${fmtNum(c.raw)}` } } } },
+      }));
+    }
+    if ($('#ch-daily')) {
+      const vals = st.daily.map((x) => x.tokens);
+      const avg = vals.map((_, i) => {
+        const win = vals.slice(Math.max(0, i - 6), i + 1).filter((v) => v != null);
+        return win.length ? win.reduce((a, b) => a + b, 0) / win.length : null;
+      });
+      const base = chartBase(text, grid);
+      S.charts.push(new window.Chart($('#ch-daily'), {
+        type: 'bar',
+        data: { labels: st.daily.map((x) => shortDay(x.day)), datasets: [
+          { type: 'line', label: '7-day average', data: avg, borderColor: colors[2], borderWidth: 2, pointRadius: 0, tension: 0.35, spanGaps: true },
+          { label: 'Tokens', data: vals, backgroundColor: colors[0], borderRadius: 3, maxBarThickness: 14 },
+        ] },
+        options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtNum(c.raw)}` } } },
+          scales: { x: { ...base.scales.x, stacked: false }, y: { ...base.scales.y, stacked: false, ticks: { color: text, callback: (v) => fmtNum(v) } } } },
+      }));
+    }
+  },
   dashboard() {
     const tools = S.data.tools.filter((t) => t.kind !== 'builtin');
     if ((!tools.length || !S.data.engine) && !S.demo && S.local === null) loadLocal().then(() => S.page === 'dashboard' && renderPage());
