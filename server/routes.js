@@ -21,6 +21,8 @@ import { buildStats } from './stats.js';
 import { createAutomation, deleteAutomation, listAutomations, runAutomation, updateAutomation } from './automations.js';
 import { checkForUpdate, installUpdate, updateView } from './updates.js';
 import { APP_VERSION } from './version.js';
+import { DATA_FLOWS, RETENTION_CHOICES, applySessionPrivacy, dataInventory, eraseEverything, pruneOldData } from './privacy.js';
+import { issueSetupCode, verifyPassword } from './auth.js';
 
 const ENGINE_CHOICES = ['auto', 'claude-code', 'codex', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli', 'claude-api'];
 
@@ -273,6 +275,16 @@ export function apiRoutes(app) {
     if (body.desktop && typeof body.desktop === 'object') {
       for (const k of Object.keys(s.desktop)) if (k in body.desktop) s.desktop[k] = Boolean(body.desktop[k]);
     }
+    let privacyChanged = false;
+    if (body.privacy && typeof body.privacy === 'object') {
+      const p = body.privacy;
+      if ('retention_days' in p) {
+        if (!RETENTION_CHOICES.includes(p.retention_days)) throw new HttpError(400, 'Choose how long to keep finished work from the list.');
+        s.privacy.retention_days = p.retention_days;
+      }
+      for (const k of ['read_sessions', 'session_titles']) if (k in p) s.privacy[k] = Boolean(p[k]);
+      privacyChanged = true;
+    }
     if (body.team_roles && typeof body.team_roles === 'object') {
       for (const [role, v] of Object.entries(body.team_roles)) {
         if (!ROLES[role] || !ENGINE_CHOICES.includes(v)) throw new HttpError(400, 'Choose one of the listed AIs for each role.');
@@ -284,6 +296,10 @@ export function apiRoutes(app) {
     }
     setRaw('settings', s);
     if (body.desktop && typeof globalThis.accApplyDesktopSettings === 'function') globalThis.accApplyDesktopSettings(s.desktop);
+    if (privacyChanged) {
+      applySessionPrivacy(s.privacy);
+      if (s.privacy.retention_days) pruneOldData(s.privacy.retention_days);
+    }
     if ('summary_key' in body) {
       if (body.summary_key) {
         const key = cleanSecret(body.summary_key);
@@ -309,6 +325,26 @@ export function apiRoutes(app) {
     res.json({ ok: true });
   });
   app.post('/api/automations/:id/run', (req, res) => res.json(runAutomation(req.params.id)));
+
+  // ── Your data ──
+  app.get('/api/privacy', (req, res) => res.json({ ...dataInventory(), flows: DATA_FLOWS, retention_choices: RETENTION_CHOICES, settings: getSettings().privacy, desktop_app: Boolean(globalThis.accDesktop) }));
+  app.post('/api/privacy/open-folder', async (req, res) => {
+    if (typeof globalThis.accOpenDataFolder !== 'function') throw new HttpError(501, 'Open the folder from your file manager.');
+    await globalThis.accOpenDataFolder();
+    res.json({ ok: true });
+  });
+  /** Erases everything after checking your password again. The app then starts over with a new setup code. */
+  app.post('/api/privacy/erase', async (req, res) => {
+    const { password, confirm } = req.body ?? {};
+    if (confirm !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm.');
+    const row = db.prepare('SELECT pass_hash FROM users WHERE id = ?').get(req.user.id);
+    if (!row || typeof password !== 'string' || !(await verifyPassword(password, row.pass_hash))) throw new HttpError(401, 'That password isn’t right.');
+    const busy = runningCount() + teamRunningCount();
+    if (busy) throw new HttpError(409, `${busy} task${busy === 1 ? ' is' : 's are'} running. Cancel ${busy === 1 ? 'it' : 'them'} first, then erase.`);
+    eraseEverything();
+    res.setHeader('Set-Cookie', 'acc_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+    res.json({ ok: true, setup_code: issueSetupCode() });
+  });
 
   // ── Updates ──
   app.get('/api/update', (req, res) => res.json(updateView()));

@@ -22,7 +22,7 @@ function createApp() {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
     next();
   });
@@ -46,6 +46,8 @@ function createApp() {
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 
   app.use('/vendor/chart.js', express.static(path.join(root, 'node_modules/chart.js/dist'), { maxAge: '7d' }));
+  // Fonts ship with the app, so opening it never contacts a font service (or tells one your IP address).
+  app.use('/vendor/fonts/inter', express.static(path.join(root, 'node_modules/@fontsource-variable/inter/files'), { maxAge: '30d' }));
   app.use(express.static(path.join(root, 'public'), { index: 'index.html' }));
 
   app.use((err, req, res, _next) => {

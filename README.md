@@ -26,6 +26,53 @@ npm run dist
 
 The installer is written to `dist/`. Use `npm run app` to open the desktop app without packaging it, and `npm run icons` to regenerate the icons from `assets/icon.svg`.
 
+## The map
+
+**Map** in the sidebar shows your setup as a map you can explore:
+
+- **The command center** sits in the middle ("You are here"). Your AI tools are places around it, grouped into regions by company: Anthropic, OpenAI, Google, GitHub and so on.
+- **Distance means usage.** The closer a place is to the center, the more you used it this month. A tool with no usage reported sits out at the edge, so nothing is guessed.
+- **Routes** run from the center to each place, wider the more requests smart routing sent there in the last 30 days, and colored by the tool's status. Dotted routes haven't been used.
+- **Layers** you can switch on and off:
+  - **Live work:** moving dashes and a "live" badge on a route while something runs there.
+  - **Team hand-offs:** dashed arcs between AIs that passed work to each other in AI team tasks.
+  - **Plan limits:** a ring around a place showing how much of its plan limit is used.
+  - **Companies:** the regions.
+- **Moving around:**
+  - Drag to move, and scroll or pinch to zoom.
+  - **+**, **−** and the compass (which shows the whole map again) sit at the bottom right. A minimap shows where you are; click it to jump.
+  - **Search the map** finds a place and flies there.
+- **Place cards:** click a place to open its card: status, tokens today and this month, requests routed there, how often its runs finished well, plan limits, and buttons to open it or chat with it.
+- **Without a mouse:** with the map focused, the arrow keys move it, **+** and **−** zoom, **0** shows everything, Tab moves between places, Enter opens one and Escape closes its card. **Every place as a list** under the map has the same facts as a table.
+
+## Privacy & data
+
+AI Command Center keeps everything in one folder on your computer. There's no analytics, tracking or advertising, and nothing goes to the makers of this app. **Privacy & data** in the sidebar shows:
+
+- **What's kept here:** counts of everything stored, the folder, and the database size. Only counts are shown, never the content.
+- **Where data goes:**
+  - To the AI you use, under your own account with that company, only when you chat, run a task or an automation, or the AI writes the summary. Ask all sends the same request to every connected AI.
+  - To the usage APIs you connected with a key.
+  - To GitHub for the update check.
+  - Nowhere else.
+- **Controls:**
+  - **Keep finished work for** deletes finished tasks and their results, conversations, alerts, activity and routing notes older than 30, 90 or 180 days or a year, once a day. It asks first, saying how much goes now. Running work, automations, tools and the daily usage numbers stay.
+  - **Sessions from AI apps** can be hidden, or listed without what you first typed in them.
+- **Your copy:** download everything as a readable JSON file, without your password or keys.
+- **Delete everything:** after your password and typing DELETE, erases your account, tools and keys, usage, tasks and results, conversations, alerts, automations, settings and the app's working folders, and compacts the database so nothing lingers in it. The app then starts over with a new setup code. The AI apps you connected keep their own history; manage that in each app.
+- **About:**
+  - AI-written content is labelled with the AI that wrote it (chat replies, task results, team work, merged answers, the summary), and can be wrong.
+  - The app isn't affiliated with Anthropic, OpenAI, Google, GitHub, Microsoft, Anysphere or Perplexity. Their names identify the tools you connect, and the colored initials aren't their logos.
+  - The open-source software it includes is listed with its licences.
+
+The interface loads nothing from other sites. Its typeface (Inter, SIL Open Font License) ships with the app, so opening it never contacts a font service, and the Content Security Policy allows only the app's own origin.
+
+**Accessibility:**
+- **Keyboard:** a "Skip to content" link appears first when you press Tab, and every control works with the keyboard. Dialogs keep focus inside them and return it to where you were when they close.
+- **Screen readers:** errors are announced right away, other messages politely, and the map has a table alternative.
+- **Readability:** secondary text meets WCAG AA contrast in both themes.
+- **Motion:** "Reduce motion" in Windows turns off the animations.
+
 ## Sign in with your account (no API key)
 
 These connect through the provider's own command-line app on your computer and the account it's signed in with, so you don't need an API key:
@@ -229,6 +276,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/assistant-tools.js`: the app functions the assistant can call. Read-only tools are available everywhere; actions are available only in the chat.
 - `server/runner.js`: background tasks the assistant carries out, with a queue, cancel/retry and follow-ups.
 - `server/updates.js`: checks GitHub for a newer release, and downloads and verifies the installer for the desktop app to run.
+- `server/privacy.js`: what the app keeps and where data goes, retention clean-up, session privacy, and erasing everything.
+- `public/map.js`: the interactive map: its model (places, routes, regions, hand-offs) and the pan, zoom and search.
 - `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
 - `server/backup.js`: backups as a JSON file (tools, tasks, conversations, alerts, automations and settings), without secrets, and restoring them.
 - `server/automations.js`: saved prompts that run on a schedule; the scheduler in `server/sync.js` starts the ones that are due every minute.
@@ -247,4 +296,6 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - The ingest endpoint takes only its own bearer token, compared by hash. The MCP bridge endpoint takes only the random token of a run in progress, and stops working when the run ends.
 - Content Security Policy allows scripts only from the app itself. All reported text is escaped before display.
 - The server listens on localhost by default. Before exposing it beyond your machine, put it behind HTTPS.
+- Passwords are stored as salted scrypt hashes; sign-in is rate-limited; session cookies are HttpOnly and SameSite=Strict (and Secure over HTTPS). Erasing all data asks for the password again.
+- The interface makes no requests to other sites: fonts and the chart library ship with the app.
 - Task names, errors and results that come from other tools are passed to Claude as data, and its instructions say to treat them that way. Background tasks get only read access plus progress reporting, so text inside a reported task can't make one change your settings.

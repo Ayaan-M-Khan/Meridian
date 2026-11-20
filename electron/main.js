@@ -153,6 +153,10 @@ if (!app.requestSingleInstanceLock()) {
       else if (win?.isVisible()) removeTray();
     };
     globalThis.accApplyDesktopSettings();
+    globalThis.accOpenDataFolder = async () => {
+      const err = await shell.openPath(process.env.ACC_DATA_DIR);
+      if (err) throw new Error(err);
+    };
 
     /**
      * Runs an installer the server downloaded and checked against the release (server/updates.js), then quits. The

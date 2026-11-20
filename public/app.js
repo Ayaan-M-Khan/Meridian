@@ -1,3 +1,5 @@
+import { mountMap, buildMapModel, mapListHtml } from './map.js';
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -59,18 +61,22 @@ const ICON = {
   folder: svg('<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>'),
   pulse: svg('<path d="M1.5 8.5h3l1.8-4.5 3.2 8 1.8-3.5h3.2"/>'),
   repeat: svg('<path d="M2.8 7A5.2 5.2 0 0 1 12.4 4.4M13.2 9a5.2 5.2 0 0 1-9.6 2.6"/><path d="M12.8 1.8v2.9H9.9M3.2 14.2v-2.9h2.9"/>'),
+  shield: svg('<path d="M8 1.6l5.2 2v4.1c0 3.2-2.2 5.6-5.2 6.7-3-1.1-5.2-3.5-5.2-6.7V3.6z"/><path d="M5.8 8l1.6 1.6 2.9-3"/>'),
+  map: svg('<path d="M1.8 3.6l4-1.6 4.4 1.8 4-1.6v10.2l-4 1.6-4.4-1.8-4 1.6z"/><path d="M5.8 2v10.2M10.2 3.8V14"/>'),
   pause: svg('<path d="M5.5 3.5v9M10.5 3.5v9"/>', 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"'),
 };
 ICON.claude = ICON.spark;
 
 const PAGES = {
   dashboard: { title: 'Overview', icon: 'grid', short: 'Home' },
+  map: { title: 'Map', icon: 'map', short: 'Map' },
   assistant: { title: 'Assistant', icon: 'chat', short: 'Assistant' },
   tasks: { title: 'Tasks', icon: 'tasks', short: 'Tasks' },
   automations: { title: 'Automations', icon: 'repeat', short: 'Auto' },
   usage: { title: 'Usage & Costs', icon: 'chart', short: 'Usage' },
   stats: { title: 'Statistics', icon: 'pulse', short: 'Stats' },
   notifications: { title: 'Alerts', icon: 'bell', short: 'Alerts' },
+  privacy: { title: 'Privacy & data', icon: 'shield', short: 'Privacy' },
   tools: { title: 'AI Tools', icon: 'tools', short: 'Tools' },
   settings: { title: 'Settings', icon: 'gear', short: 'Settings' },
   tool: { title: 'Tool', icon: 'tools', short: 'Tool' },
@@ -176,6 +182,8 @@ function toast(msg, isErr = false) {
   const t = $('#toast');
   t.textContent = msg;
   t.className = isErr ? 'err' : '';
+  t.setAttribute('role', isErr ? 'alert' : 'status');
+  t.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), isErr ? 6500 : 3200);
@@ -221,6 +229,7 @@ async function showAuth() {
       <button class="btn primary lg" type="submit">${setup ? 'Create account' : 'Sign in'}</button>
       <div class="error-text" data-error></div>
     </form>
+    ${setup ? '<p class="auth-privacy">Your account and everything the app keeps stay on this computer. There’s no analytics or tracking. Data goes to an AI company only when you use that AI, under your own account with it. You can see, export or delete all of it under <b>Privacy &amp; data</b>.</p>' : ''}
   </div></div>`;
   $('#f-user')?.focus();
 }
@@ -230,15 +239,16 @@ function renderShell() {
   const nav = (key) => `<a href="#${key}" data-nav="${key}">${ICON[PAGES[key].icon]}<span>${PAGES[key].title}</span><span class="count" data-count="${key}" hidden></span></a>`;
   const tab = (key) => `<a href="#${key}" data-nav="${key}">${ICON[PAGES[key].icon]}<span>${PAGES[key].short}</span><span class="dot-badge" data-count="${key}" hidden></span></a>`;
   $('#root').innerHTML = `
+  <button class="skip-link" data-action="skip">Skip to content</button>
   <div class="app">
     <aside class="sidebar">
       <a class="brand" href="#dashboard"><div class="brand-mark">${ICON.spark}</div><div><div class="brand-name">AI Command Center</div><div class="brand-sub">All your AI, one place</div></div></a>
       <nav class="nav" aria-label="Main">
-        ${nav('dashboard')}${nav('assistant')}${nav('tasks')}${nav('automations')}${nav('usage')}${nav('stats')}${nav('notifications')}
+        ${nav('dashboard')}${nav('map')}${nav('assistant')}${nav('tasks')}${nav('automations')}${nav('usage')}${nav('stats')}${nav('notifications')}
         <div class="nav-label nav-label-row"><span>Connected</span><button class="nav-add" data-action="add-tool" aria-label="Connect a tool" title="Connect a tool">${ICON.plus}</button></div>
         <div class="nav-tools" id="nav-tools"></div>
         <div class="nav-label">Manage</div>
-        ${nav('tools')}${nav('settings')}
+        ${nav('tools')}${nav('privacy')}${nav('settings')}
       </nav>
       <a class="update-pill" id="update-pill" href="#settings" data-action="go-update" hidden></a>
       <div class="sidebar-foot"><span class="avatar">${esc(S.user.username.slice(0, 1).toUpperCase())}</span><span class="who">${esc(S.user.username)}</span><button class="btn small ghost" data-action="logout">Sign out</button></div>
@@ -254,8 +264,8 @@ function renderShell() {
         <span>You’re looking at demo data. None of it comes from your accounts.</span>
         <button class="btn small" data-action="toggle-demo">Exit demo</button>
       </div>
-      <main class="content" id="content"></main>
-      <nav class="tabbar" aria-label="Main">${['dashboard', 'assistant', 'tasks', 'tools', 'stats'].map(tab).join('')}</nav>
+      <main class="content" id="content" tabindex="-1"></main>
+      <nav class="tabbar" aria-label="Main">${['dashboard', 'map', 'assistant', 'tasks', 'tools'].map(tab).join('')}</nav>
     </div>
   </div>`;
 }
@@ -284,6 +294,8 @@ function currentTitle() {
 }
 
 function updateChrome() {
+  // Before sign-in, or while the app starts, there's no app frame to update yet.
+  if (!$('#page-title')) return;
   const d = S.data;
   document.querySelectorAll('[data-nav]').forEach((a) => {
     const on = a.dataset.nav === S.page || (S.page === 'tool' && a.dataset.nav === 'tools' && a.closest('.tabbar'));
@@ -323,7 +335,8 @@ async function load({ force = false } = {}) {
   updateChrome();
   const typing = document.activeElement?.closest?.('#content') && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
   // Settings and the chat keep their own state on screen, so background refreshes leave them alone.
-  const keep = ['settings', 'assistant'].includes(S.page) && $('#content')?.dataset.page === S.page;
+  const keep = ['settings', 'assistant', 'privacy', 'map'].includes(S.page) && $('#content')?.dataset.page === S.page;
+  if (keep && S.page === 'map') refreshMap();
   if (force ? !(S.page === 'assistant' && keep && S.chat.streaming) : !(typing || keep)) renderPage();
   refreshOpenTask();
 }
@@ -341,6 +354,8 @@ function schedulePoll() {
 function renderPage() {
   S.charts.forEach((c) => c.destroy());
   S.charts = [];
+  S.mapInst?.destroy();
+  S.mapInst = null;
   const el = $('#content');
   if (!el) return;
   if (!S.data) {
@@ -612,7 +627,7 @@ function heroCommand(d) {
         <button class="btn primary" type="submit">${ICON.send}<span class="hide-sm">Ask all</span></button>
       </form>
       <div class="lineup">${ready.map((x) => `<span class="lineup-step">${engineLogo(x, 'xs')}<span>${esc(x.label)}</span></span>`).join('')}<span class="lineup-arrow" aria-hidden="true">→</span><span class="lineup-step">${d.team?.lineup ? engineById(d.team.lineup.builder.id, d.team.lineup.builder.label) : ''}<span><b>Combine</b> ${esc(d.team?.lineup?.builder.label ?? '')}</span></span></div>
-      <p class="hero-foot">${ready.length > 1 ? `Each of your ${ready.length} AIs answers on its own, then the answers are combined into one. You can read every answer on the task.` : 'Connect more AIs to compare their answers. With one, you get its answer.'}</p>`;
+      <p class="hero-foot">${ready.length > 1 ? `Sends your question to all ${ready.length} AIs, each under your account with its company. Each answers on its own, then the answers are combined into one; you can read every answer on the task.` : 'Connect more AIs to compare their answers. With one, you get its answer.'}</p>`;
   }
   if (!team) {
     return `${toggle}<form class="command" data-form="ask">
@@ -860,7 +875,7 @@ const VIEWS = {
     const budgeted = d.tools.filter((t) => t.enabled && t.budget_usd);
     const limited = d.tools.filter((t) => t.enabled && t.limits);
     const sm = d.summary;
-    const smSource = !sm ? '' : sm.source === 'ai' ? `Written by ${sm.by ?? 'the assistant'} from your data` : sm.source === 'demo' ? 'Sample summary' : 'Generated from your data';
+    const smSource = !sm ? '' : sm.source === 'ai' ? `AI-generated by ${sm.by ?? 'the assistant'} from your data` : sm.source === 'demo' ? 'Sample summary' : 'Generated from your data';
     const work = running.filter((t) => t.kind !== 'session');
     const stalled = work.filter((t) => t.stalled).length;
     const nextEta = work.map((t) => t.eta_at && !t.overdue && Date.parse(t.eta_at)).filter(Boolean).sort((a, b) => a - b)[0];
@@ -893,7 +908,7 @@ const VIEWS = {
       </section>
 
       <section class="card a-tools">
-        <div class="card-head"><h3>Your AI tools</h3><button class="aside link" data-action="add-tool">${ICON.plus} Connect</button></div>
+        <div class="card-head"><h3>Your AI tools</h3><a class="aside" href="#map">${ICON.map} Map</a><button class="aside link aside-next" data-action="add-tool">${ICON.plus} Connect</button></div>
         <div class="rows">${tools.map((t) => {
           const st = toolStatus(t);
           const sub = t.current_activity ? `Running: ${t.current_activity}` : accountLine(t) ?? KIND_LABEL[t.kind];
@@ -950,7 +965,7 @@ const VIEWS = {
           <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
         </form>
       </section>
-      <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: a new conversation goes to the AI best suited to its first message, and stays with it.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`}</p>
+      <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: a new conversation goes to the AI best suited to its first message, and stays with it.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`} Replies are AI-generated and can be wrong. <a href="#privacy">What’s shared</a></p>
     </div>`;
   },
 
@@ -1227,6 +1242,83 @@ const VIEWS = {
         <div class="row-time">${esc(rel(n.created_at))}</div></button>`).join('')}</div>` : emptyBlock('No alerts yet', 'Failed tasks, budget warnings and connection problems show up here.')}</section>`;
   },
 
+  map() {
+    const d = S.data;
+    const tools = d.tools.filter((t) => t.kind !== 'builtin');
+    return `<div class="page-head"><div><h2>Map</h2><p>Your command center and the AI tools around it, grouped by company, with the routes your requests take. Drag to move, scroll to zoom, or search for a place.</p></div>
+        <div class="form-actions"><button class="btn" data-action="add-tool">${ICON.plus}Connect a tool</button></div></div>
+      <div class="map" id="map" tabindex="0" aria-label="AI map. Arrow keys move it, plus and minus zoom, 0 shows everything, Tab moves between places."></div>
+      <details class="map-list card" ${tools.length ? '' : 'hidden'}><summary>${ICON.tasks}<span>Every place as a list</span></summary><div id="map-list"></div></details>`;
+  },
+
+  privacy() {
+    const d = S.data;
+    const p = S.privacyInfo;
+    const head = `<div class="page-head"><div><h2>Privacy &amp; data</h2><p>What AI Command Center keeps, where your data goes, and how to control or delete it.</p></div></div>`;
+    if (!p) return `${head}<section class="card"><div class="empty">Loading…</div></section>`;
+    const dis = d.demo ? 'disabled' : '';
+    const c = p.counts;
+    const kv = (label, value, sub = '') => `<div class="pv-kv"><span>${esc(label)}</span><b class="num">${esc(value)}</b>${sub ? `<span class="faint small">${esc(sub)}</span>` : ''}</div>`;
+    const mb = p.database_bytes == null ? 'Unknown' : p.database_bytes < 1e6 ? `${Math.max(1, Math.round(p.database_bytes / 1024))} KB` : `${(p.database_bytes / 1e6).toFixed(1)} MB`;
+    const st = p.settings ?? {};
+    const days = (n) => (n === 0 ? 'Keep until I delete it' : n === 365 ? '1 year' : `${n} days`);
+    const pruned = p.last_pruned ? `Last clean-up ${rel(p.last_pruned.at)}: ${plural(p.last_pruned.tasks ?? 0, 'task')}, ${plural(p.last_pruned.conversations ?? 0, 'conversation')} and ${plural(p.last_pruned.alerts ?? 0, 'alert')} removed.` : '';
+    const sw = (k, label, help) => `<label class="switch"><span><span class="switch-label">${esc(label)}</span><span class="faint small">${esc(help)}</span></span><input type="checkbox" data-privacy="${k}" ${st[k] !== false ? 'checked' : ''} ${dis}></label>`;
+    return `${head}
+      ${d.demo ? '<div class="callout warn">You’re looking at demo data elsewhere in the app. This page always describes your real data, and its controls are off while the demo is showing.</div>' : ''}
+      <section class="card pv-hero">
+        <span class="pv-badge">${ICON.shield}</span>
+        <div class="min0"><h3>Your data stays on this computer</h3>
+          <p>Everything the app keeps is in one folder on this computer. There’s no analytics, tracking or advertising, and nothing is sent to the makers of this app. Data leaves this computer only to the services you connect, and only when you use them.</p>
+          <div class="pv-path"><code title="${esc(p.folder)}">${esc(p.folder)}</code>${p.desktop_app ? `<button class="btn small" data-action="open-data-folder">${ICON.folder}Open folder</button>` : ''}</div></div>
+      </section>
+      <div class="pv-grid">
+        <section class="card"><div class="card-head">${ICON.folder}<h3>What’s kept here</h3><span class="aside">${esc(mb)}</span></div>
+          <div class="pv-kvs">
+            ${kv('Connected tools', c.tools, 'Names and budgets; keys are encrypted')}
+            ${kv('Your tasks and results', c.tasks)}
+            ${kv('Sessions from AI apps', c.sessions, st.read_sessions === false ? 'Off' : 'When, where, model, tokens')}
+            ${kv('Assistant conversations', c.conversations)}
+            ${kv('Alerts', c.alerts)}
+            ${kv('Activity entries', c.activity)}
+            ${kv('Routing notes', c.routing, 'Which AI took a request, and why')}
+            ${kv('Automations', c.automations)}
+            ${kv('Days of usage totals', c.usage_days, 'Numbers only')}
+          </div>
+          <p class="fine">Your password is stored only as a salted hash. API keys are encrypted with a key kept in the same folder. Backups never include either.</p>
+        </section>
+        <section class="card"><div class="card-head">${ICON.external}<h3>Where data goes</h3></div>
+          <ol class="pv-flows">${p.flows.map((f) => `<li><b>${esc(f.to)}</b><span>${esc(f.what)}</span><span class="faint small">${esc(f.when)} ${esc(f.terms)}</span></li>`).join('')}</ol>
+        </section>
+      </div>
+      <section class="card"><div class="card-head">${ICON.gear}<h3>Controls</h3></div>
+        <div class="switch"><span><span class="switch-label">Keep finished work for</span><span class="faint small">Finished tasks and their results, conversations, alerts, activity and routing notes older than this are deleted once a day. Running work, automations, tools and usage totals are kept. ${esc(pruned)}</span></span>
+          <select class="input pv-select" data-privacy="retention_days" aria-label="Keep finished work for" ${dis}>${p.retention_choices.map((n) => `<option value="${n}" ${st.retention_days === n ? 'selected' : ''}>${esc(days(n))}</option>`).join('')}</select></div>
+        ${sw('read_sessions', 'List sessions from AI apps on this computer', 'Read from each app’s own logs: when and where it ran, the model and tokens. Off removes them here; the apps’ own history isn’t touched.')}
+        ${sw('session_titles', 'Name sessions after their first message', 'Off lists them as “Claude Code session” and so on, without what you typed.')}
+        <p class="fine">Alerts, Windows notifications and the update check are in <a href="#settings">Settings</a>.</p>
+      </section>
+      <section class="card"><div class="card-head">${ICON.download}<h3>Your copy, and deleting everything</h3></div>
+        <p class="muted small">Download everything in a readable file you can keep or move: tools, tasks and results, conversations, alerts, automations and settings. It never includes your password or keys.</p>
+        <div class="form-actions"><button class="btn" data-action="backup-download" ${dis}>${ICON.download}Download a copy</button>
+          ${S.eraseOpen ? '' : `<button class="btn danger" data-action="erase-open" ${dis}>${ICON.trash}Delete everything…</button>`}</div>
+        ${S.eraseOpen ? `<form class="pv-erase" data-form="erase">
+          <p><b>This permanently deletes everything AI Command Center keeps</b>: your account, tools and keys, usage, tasks and results, conversations, alerts, automations and settings. It can’t be undone. The AI apps you connected and their own history aren’t affected. The app then starts over as if newly installed.</p>
+          <div class="form-row"><div class="field"><label for="er-pass">Your password</label><input class="input" id="er-pass" name="password" type="password" autocomplete="current-password" required></div>
+            <div class="field"><label for="er-confirm">Type DELETE to confirm</label><input class="input" id="er-confirm" name="confirm" autocomplete="off" required pattern="DELETE" spellcheck="false"></div></div>
+          <div class="form-actions"><button class="btn danger" type="submit">${ICON.trash}Delete everything</button><button class="btn ghost" type="button" data-action="erase-cancel">Keep my data</button></div>
+          <div class="error-text" data-error></div></form>` : ''}
+      </section>
+      <section class="card pv-about"><div class="card-head">${ICON.info}<h3>About</h3><span class="aside">Version ${esc(d.update?.current ?? '')}</span></div>
+        <p><b>AI-generated content.</b> Chat replies, task results, AI team work, merged answers and the daily summary are written by AI models from other companies, and each is labelled with the AI that wrote it. They can be wrong or out of date, so check anything important before relying on it.</p>
+        <p><b>Your accounts.</b> Work you run here counts toward your plans and follows each provider’s terms and privacy policy. Only connect accounts you’re allowed to use, and only give an AI team folders you’re allowed to change.</p>
+        <p><b>Not affiliated.</b> AI Command Center isn’t made, endorsed or sponsored by Anthropic, OpenAI, Google, GitHub, Microsoft, Anysphere or Perplexity. Their product names are trademarks of their owners and appear only to identify the tools you connect. The coloured initials aren’t their logos.</p>
+        <details class="pv-licenses"><summary>Open-source software in this app</summary>
+          <ul>${[['Electron', 'MIT'], ['Express', 'MIT'], ['Chart.js', 'MIT'], ['Anthropic SDK for TypeScript', 'MIT'], ['Inter typeface', 'SIL Open Font License 1.1'], ['Node.js', 'MIT and others']].map(([n, l]) => `<li>${esc(n)} <span class="faint">· ${esc(l)}</span></li>`).join('')}</ul>
+          <p class="fine">Each package’s licence ships with it in the app’s files.</p></details>
+      </section>`;
+  },
+
   settings() {
     const d = S.data;
     const st = d.settings;
@@ -1362,6 +1454,37 @@ function taskListHtml(groups, labels) {
     : emptyBlock('No tasks yet', 'Connect Claude Code, Codex, Gemini or GitHub Copilot to see their sessions, have your scripts report tasks, or start an assistant or AI team task.');
 }
 
+/** Retention deletes old work as soon as it's set, so say how much first. Resolves true to go ahead. */
+function confirmRetention(days) {
+  const cutoff = Date.now() - days * 86_400_000;
+  const n = (S.data?.tasks ?? []).filter((t) => t.kind !== 'session' && ['completed', 'failed'].includes(t.status) && Date.parse(t.finished_at ?? t.updated_at) < cutoff).length;
+  return new Promise((resolve) => {
+    openPanel('Delete old finished work?', `<div class="form">
+      <p>Finished tasks and their results, conversations, alerts, activity and routing notes older than ${days === 365 ? 'a year' : `${days} days`} will be deleted now, then once a day. ${n ? `That includes ${plural(n, 'task')} now.` : 'Nothing is that old yet.'} Deleted work can’t be brought back, unless you saved a copy first.</p>
+      <div class="form-actions"><button class="btn danger" data-retention="yes">Delete old work</button><button class="btn ghost" data-retention="no">Cancel</button></div></div>`, { center: true });
+    const root = $('#modal-root');
+    const done = (v) => {
+      root.removeEventListener('click', onPick, true);
+      S.onModalClose = null;
+      closeModal();
+      resolve(v);
+    };
+    // Escape, or anything else that closes the dialog, counts as Cancel.
+    S.onModalClose = () => {
+      root.removeEventListener('click', onPick, true);
+      resolve(false);
+    };
+    const onPick = (e) => {
+      const b = e.target.closest('[data-retention], [data-action="close"], .overlay');
+      if (!b) return;
+      if (b.classList.contains('overlay') && e.target !== b) return;
+      e.stopPropagation();
+      done(b.dataset.retention === 'yes');
+    };
+    root.addEventListener('click', onPick, true);
+  });
+}
+
 // ── Updates ──────────────────────────────────────────────────────────────
 function updateCard(d) {
   const u = d.update ?? {};
@@ -1384,6 +1507,41 @@ function updateCard(d) {
       <span class="faint small">${u.checked_at ? `Checked ${esc(rel(u.checked_at))}` : 'Not checked yet'}</span></div>
     <p class="fine">Reads the public list of releases on GitHub; no account or data of yours is sent.${u.can_install ? ' Installing keeps your data and settings, and the app opens again by itself.' : d.desktop_app ? '' : ' Running as a server: download the new version and restart it yourself.'}</p>
   </section>`;
+}
+
+// ── Map ──────────────────────────────────────────────────────────────────
+const MAP_HELPERS = {
+  esc,
+  ICON,
+  fmtNum,
+  rel,
+  logo,
+  limitMeters,
+  accountLine,
+  toolStatus,
+  hueOf: (vendor) => HUE[vendor] ?? 'slate',
+  mono: (t) => (t.kind === 'builtin' ? 'An' : MONO[t.adapter] ?? monogram(t.adapter_name ?? t.name)),
+  kindLabel: (t) => KIND_LABEL[t.kind] ?? '',
+  remember: writeStore,
+};
+S.map = { view: null, sel: null, layers: null, legend: readStore('acc-map-legend') === '1' };
+const mapStats = () => (S.stats && S.stats.demo === S.demo ? S.stats : null);
+
+function mountTheMap() {
+  const el = $('#map');
+  if (!el) return;
+  // A different data set (demo on or off) starts from a fresh view.
+  if (S.map.demo !== S.demo) S.map = { view: null, sel: null, layers: S.map.layers, legend: S.map.legend, demo: S.demo };
+  S.mapInst = mountMap(el, { data: S.data, stats: mapStats(), state: S.map, h: MAP_HELPERS });
+  const list = $('#map-list');
+  if (list) list.innerHTML = mapListHtml(S.mapInst.model(), MAP_HELPERS);
+}
+
+function refreshMap() {
+  if (!S.mapInst || !$('#map')) return;
+  S.mapInst.update(S.data, mapStats());
+  const list = $('#map-list');
+  if (list) list.innerHTML = mapListHtml(S.mapInst.model(), MAP_HELPERS);
 }
 
 // ── Automations ──────────────────────────────────────────────────────────
@@ -1451,7 +1609,7 @@ function openAutomation(a = {}) {
     <form class="form" data-form="automation" ${a.id ? `data-id="${a.id}"` : ''}>
       <div class="field"><label for="au-name">Name</label><input class="input" id="au-name" name="name" maxlength="80" required value="${esc(a.name ?? '')}" placeholder="Weekly usage report"></div>
       <div class="field"><label for="au-prompt">What should it do each time?</label><textarea class="input" id="au-prompt" name="prompt" rows="5" maxlength="4000" required placeholder="Summarize last week’s AI usage and flag anything close to a limit.">${esc(a.prompt ?? '')}</textarea>
-        <span class="help">Write it as you would for a one-off task. The AI starts fresh each run.</span></div>
+        <span class="help">Write it as you would for a one-off task. The AI starts fresh each run. Each run sends this prompt, and any dashboard data the AI asks for, to the AI it goes to, while you’re away.</span></div>
       <div class="field"><label>How it runs</label>
         <div class="choice-row" role="radiogroup">${Object.entries(MODE_LABEL).map(([k, v]) => `<label class="choice"><input type="radio" name="mode" value="${k}" ${mode === k ? 'checked' : ''} data-auto-mode><span><b>${v}</b><span class="faint small block">${k === 'task' ? 'The best AI for it works alone' : k === 'team' ? 'Plan, build, review, fix' : 'Every AI answers, then a merge'}</span></span></label>`).join('')}</div></div>
       <div class="field" id="au-folder-field" ${mode === 'team' ? '' : 'hidden'}><label for="au-folder">Folder to work in (optional)</label>
@@ -1559,6 +1717,35 @@ function chartBase(text, grid) {
 }
 
 const AFTER = {
+  map() {
+    mountTheMap();
+    const fresh = S.stats && S.stats.demo === S.demo && Date.now() - S.statsAt < 60_000;
+    if (fresh || S.statsLoading) return;
+    S.statsLoading = true;
+    api(S.demo ? '/api/demo/stats' : '/api/stats')
+      .then((r) => {
+        S.stats = { ...r, demo: S.demo };
+        S.statsAt = Date.now();
+        if (S.page === 'map') refreshMap();
+      })
+      .catch(() => {
+        /* the map still works without routing counts */
+      })
+      .finally(() => (S.statsLoading = false));
+  },
+  privacy() {
+    const fresh = S.privacyInfo && Date.now() - S.privacyAt < 30_000;
+    if (fresh || S.privacyLoading) return;
+    S.privacyLoading = true;
+    api('/api/privacy')
+      .then((r) => {
+        S.privacyInfo = r;
+        S.privacyAt = Date.now();
+        if (S.page === 'privacy' && !$('#er-pass')) renderPage();
+      })
+      .catch((err) => toast(err.message, true))
+      .finally(() => (S.privacyLoading = false));
+  },
   stats() {
     const fresh = S.stats && S.stats.demo === S.demo && Date.now() - S.statsAt < 60_000;
     if (!fresh) {
@@ -1669,6 +1856,7 @@ const AFTER = {
 
 // ── Modals ───────────────────────────────────────────────────────────────
 function openPanel(title, body, { center = false, wide = false, focus = true } = {}) {
+  if (!$('#modal-root .panel')) S.returnFocus = document.activeElement;
   $('#modal-root').innerHTML = `<div class="overlay ${center ? 'center' : ''}" data-action="overlay">
     <div class="panel ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="panel-head"><h2>${esc(title)}</h2><button class="btn icon-btn ghost" data-action="close" aria-label="Close">${ICON.close}</button></div>
@@ -1676,7 +1864,14 @@ function openPanel(title, body, { center = false, wide = false, focus = true } =
   if (focus) $('#modal-root .panel-body input, #modal-root .panel-body button')?.focus();
 }
 function closeModal() {
+  const onClose = S.onModalClose;
+  S.onModalClose = null;
+  onClose?.();
+  const hadPanel = Boolean($('#modal-root .panel'));
   $('#modal-root').innerHTML = '';
+  const back = S.returnFocus;
+  S.returnFocus = null;
+  if (hadPanel && back?.isConnected && typeof back.focus === 'function') back.focus({ preventScroll: true });
   S.add = null;
   S.openTask = null;
 }
@@ -1768,7 +1963,7 @@ async function openTask(id, { refresh = false } = {}) {
     }
     const box = $('#task-detail');
     if (box && detail.result) {
-      box.insertAdjacentHTML('beforebegin', `<div class="section"><h4>Result</h4>
+      box.insertAdjacentHTML('beforebegin', `<div class="section"><h4>Result${t.runner ? ` <span class="tag ai-tag" title="Written by an AI model. Check anything important before relying on it.">AI-generated · ${esc(t.runner_label)}</span>` : ''}</h4>
         <div class="result md" id="task-result">${md(detail.result)}</div>
         <pre id="task-result-raw" hidden>${esc(detail.result)}</pre>
         <div class="form-actions"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button>
@@ -2033,6 +2228,14 @@ const FORMS = {
     const r = await api('/api/team-tasks', { method: 'POST', body: { goal: fd.goal, folder: fd.folder?.trim() || null } });
     closeModal();
     await startedTeam(r);
+  },
+  async erase(fd) {
+    if (fd.confirm !== 'DELETE') throw new Error('Type DELETE, in capitals, to confirm.');
+    const r = await api('/api/privacy/erase', { method: 'POST', body: { password: fd.password, confirm: fd.confirm } });
+    clearTimeout(S.timer);
+    S.user = null;
+    S.data = null;
+    location.replace(r.setup_code ? `/?setup=${encodeURIComponent(r.setup_code)}` : '/');
   },
   async 'follow-up'(fd, form) {
     const r = await api(`/api/tasks/${form.dataset.id}/follow-up`, { method: 'POST', body: { text: fd.text } });
@@ -2346,6 +2549,27 @@ const ACTIONS = {
       el.disabled = false;
     }
   },
+  'erase-open'() {
+    S.eraseOpen = true;
+    renderPage();
+    $('#er-pass')?.focus();
+  },
+  'erase-cancel'() {
+    S.eraseOpen = false;
+    renderPage();
+  },
+  async 'open-data-folder'() {
+    await api('/api/privacy/open-folder', { method: 'POST' });
+  },
+  async 'map-chat'(el) {
+    await useEngine(el.dataset.engine);
+    location.hash = '#assistant';
+  },
+  skip() {
+    const main = $('#content');
+    main?.focus();
+    main?.scrollTo(0, 0);
+  },
   'go-update'() {
     if (S.page !== 'settings') location.hash = '#settings';
     setTimeout(() => document.getElementById('updates')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
@@ -2555,6 +2779,26 @@ async function onChange(e) {
     }
     return;
   }
+  if (el.dataset.privacy) {
+    const k = el.dataset.privacy;
+    const value = k === 'retention_days' ? Number(el.value) : el.checked;
+    if (k === 'retention_days' && value && !(await confirmRetention(value))) {
+      el.value = String(S.privacyInfo?.settings?.retention_days ?? 0);
+      return;
+    }
+    try {
+      await api('/api/settings', { method: 'PUT', body: { privacy: { [k]: value } } });
+      toast(k === 'retention_days' ? (value ? `Finished work older than ${value === 365 ? 'a year' : `${value} days`} is now deleted daily` : 'Finished work is kept until you delete it')
+        : k === 'read_sessions' ? (value ? 'Sessions from AI apps are listed again after the next sync' : 'Sessions from AI apps are no longer listed')
+          : value ? 'Sessions are named after their first message from the next sync' : 'Sessions no longer show what you typed');
+      S.privacyInfo = null;
+      await load({ force: true });
+    } catch (err) {
+      if (k !== 'retention_days') el.checked = !el.checked;
+      toast(err.message, true);
+    }
+    return;
+  }
   if (el.dataset.autoToggle) {
     try {
       const a = await api(`/api/automations/${el.dataset.autoToggle}`, { method: 'PATCH', body: { enabled: el.checked } });
@@ -2651,6 +2895,7 @@ async function boot() {
       Object.assign(S, routeFromHash());
       S.confirmRemove = null;
       S.confirmAuto = null;
+      S.eraseOpen = false;
       closeModal();
       updateChrome();
       renderPage();
@@ -2670,6 +2915,24 @@ async function boot() {
       }
     });
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && $('#modal-root .panel')) {
+        const items = [...$('#modal-root .panel').querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')].filter((el) => el.offsetParent !== null);
+        if (items.length) {
+          const first = items[0];
+          const last = items[items.length - 1];
+          const inside = $('#modal-root .panel').contains(document.activeElement);
+          if (e.shiftKey && (document.activeElement === first || !inside)) {
+            e.preventDefault();
+            last.focus();
+            return;
+          }
+          if (!e.shiftKey && (document.activeElement === last || !inside)) {
+            e.preventDefault();
+            first.focus();
+            return;
+          }
+        }
+      }
       if (e.target.id === 'chat-input' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         e.target.form.requestSubmit();

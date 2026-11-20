@@ -7,6 +7,7 @@ import { maybeRefreshSummary } from './summary.js';
 import { pruneSessions } from './auth.js';
 import { runDueAutomations } from './automations.js';
 import { maybeCheckForUpdate } from './updates.js';
+import { maybePrune } from './privacy.js';
 import { AdapterError, addDays, nowIso, startOfUtcDay, startOfUtcMonth, utcDay } from './util.js';
 
 const inFlight = new Map();
@@ -24,7 +25,7 @@ export function syncIntegration(id) {
 export const localStatusOf = (st) => (!st?.installed ? 'missing' : !st.signed_in ? 'signin' : 'ok');
 
 /** Sessions read from a CLI's logs become tasks of kind 'session'. They are not announced in the feed. */
-function saveSessions(integrationId, sessions, now = Date.now()) {
+function saveSessions(integrationId, sessions, now = Date.now(), { titles = true, label = 'AI app' } = {}) {
   const cutoff = now - 30 * 86_400_000;
   const keep = sessions
     .filter((s) => s.last_at && Date.parse(s.last_at) >= cutoff)
@@ -43,7 +44,8 @@ function saveSessions(integrationId, sessions, now = Date.now()) {
     const detail = [s.where && `in ${s.where}`, s.model, s.tokens ? `${s.tokens.toLocaleString('en-US')} tokens` : null].filter(Boolean).join(' · ');
     const ext = `session:${s.id}`;
     ids.push(ext);
-    up.run(integrationId, ext, String(s.name).slice(0, 200), detail || null, running ? 'running' : 'completed', s.started_at, running ? null : s.last_at, s.started_at ?? s.last_at, s.last_at);
+    // With session names off, a session is listed without what you first typed in it.
+    up.run(integrationId, ext, titles ? String(s.name).slice(0, 200) : `${label} session`, detail || null, running ? 'running' : 'completed', s.started_at, running ? null : s.last_at, s.started_at ?? s.last_at, s.last_at);
   }
   const stale = db.prepare("SELECT id, external_id FROM tasks WHERE integration_id = ? AND kind = 'session'").all(integrationId).filter((t) => !ids.includes(t.external_id));
   const del = db.prepare('DELETE FROM tasks WHERE id = ?');
@@ -75,7 +77,8 @@ async function runSync(id) {
         ins.run(id, r.day, r.model ?? '', source, r.input_tokens ?? null, r.output_tokens ?? null, r.cache_read_tokens ?? null,
           r.cache_write_tokens ?? null, r.requests ?? null, r.cost_usd ?? null);
       }
-      if (out.sessions) saveSessions(id, out.sessions);
+      const privacy = getSettings().privacy ?? {};
+      if (out.sessions && privacy.read_sessions !== false) saveSessions(id, out.sessions, Date.now(), { titles: privacy.session_titles !== false, label: row.name });
       db.prepare('UPDATE integrations SET status = ?, last_sync_at = ?, last_error = NULL, data_refreshed_at = ?, meta = ? WHERE id = ?').run(
         status, nowIso(), out.dataRefreshedAt ?? null, out.meta ? JSON.stringify(out.meta) : row.meta, id);
     });
@@ -112,6 +115,11 @@ async function tick() {
     console.error('[acc] automations:', err);
   }
   evaluateAlerts();
+  try {
+    maybePrune();
+  } catch (err) {
+    console.error('[acc] retention:', err);
+  }
   maybeCheckForUpdate(getSettings());
   await maybeRefreshSummary();
   pruneSessions();

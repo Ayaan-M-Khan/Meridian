@@ -194,6 +194,9 @@ export const DEFAULT_SETTINGS = {
   route_prefs: {},
   // Desktop app only: keep running in the tray when the window closes, start at sign-in, show Windows notifications.
   desktop: { keep_running: false, open_at_login: false, notifications: true, check_updates: true },
+  // Your data (privacy.js): delete finished work older than this many days (0 keeps it), whether sessions from AI apps
+  // on this computer are listed, and whether they're named after their first message.
+  privacy: { retention_days: 0, read_sessions: true, session_titles: true },
   notify: {
     my_task_done: true,
     update: true,
@@ -232,6 +235,7 @@ export function getSettings() {
     notify: { ...DEFAULT_SETTINGS.notify, ...(saved.notify ?? {}) },
     team_roles: { ...DEFAULT_SETTINGS.team_roles, ...(saved.team_roles ?? {}) },
     desktop: { ...DEFAULT_SETTINGS.desktop, ...(saved.desktop ?? {}) },
+    privacy: { ...DEFAULT_SETTINGS.privacy, ...(saved.privacy ?? {}) },
     engine_models: { ...(saved.engine_models ?? {}) },
     route_prefs: { ...(saved.route_prefs ?? {}) },
   };
