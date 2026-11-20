@@ -125,7 +125,7 @@ test('a Claude background task reports progress, saves its result and records to
   assert.equal(usage.r, 2);
   const view = buildState().tasks.find((x) => x.id === t.id);
   assert.equal(view.runner, 'claude-api');
-  assert.deepEqual(view.controls, ['retry']);
+  assert.deepEqual(view.controls, ['retry', 'follow_up']);
 });
 
 test('the assistant can act on the dashboard and the chat shows what it did', async () => {

@@ -2,6 +2,7 @@ import { adapters } from './adapters/index.js';
 import { DEFAULT_SETTINGS } from './db.js';
 import { lastNDays, startOfUtcMonth, utcDay } from './util.js';
 import { nextRun } from './automations.js';
+import { updateView } from './updates.js';
 
 /** Sample statistics in the same shape as buildStats(), for demo mode. */
 export function demoStats(now = new Date()) {
@@ -144,7 +145,7 @@ export function demoState(now = new Date()) {
     description: null, progress: null, step: null, started_at: null, eta: null,
     eta_at: null, eta_source: null, stalled: false, overdue: false, longer_than_usual: false, typical_ms: null,
     scheduled_for: null, finished_at: null, error: null, has_result: false,
-    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, team: null, controls: [], ...extra,
+    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, team: null, follows: null, controls: [], ...extra,
   });
   const stage = (key, label, role, engine, engine_label, status, extra = {}) => ({ key, label, role, engine, engine_label, status, started_at: null, finished_at: null, verdict: undefined, note: undefined, error: undefined, ...extra });
   const tasks = [
@@ -232,6 +233,7 @@ export function demoState(now = new Date()) {
     },
     settings: { ...DEFAULT_SETTINGS, monthly_ceiling_usd: 300, summary_key_set: false, summary_key_hint: null },
     desktop_app: Boolean(globalThis.accDesktop),
+    update: { ...updateView(), notes: null, can_install: false },
     task_kinds: { code: 'Coding', debug: 'Debugging', writing: 'Writing', research: 'Research', analysis: 'Analysis', planning: 'Planning', quick: 'Quick question', general: 'General' },
     automations: [
       { id: 1, name: 'Weekly AI usage report', prompt: 'Summarize last week’s AI usage by tool, flag anything near a limit, and suggest where to cut back.', mode: 'task', mode_label: 'Assistant task', schedule: { every: 'week', at: '09:00', day: 1 }, schedule_text: 'Every Monday at 09:00', enabled: true, next_run_at: nextRun({ every: 'week', at: '09:00', day: 1 }, now).toISOString(), last_run_at: ago(60 * 24 * 6.9), last_error: null, last_task: { id: 7, status: 'completed', finished_at: ago(60 * 24 * 6.9) }, created_at: ago(60 * 24 * 30) },

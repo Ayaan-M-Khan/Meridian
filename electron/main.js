@@ -1,4 +1,6 @@
 import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, nativeTheme, shell } from 'electron';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -151,6 +153,23 @@ if (!app.requestSingleInstanceLock()) {
       else if (win?.isVisible()) removeTray();
     };
     globalThis.accApplyDesktopSettings();
+
+    /**
+     * Runs an installer the server downloaded and checked against the release (server/updates.js), then quits. The
+     * installer replaces the app in place, keeps your data, and opens the app again when it's done.
+     */
+    const { UPDATE_DIR } = await import('../server/updates.js');
+    globalThis.accInstallUpdate = async (file) => {
+      if (!app.isPackaged) throw new Error('Updates install only in the installed app, not when running from source.');
+      const resolved = path.resolve(String(file));
+      if (path.dirname(resolved) !== path.resolve(UPDATE_DIR) || !/\.exe$/i.test(resolved) || !fs.existsSync(resolved)) throw new Error('The downloaded installer is missing. Try again.');
+      spawn(resolved, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      // Give the page time to show that the app is restarting, then get out of the installer's way.
+      setTimeout(() => {
+        quitting = true;
+        app.quit();
+      }, 1500);
+    };
 
     // Links to other sites open in the default browser, never inside the app window.
     win.webContents.setWindowOpenHandler(({ url }) => {

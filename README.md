@@ -13,6 +13,7 @@ The desktop app keeps its data in `%APPDATA%\AI Command Center\data`. It syncs, 
 - **Closing the window** quits the app, unless tasks are running: then it asks whether to keep them going in the background. **Settings → Desktop app** can keep it running in the system tray every time, and start it in the tray when you sign in to Windows.
 - **Windows notifications** show new alerts while the app isn't in front, including "AI team finished" and "Task failed" for tasks you started. Click one to open it.
 - **Backups:** **Settings → Backup** saves your tools, tasks and results, conversations, alerts and settings to a JSON file, and restores from one. Backups never include your password, API keys or ingest tokens, so the file is safe to keep; you add keys again after restoring. The code is on GitHub; your data stays on your computer and in the backups you save.
+- **Updates:** the app checks this project's GitHub releases every few hours and lets you know when there's a new version. **Settings → Updates** shows what's new and installs it: the app downloads the installer, checks it against the release (size and GitHub's SHA-256 checksum), closes, updates in place and opens again, with your data kept. It won't install while tasks are running. Public releases are read directly; while the repository is private, the check and download use your GitHub CLI sign-in (`gh auth login`), and the app never handles the token. Turn the automatic check off under **Settings → Desktop app**.
 - **Exports:** **Usage & Costs** downloads the last 30 days as CSV, and each task's result saves as a Markdown file.
 - **Shortcuts:** Ctrl+K (or **/**) jumps to the overview's command bar. The Tasks page has a search box.
 
@@ -120,6 +121,8 @@ The **Assistant** page, the command bar on the overview, and **Ask** on each too
 - **Background tasks.** Choose **New assistant task** on the Tasks page, or ask for one in the chat. It works through the task on its own and reports its progress, so the Tasks page shows a live progress bar, the current step and an expected finish. The result is saved on the task. Two run at a time; others wait in the queue. They stop if you close the app.
 - **The daily summary** on the overview.
 
+**Follow-ups.** A finished or failed assistant task, AI team task or Ask all has **Continue from here** on its panel: write what to do next (“make it shorter”, “now add tests”) and a new task starts that runs the same way, in the same folder for an AI team, and gets the earlier request and result to build on. The earlier result is passed as material, not as instructions. The new task links back to the one it continues.
+
 When it runs through a command-line app, the app's functions are offered to it as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off or limited: no shell commands, and no file changes outside AI team tasks with a folder. It runs in its own folder inside the app's data folder, so its sessions stay apart from yours, and its usage is counted under that tool from its logs. Runs the app starts also turn off the CLI's auto-update for that run, so a run never stops to update.
 
 Each AI app's page has **Model for runs from this app** (for example `sonnet` in Claude Code), used for everything the app runs through it; a lighter model uses less of your plan. **Settings → Assistant** can also build the daily summary from fixed rules only, so it never uses an AI.
@@ -224,7 +227,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/engine-list.js`, `server/engines.js`: which AI the assistant uses, and running a prompt through a CLI with the bridge.
 - `server/assistant.js`: the chat. It runs the tool-use loop (API key) or a CLI run, and streams replies to the browser as newline-delimited JSON.
 - `server/assistant-tools.js`: the app functions the assistant can call. Read-only tools are available everywhere; actions are available only in the chat.
-- `server/runner.js`: background tasks the assistant carries out, with a queue and cancel/retry.
+- `server/runner.js`: background tasks the assistant carries out, with a queue, cancel/retry and follow-ups.
+- `server/updates.js`: checks GitHub for a newer release, and downloads and verifies the installer for the desktop app to run.
 - `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
 - `server/backup.js`: backups as a JSON file (tools, tasks, conversations, alerts, automations and settings), without secrets, and restoring them.
 - `server/automations.js`: saved prompts that run on a schedule; the scheduler in `server/sync.js` starts the ones that are due every minute.

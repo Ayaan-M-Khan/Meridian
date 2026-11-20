@@ -601,3 +601,121 @@ test('automations: saved with checks, paused and resumed, run when due, skipped 
   assert.equal(listAutomations().length, 0);
   assert.ok(Array.isArray(buildState().automations));
 });
+
+test('updates: versions compare by number, a newer release is offered once, and installs only from this project', async () => {
+  const { compareVersions, checkForUpdate, updateView, installUpdate, downloadInstaller, DOWNLOAD_PREFIX } = await import('../server/updates.js');
+  const { setRaw } = await import('../server/db.js');
+  assert.equal(compareVersions('0.10.0', '0.9.9'), 1);
+  assert.equal(compareVersions('v0.7.0', '0.7.0'), 0);
+  assert.equal(compareVersions('0.7.0', '0.7.1'), -1);
+
+  const body = (tag, assets) => ({ tag_name: tag, html_url: `https://github.com/Ayaan-M-Khan/ai-command-center/releases/tag/${tag}`, body: '## New\n- Things', assets });
+  const publicRelease = (tag, assets) => async (url, opts) => {
+    assert.match(url, /^https:\/\/api\.github\.com\/repos\/Ayaan-M-Khan\/ai-command-center\/releases\/latest$/);
+    assert.equal(opts.headers['user-agent'], 'AI-Command-Center-updater', 'a generic client name, nothing about the person');
+    return new Response(JSON.stringify(body(tag, assets)), { status: 200 });
+  };
+  const notFound = async () => new Response('{}', { status: 404 });
+  const noGh = async () => null;
+  const installer = Buffer.from('pretend installer');
+  const sha = crypto.createHash('sha256').update(installer).digest('hex');
+  const good = { name: 'AI-Command-Center-Setup-9.0.0.exe', browser_download_url: `${DOWNLOAD_PREFIX}v9.0.0/AI-Command-Center-Setup-9.0.0.exe`, size: installer.length, digest: `sha256:${sha}` };
+  const foreign = { name: 'AI-Command-Center-Setup-9.0.0.exe', browser_download_url: 'https://example.com/AI-Command-Center-Setup-9.0.0.exe', size: 1 };
+  const alerts = () => db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind = 'update'").get().n;
+  try {
+    await checkForUpdate({ force: true, current: '0.8.0', fetchImpl: publicRelease('v9.0.0', [foreign]), gh: noGh });
+    let u = updateView('0.8.0');
+    assert.equal(u.available, true);
+    assert.equal(u.latest, '9.0.0');
+    assert.equal(u.can_install, false, 'an installer from anywhere else is never used');
+    assert.equal(alerts(), 1);
+
+    // Private releases: read through the GitHub CLI's own sign-in.
+    const ghCalls = [];
+    const gh = async (args) => {
+      ghCalls.push(args);
+      return { code: 0, stdout: JSON.stringify(body('v9.0.0', [good])), stderr: '' };
+    };
+    await checkForUpdate({ force: true, current: '0.8.0', fetchImpl: notFound, gh });
+    assert.deepEqual(ghCalls[0], ['api', 'repos/Ayaan-M-Khan/ai-command-center/releases/latest']);
+    assert.equal(alerts(), 1, 'one alert per version');
+    assert.equal(updateView('0.8.0').can_install, false, 'only the desktop app installs');
+    await assert.rejects(installUpdate(), /desktop app/);
+    await checkForUpdate({ force: true, current: '0.8.0', fetchImpl: notFound, gh: noGh });
+    assert.match(updateView('0.8.0').error, /releases are private.*gh auth login/);
+
+    // Downloads are checked against the release before anything runs.
+    const dir = path.join(tmp, 'update-dl');
+    const asset = { name: good.name, url: good.browser_download_url, tag: 'v9.0.0', via: 'web', size: installer.length, sha256: sha };
+    const file = await downloadInstaller(asset, { dir, fetchImpl: async () => new Response(installer) });
+    assert.equal(fs.readFileSync(file, 'utf8'), 'pretend installer');
+    await assert.rejects(downloadInstaller(asset, { dir, fetchImpl: async () => new Response('tampered!!!!!!!!!') }), /didn’t match the release/);
+    await assert.rejects(downloadInstaller({ ...asset, url: 'https://example.com/x.exe' }, { dir }), /isn’t from AI Command Center’s releases/);
+    const viaGh = await downloadInstaller({ ...asset, via: 'gh' }, { dir, gh: async (args) => {
+      assert.deepEqual(args.slice(0, 5), ['release', 'download', 'v9.0.0', '--repo', 'Ayaan-M-Khan/ai-command-center']);
+      fs.writeFileSync(path.join(args[args.indexOf('--dir') + 1], good.name), installer);
+      return { code: 0, stdout: '', stderr: '' };
+    } });
+    assert.equal(path.basename(viaGh), good.name);
+
+    await checkForUpdate({ force: true, current: '0.8.0', fetchImpl: publicRelease('v9.0.0', [good]), gh: noGh });
+    const ran = [];
+    globalThis.accInstallUpdate = async (f) => ran.push(f);
+    assert.equal(updateView('0.8.0').can_install, true);
+    await assert.rejects(installUpdate({ busy: 2 }), /2 tasks are still running/);
+    const r = await installUpdate({ download: async (a) => {
+      assert.equal(a.via, 'web');
+      return downloadInstaller(a, { dir, fetchImpl: async () => new Response(installer) });
+    } });
+    assert.equal(r.version, '9.0.0');
+    assert.equal(ran.length, 1);
+    assert.equal(path.basename(ran[0]), good.name);
+
+    await checkForUpdate({ force: true, current: '0.8.0', fetchImpl: async () => new Response('{}', { status: 403 }), gh: noGh });
+    u = updateView('0.8.0');
+    assert.match(u.error, /limiting requests/);
+    assert.equal(u.latest, '9.0.0', 'a failed check keeps what the last one found');
+
+    await checkForUpdate({ force: true, current: '9.0.0', fetchImpl: publicRelease('v9.0.0', [good]), gh: noGh });
+    assert.equal(updateView('9.0.0').available, false);
+  } finally {
+    delete globalThis.accInstallUpdate;
+    setRaw('update_check', undefined);
+    db.prepare("DELETE FROM notifications WHERE kind = 'update'").run();
+  }
+});
+test('a follow-up continues a finished task: same kind of run, and it sees the earlier request and result', async () => {
+  const { followUpTask } = await import('../server/runner.js');
+  const finished = (id) => waitFor(() => {
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    return row.status === 'completed' || row.status === 'failed' ? row : null;
+  });
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Draft: a long email about the launch.' });
+  const first = startClaudeTask({ name: 'Launch email', instructions: 'Write an email about the launch.', engine: 'claude-code' });
+  assert.equal((await finished(first.id)).status, 'completed');
+  assert.throws(() => followUpTask(first.id, ''), /what to do next/);
+
+  const log = path.join(tmp, 'follow.log');
+  process.env.FAKE_CLAUDE_LOG = log;
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Short version.' });
+  try {
+    const r = followUpTask(first.id, 'Make it shorter.');
+    assert.equal(r.kind, 'task');
+    const next = await finished(r.task_id);
+    assert.equal(next.status, 'completed', next.error ?? '');
+    assert.equal(next.name, 'Follow-up: Launch email');
+    assert.equal(next.description, 'Make it shorter.', 'the new task shows only what you asked now');
+    const sent = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.prompt)?.prompt ?? '';
+    assert.match(sent, /Make it shorter\./);
+    assert.match(sent, /Write an email about the launch\./, 'the earlier request comes along');
+    assert.match(sent, /<earlier_result>\nDraft: a long email about the launch\.\n<\/earlier_result>/, 'and the earlier result, marked as material');
+    const view = buildState().tasks.find((x) => x.id === r.task_id);
+    assert.deepEqual(view.follows, { id: first.id, name: 'Launch email' });
+    assert.ok(view.controls.includes('follow_up'));
+    const again = followUpTask(r.task_id, 'Now in French.');
+    await finished(again.task_id);
+    assert.equal(db.prepare('SELECT name FROM tasks WHERE id = ?').get(again.task_id).name, 'Follow-up: Launch email', 'no “Follow-up: Follow-up:”');
+  } finally {
+    delete process.env.FAKE_CLAUDE_LOG;
+  }
+});

@@ -96,6 +96,7 @@ const CAP_LONG = {
 };
 const NOTIFY_LABELS = {
   my_task_done: ['Your tasks', 'When an assistant or AI team task you started finishes or fails'],
+  update: ['App updates', 'When a new version of AI Command Center is available'],
   task_failed: ['Failed tasks', 'When a reported task fails'],
   task_completed: ['Completed tasks', 'When a reported task finishes'],
   task_stalled: ['Stalled tasks', 'When a task that reports progress stops updating'],
@@ -239,6 +240,7 @@ function renderShell() {
         <div class="nav-label">Manage</div>
         ${nav('tools')}${nav('settings')}
       </nav>
+      <a class="update-pill" id="update-pill" href="#settings" data-action="go-update" hidden></a>
       <div class="sidebar-foot"><span class="avatar">${esc(S.user.username.slice(0, 1).toUpperCase())}</span><span class="who">${esc(S.user.username)}</span><button class="btn small ghost" data-action="logout">Sign out</button></div>
     </aside>
     <div class="main">
@@ -302,6 +304,11 @@ function updateChrome() {
   const bell = $('#bell-count');
   bell.hidden = !d?.unread;
   bell.textContent = d?.unread || '';
+  const up = $('#update-pill');
+  if (up) {
+    up.hidden = !d?.update?.available || d.demo;
+    up.innerHTML = d?.update?.available ? `${ICON.download}<span>Update to ${esc(d.update.latest)}</span>` : '';
+  }
   navTools();
 }
 
@@ -476,7 +483,7 @@ function taskRow(t, { compact = false } = {}) {
   const session = t.kind === 'session';
   const prog = t.status === 'running' && t.progress != null;
   const st = session ? SESSION_STATUS[t.status] ?? SESSION_STATUS.completed : TASK_STATUS[t.status];
-  const badge = session ? '<span class="tag">Session</span>' : t.runner_label ? `<span class="tag accent">${esc(t.runner_label)}</span>` : '';
+  const badge = session ? '<span class="tag">Session</span>' : t.runner_label ? `<span class="tag accent">${esc(t.runner_label)}</span>${t.follows ? ' <span class="tag">Follow-up</span>' : ''}` : '';
   return `<button class="row" data-action="open-task" data-id="${t.id}">
     ${session ? `<div class="status-ico ${t.status === 'running' ? 's-running' : 's-queued'}">${ICON.terminal}</div>` : statusIcon(t.status)}
     <div class="row-main">
@@ -1304,8 +1311,11 @@ const VIEWS = {
             ['keep_running', 'Keep running when the window is closed', 'Tasks, the AI team, syncs and alerts keep going. Open it again from the icon in the system tray, and quit it there.'],
             ['open_at_login', 'Start when you sign in to Windows', 'Starts in the system tray, so syncs and alerts run from the moment you sign in.'],
             ['notifications', 'Windows notifications', 'Show new alerts, such as a finished AI team task, as Windows notifications while the app isn’t in front.'],
+            ['check_updates', 'Check for updates', 'Looks for a new version every few hours and lets you know. Nothing installs until you choose to.'],
           ].map(([k, label, help]) => `<label class="switch"><span><span class="switch-label">${esc(label)}</span><span class="faint small">${esc(help)}</span></span><input type="checkbox" data-desktop="${k}" ${st.desktop?.[k] ? 'checked' : ''} ${dis}></label>`).join('')}
         </section>` : ''}
+
+        ${updateCard(d)}
 
         <section class="card"><div class="card-head">${ICON.download}<h3>Backup</h3></div>
           <p class="muted small">Save your tools, tasks and their results, conversations, alerts and settings to a file. Backups never include your password, API keys or ingest tokens, so a backup file is safe to keep, and you add keys again after restoring.</p>
@@ -1350,6 +1360,30 @@ function taskListHtml(groups, labels) {
   return d.tasks.length
     ? emptyBlock(`No ${labels[S.taskFilter]?.toLowerCase() ?? ''} tasks`, 'Try another filter.')
     : emptyBlock('No tasks yet', 'Connect Claude Code, Codex, Gemini or GitHub Copilot to see their sessions, have your scripts report tasks, or start an assistant or AI team task.');
+}
+
+// ── Updates ──────────────────────────────────────────────────────────────
+function updateCard(d) {
+  const u = d.update ?? {};
+  const dis = d.demo ? 'disabled' : '';
+  const status = u.available
+    ? `<b>Version ${esc(u.latest)} is available.</b> You have ${esc(u.current)}.`
+    : u.latest && !u.error
+      ? `You have the newest version, ${esc(u.current)}.`
+      : `You have version ${esc(u.current ?? 'unknown')}.`;
+  const action = u.can_install
+    ? `<button class="btn primary" data-action="install-update" ${dis}>${ICON.download}Install ${esc(u.latest)} and restart</button>`
+    : u.available
+      ? `<a class="btn primary" href="${esc(u.url)}" target="_blank" rel="noopener">${ICON.external}Get ${esc(u.latest)} from GitHub</a>`
+      : '';
+  return `<section class="card" id="updates"><div class="card-head">${ICON.refresh}<h3>Updates</h3>${u.available ? '<span class="tag accent">New version</span>' : ''}</div>
+    <p class="small update-status">${status}</p>
+    ${u.error ? `<div class="callout warn small">Couldn’t check: ${esc(u.error)}</div>` : ''}
+    ${u.available && u.notes ? `<details class="release-notes"><summary>What’s new in ${esc(u.latest)}</summary><div class="md">${md(u.notes)}</div></details>` : ''}
+    <div class="form-actions">${action}<button class="btn" data-action="check-update" ${dis}>Check now</button>
+      <span class="faint small">${u.checked_at ? `Checked ${esc(rel(u.checked_at))}` : 'Not checked yet'}</span></div>
+    <p class="fine">Reads the public list of releases on GitHub; no account or data of yours is sent.${u.can_install ? ' Installing keeps your data and settings, and the app opens again by itself.' : d.desktop_app ? '' : ' Running as a server: download the new version and restart it yourself.'}</p>
+  </section>`;
 }
 
 // ── Automations ──────────────────────────────────────────────────────────
@@ -1697,7 +1731,8 @@ async function openTask(id, { refresh = false } = {}) {
       : `<div class="form-actions"><button class="btn" disabled>Pause</button><button class="btn" disabled>Cancel</button><button class="btn" disabled>Restart</button></div>
        <p class="faint small">${esc(t.tool_name)} doesn’t offer task controls through this app. Stop or restart the task where it runs.</p>`;
   openPanel(t.name, `
-    <div class="pill-row">${pill(st.pill, st.label)}${session ? '<span class="tag">Session</span>' : ''}${mine ? `<span class="tag accent">Run by ${esc(t.runner_label)}</span>` : ''}</div>
+    <div class="pill-row">${pill(st.pill, st.label)}${session ? '<span class="tag">Session</span>' : ''}${mine ? `<span class="tag accent">Run by ${esc(t.runner_label)}</span>` : ''}
+      ${t.follows ? `<span class="faint small">Follows up on ${S.data.tasks.some((x) => x.id === t.follows.id) ? `<button class="link" data-action="open-task" data-id="${t.follows.id}">${esc(t.follows.name)}</button>` : `“${esc(t.follows.name)}”`}</span>` : ''}</div>
     ${t.error ? `<div class="callout err">${esc(t.error)}</div>` : ''}
     ${t.step && t.status === 'running' ? `<p class="now-step"><span class="faint">Now:</span> ${esc(t.step)}</p>` : ''}
     ${t.progress != null ? `<div class="meter flat"><div class="meter-top"><span class="muted">Progress</span><b>${Math.round(t.progress)}%</b></div>${bar(t.progress, t.stalled ? 'err' : 'info')}</div>` : ''}
@@ -1715,6 +1750,7 @@ async function openTask(id, { refresh = false } = {}) {
     ${t.team ? teamTimeline(t) : ''}
     <div class="section" id="task-detail">${t.description ? `<h4>${t.team ? 'Goal' : mine ? 'Instructions' : session ? 'Details' : 'Description'}</h4><p class="pre">${esc(t.description)}</p>` : ''}</div>
     ${canAsk ? `<div class="form-actions"><button class="btn" data-action="ask-task" data-id="${t.id}">${ICON.chat}Ask the assistant about this</button></div>` : ''}
+    ${mine && !S.data.demo && t.controls.includes('follow_up') ? followUpForm(t) : ''}
     <div class="section"><h4>Controls</h4>${controls}</div>`, { focus: !refresh });
   S.openTask = { id: t.id, sig: `${t.status}|${t.updated_at}|${t.progress}` };
   const restore = () => {
@@ -1742,6 +1778,21 @@ async function openTask(id, { refresh = false } = {}) {
   } catch (err) {
     if (!refresh) toast(err.message, true);
   }
+}
+
+/** Continue a finished task: the new one runs the same way and sees this one's request and result. */
+function followUpForm(t) {
+  const how = t.team?.mode === 'compare' ? 'an Ask all task' : t.team ? `an AI team task${t.team.folder ? ' in the same folder' : ''}` : 'a task';
+  const hint = t.status === 'failed'
+    ? 'Say what to change, for example a simpler approach or more detail on the goal.'
+    : t.team?.folder ? 'For example: “Now add tests for the new code.”' : 'For example: “Make it shorter” or “Turn this into a checklist.”';
+  return `<form class="section follow-form" data-form="follow-up" data-id="${t.id}">
+    <h4>${t.status === 'failed' ? 'Try again differently' : 'Continue from here'}</h4>
+    <div class="follow-row"><textarea class="input" id="fu-text" name="text" rows="2" maxlength="2000" required placeholder="${esc(hint)}" aria-label="What should happen next"></textarea>
+      <button class="btn primary" type="submit">${ICON.send}<span>Continue</span></button></div>
+    <span class="help">Starts ${how} that builds on this ${t.status === 'failed' ? 'attempt' : 'result'}.</span>
+    <div class="error-text" data-error></div>
+  </form>`;
 }
 
 const STAGE_STATE = {
@@ -1982,6 +2033,13 @@ const FORMS = {
     const r = await api('/api/team-tasks', { method: 'POST', body: { goal: fd.goal, folder: fd.folder?.trim() || null } });
     closeModal();
     await startedTeam(r);
+  },
+  async 'follow-up'(fd, form) {
+    const r = await api(`/api/tasks/${form.dataset.id}/follow-up`, { method: 'POST', body: { text: fd.text } });
+    toast(r.status === 'queued' ? 'Follow-up queued. It starts when a running task finishes.' : 'Follow-up started');
+    S.taskFilter = 'all';
+    await load({ force: true });
+    openTask(r.task_id);
   },
   async automation(fd, form) {
     const body = { name: fd.name, prompt: fd.prompt, mode: fd.mode, folder: fd.mode === 'team' ? fd.folder?.trim() || null : null, schedule: { every: fd.every, at: fd.at, day: Number(fd.day) } };
@@ -2288,6 +2346,39 @@ const ACTIONS = {
       el.disabled = false;
     }
   },
+  'go-update'() {
+    if (S.page !== 'settings') location.hash = '#settings';
+    setTimeout(() => document.getElementById('updates')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+  },
+  async 'check-update'(el) {
+    el.disabled = true;
+    el.textContent = 'Checking…';
+    try {
+      const u = await api('/api/update/check', { method: 'POST' });
+      toast(u.error ? `Couldn’t check: ${u.error}` : u.available ? `Version ${u.latest} is available` : 'You have the newest version', Boolean(u.error));
+      await load({ force: true });
+    } finally {
+      if (el.isConnected) {
+        el.disabled = false;
+        el.textContent = 'Check now';
+      }
+    }
+  },
+  async 'install-update'(el) {
+    el.disabled = true;
+    el.textContent = 'Downloading…';
+    try {
+      const r = await api('/api/update/install', { method: 'POST' });
+      clearTimeout(S.timer);
+      openPanel('Updating', `<div class="updating"><span class="spin"></span><div><b>Installing version ${esc(r.version)}</b><p class="muted small">AI Command Center closes now and opens again by itself in a minute. Your data and settings stay as they are.</p></div></div>`, { center: true, focus: false });
+    } catch (err) {
+      if (el.isConnected) {
+        el.disabled = false;
+        el.innerHTML = `${ICON.download}Try the update again`;
+      }
+      throw err;
+    }
+  },
   'new-automation'(el) {
     const t = AUTO_TEMPLATES[Number(el.dataset.template)];
     openAutomation(t ? { ...t, schedule: { ...t.schedule } } : {});
@@ -2580,6 +2671,11 @@ async function boot() {
     });
     document.addEventListener('keydown', (e) => {
       if (e.target.id === 'chat-input' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        e.target.form.requestSubmit();
+        return;
+      }
+      if (e.target.id === 'fu-text' && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         e.target.form.requestSubmit();
         return;

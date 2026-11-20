@@ -193,9 +193,10 @@ export const DEFAULT_SETTINGS = {
   // Smart routing: your preferred AI per kind of task ('planning': 'codex'). Missing or 'auto': routing decides.
   route_prefs: {},
   // Desktop app only: keep running in the tray when the window closes, start at sign-in, show Windows notifications.
-  desktop: { keep_running: false, open_at_login: false, notifications: true },
+  desktop: { keep_running: false, open_at_login: false, notifications: true, check_updates: true },
   notify: {
     my_task_done: true,
+    update: true,
     task_failed: true,
     task_completed: false,
     task_stalled: true,

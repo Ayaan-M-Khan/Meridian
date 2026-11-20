@@ -15,7 +15,7 @@ import { classify, logRoute } from './router.js';
 import { engineHasTools, runCliEngine } from './engines.js';
 import { dashboardSnapshot } from './assistant.js';
 import { randomToken } from './crypto.js';
-import { cancelTeamTask, retryTeamTask } from './team.js';
+import { cancelTeamTask, previousContext, retryTeamTask, startTeamTask } from './team.js';
 import { HttpError, nowIso } from './util.js';
 
 const MAX_PARALLEL = 2;
@@ -79,19 +79,20 @@ function setStatus(id, status, fields = {}) {
 const CANCELLED = 'Cancelled from AI Command Center.';
 
 /** Creates the task and starts it, or queues it when two are already running. */
-export function startClaudeTask({ name, instructions, engine: engineId }) {
+export function startClaudeTask({ name, instructions, engine: engineId, previous = null }) {
   // On Automatic, the task goes to the best AI for it. Fails early, with a readable message, when nothing is ready.
   const engine = chooseEngine(engineId, { text: `${name}\n${instructions}`, needsTools: true });
   if (engine.route) logRoute('task', { engine, category: engine.route.category, why: engine.route.why }, name);
   const integ = assistantIntegration();
   if (!integ.enabled) throw new HttpError(409, 'The built-in assistant tool is turned off on the AI Tools page.');
   const now = nowIso();
+  const detail = previous?.result ? JSON.stringify({ previous: { task_id: previous.task_id ?? null, name: String(previous.name ?? '').slice(0, 80), request: previous.request ?? null, result: previous.result } }) : null;
   const { lastInsertRowid } = db
     .prepare(
-      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, category, created_at, updated_at)
-       VALUES(?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?)`,
+      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, category, detail, created_at, updated_at)
+       VALUES(?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?, ?)`,
     )
-    .run(integ.id, `task-${randomToken(6)}`, name, instructions, engine.id, engine.route?.category ?? classify(`${name}\n${instructions}`).category, now, now);
+    .run(integ.id, `task-${randomToken(6)}`, name, instructions, engine.id, engine.route?.category ?? classify(`${name}\n${instructions}`).category, detail, now, now);
   const id = Number(lastInsertRowid);
   announce(integ, id, taskRow(id));
   queue.push(id);
@@ -116,7 +117,8 @@ async function execute(id) {
   }
   recordProgress(id, 0);
   const tools = [...READ_TOOLS, progressTool(id)];
-  const brief = `Task: ${task.name}\n\nInstructions:\n${task.description}`;
+  const previous = readPrevious(task);
+  const brief = `Task: ${task.name}\n\nInstructions:\n${task.description}${previous ? `\n\n---\n\n${previousContext(previous)}` : ''}`;
 
   if (task.runner && task.runner !== 'claude-api') {
     try {
@@ -216,11 +218,47 @@ export function retryClaudeTask(id) {
   if (t.status === 'running' || t.status === 'queued') throw new ToolInputError(`“${t.name}” is still ${t.status}.`);
   let next;
   try {
-    next = startClaudeTask({ name: t.name, instructions: t.description ?? '' });
+    next = startClaudeTask({ name: t.name, instructions: t.description ?? '', previous: readPrevious(t) });
   } catch (err) {
     throw new ToolInputError(err.message);
   }
   return { ok: true, task_id: next.id, status: next.status };
+}
+
+function readPrevious(t) {
+  try {
+    return JSON.parse(t.detail ?? 'null')?.previous ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const RESULT_CONTEXT_LIMIT = 24_000;
+
+/**
+ * Continues a finished task with a new instruction. The new task gets the earlier one's request and result, and runs
+ * the same way: an assistant task, an AI team (in the same folder) or Ask all.
+ */
+export function followUpTask(id, text) {
+  const t = ownTask(id);
+  if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw new HttpError(400, 'Write what to do next, up to 2,000 characters.');
+  if (t.status !== 'completed' && t.status !== 'failed') throw new HttpError(400, `“${t.name}” is still ${t.status}. Follow up when it finishes.`);
+  const result = t.result ?? (t.error ? `The task failed: ${t.error}` : null);
+  if (!result) throw new HttpError(400, 'That task has no result to follow up on.');
+  let detail = null;
+  try {
+    detail = JSON.parse(t.detail ?? 'null');
+  } catch {
+    detail = null;
+  }
+  const team = t.runner === 'team' && detail;
+  const clipped = result.length > RESULT_CONTEXT_LIMIT ? `${result.slice(0, RESULT_CONTEXT_LIMIT)}\n\n[…the rest of the result is left out for length]` : result;
+  const previous = { task_id: t.id, name: t.name, request: String((team ? detail.goal : t.description) ?? '').slice(0, 4000) || null, result: clipped };
+  const name = `Follow-up: ${t.name.replace(/^Follow-up: /, '')}`.slice(0, 80);
+  const next = team
+    ? startTeamTask({ goal: text.trim(), folder: detail.folder ?? null, mode: detail.mode ?? 'team', name, previous })
+    : startClaudeTask({ name, instructions: text.trim(), previous });
+  return { ok: true, task_id: next.id, status: next.status, kind: team ? 'team' : 'task' };
 }
 
 /** Background tasks stop when the app closes; on the next start, mark any left over as failed. */

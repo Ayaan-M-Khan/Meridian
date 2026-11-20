@@ -5,6 +5,7 @@ import { listEngines } from './engine-list.js';
 import { ROLES, lineupView, teamView } from './team.js';
 import { CATEGORIES } from './router.js';
 import { listAutomations } from './automations.js';
+import { updateView } from './updates.js';
 import { lastNDays, nowIso, rowTokens, startOfUtcMonth, sumField, sumNullable, utcDay } from './util.js';
 
 const ACTIVE_WINDOW_MS = 15 * 60_000;
@@ -36,6 +37,7 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
   const builtin = adapterOf.get(t.integration_id) === 'claude-assistant';
   const session = t.kind === 'session';
   const team = t.kind === 'team' ? teamView(t) : null;
+  const prev = builtin && t.detail ? parseMeta(t.detail)?.previous : null;
   // An interactive CLI session has no set end, so it never gets a finish estimate.
   const est = session
     ? estimate({ ...t, status: 'completed' })
@@ -62,7 +64,8 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
     runner: builtin ? t.runner ?? 'claude-api' : null,
     runner_label: !builtin ? null : t.runner === 'team' ? (team?.mode === 'compare' ? 'Ask all' : 'AI team') : adapters[t.runner]?.engine?.label ?? 'Claude API',
     team,
-    controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry'],
+    follows: prev?.task_id ? { id: prev.task_id, name: prev.name } : null,
+    controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry', 'follow_up'],
   };
 }
 
@@ -214,5 +217,6 @@ export function buildState(now = new Date()) {
     team: { lineup: lineupView({ settings }), roles: Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, { title: r.title, does: r.does }])) },
     task_kinds: CATEGORIES,
     automations: listAutomations(),
+    update: updateView(),
   };
 }

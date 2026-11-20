@@ -8,27 +8,19 @@ import { refreshSummary, SUMMARY_KEY_AAD } from './summary.js';
 import { evaluateAlerts } from './alerts.js';
 import { parseUsage, upsertUsage } from './ingest.js';
 import { AdapterError, HttpError, nowIso } from './util.js';
-import { startClaudeTask, cancelClaudeTask, retryClaudeTask } from './runner.js';
+import { startClaudeTask, cancelClaudeTask, retryClaudeTask, followUpTask, runningCount } from './runner.js';
 import { ToolInputError } from './assistant-tools.js';
 import { chooseEngine, listEngines } from './engine-list.js';
 import { LOCAL_ADAPTERS } from './adapters/local.js';
 import { openConsole, forgetResolved } from './local/cli.js';
 import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
-import { ROLES, lineupView, startTeamTask } from './team.js';
+import { ROLES, lineupView, startTeamTask, teamRunningCount } from './team.js';
 import { makeBackup, restoreBackup } from './backup.js';
 import { CATEGORIES, classify, routeTask } from './router.js';
 import { buildStats } from './stats.js';
 import { createAutomation, deleteAutomation, listAutomations, runAutomation, updateAutomation } from './automations.js';
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
-const APP_VERSION = (() => {
-  try {
-    return JSON.parse(fs.readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')).version;
-  } catch {
-    return null;
-  }
-})();
+import { checkForUpdate, installUpdate, updateView } from './updates.js';
+import { APP_VERSION } from './version.js';
 
 const ENGINE_CHOICES = ['auto', 'claude-code', 'codex', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli', 'claude-api'];
 
@@ -318,6 +310,14 @@ export function apiRoutes(app) {
   });
   app.post('/api/automations/:id/run', (req, res) => res.json(runAutomation(req.params.id)));
 
+  // ── Updates ──
+  app.get('/api/update', (req, res) => res.json(updateView()));
+  app.post('/api/update/check', async (req, res) => {
+    await checkForUpdate({ force: true });
+    res.json(updateView());
+  });
+  app.post('/api/update/install', async (req, res) => res.json(await installUpdate({ busy: runningCount() + teamRunningCount() })));
+
   // ── Backups ──
   app.get('/api/backup', (req, res) => {
     const b = makeBackup(APP_VERSION);
@@ -389,6 +389,14 @@ export function apiRoutes(app) {
   };
   app.post('/api/tasks/:id/cancel', control(cancelClaudeTask));
   app.post('/api/tasks/:id/retry', control(retryClaudeTask));
+  app.post('/api/tasks/:id/follow-up', (req, res) => {
+    try {
+      res.status(201).json(followUpTask(Number(req.params.id), req.body?.text));
+    } catch (err) {
+      if (err instanceof ToolInputError) throw new HttpError(400, err.message);
+      throw err;
+    }
+  });
 
   // ── Assistant ──
   app.get('/api/assistant/threads', (req, res) => res.json(listThreads()));

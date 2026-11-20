@@ -812,3 +812,23 @@ th { color: var(--text-3); }
 .choice b { font-size: 13px; font-weight: 600; }
 .task-tools .chips { flex: 1 1 340px; min-width: 0; }
 @media (max-width: 640px) { .task-search { flex: 1 1 100%; width: auto; } }
+
+/* ── Updates (0.8) ─────────────────────────────────────────────────── */
+.update-pill { display: flex; align-items: center; gap: 8px; margin: 0 12px 10px; padding: 8px 11px; border-radius: var(--r-sm); background: var(--accent-dim); color: var(--accent-ink); font-size: 12.5px; font-weight: 600; text-decoration: none; }
+.update-pill:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.update-pill svg { width: 14px; height: 14px; flex-shrink: 0; }
+.update-status { margin: 0 0 4px; }
+.release-notes { margin: 10px 0 4px; border: 1px solid var(--border-sub); border-radius: var(--r-sm); padding: 9px 12px; }
+.release-notes summary { cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-2); }
+.release-notes .md { margin-top: 8px; font-size: 13px; max-height: 320px; overflow: auto; }
+.updating { display: flex; gap: 14px; align-items: flex-start; }
+.updating .spin { margin-top: 3px; flex-shrink: 0; }
+.updating p { margin: 4px 0 0; }
+
+/* ── Follow-ups (0.8) ──────────────────────────────────────────────── */
+.follow-form { display: flex; flex-direction: column; gap: 6px; }
+.follow-row { display: flex; gap: 8px; align-items: flex-end; }
+.follow-row textarea { flex: 1; min-width: 0; resize: vertical; min-height: 44px; }
+.follow-row .btn { flex-shrink: 0; }
+.follow-form .help { font-size: 12px; color: var(--text-3); }
+@media (max-width: 480px) { .follow-row { flex-direction: column; align-items: stretch; } }

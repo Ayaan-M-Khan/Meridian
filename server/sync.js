@@ -6,6 +6,7 @@ import { evaluateAlerts } from './alerts.js';
 import { maybeRefreshSummary } from './summary.js';
 import { pruneSessions } from './auth.js';
 import { runDueAutomations } from './automations.js';
+import { maybeCheckForUpdate } from './updates.js';
 import { AdapterError, addDays, nowIso, startOfUtcDay, startOfUtcMonth, utcDay } from './util.js';
 
 const inFlight = new Map();
@@ -111,6 +112,7 @@ async function tick() {
     console.error('[acc] automations:', err);
   }
   evaluateAlerts();
+  maybeCheckForUpdate(getSettings());
   await maybeRefreshSummary();
   pruneSessions();
 }
