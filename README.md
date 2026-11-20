@@ -51,6 +51,31 @@ Notes:
 
 Signing in to claude.ai, chatgpt.com or gemini.google.com directly from this app isn't possible: none of them offers sign-in for other apps. Going through their own command-line apps is the supported way to use your account here. These run on your computer with your own account, for your own use.
 
+## Smart routing
+
+With the assistant on **Automatic** (Settings → Assistant), every request goes to the AI best suited to it, decided without asking an AI, so routing costs nothing:
+
+1. **What kind of task it is:** coding, debugging, writing, research, analysis, planning or a quick question, from the words in the request.
+2. **Who is strongest at it:** coding to Claude Code or Codex, planning to Codex, research to Gemini, quick questions to Copilot, writing to Claude (starting points in `server/router.js`).
+3. **Credits:**
+   - Plans you already pay for come before a pay-per-use API key.
+   - An AI near its plan limit is used less, and one at its limit is skipped. Codex reports its limits; the others don't.
+   - Among equally good AIs, the one used least today goes first, so no plan sits idle.
+4. **Reliability:** an AI whose recent runs here failed (signed out, blocked, timing out) is tried after the others.
+
+The command bar shows where a request will go as you type. A chat stays with the AI it started with, and shows which one Automatic picked and why. Background tasks and the AI team's roles are routed the same way. Pick a specific AI in Settings or the chat to turn routing off.
+
+## Statistics
+
+The **Statistics** page shows:
+
+- Each tool's share of your tokens this month, and 30 days of usage with a 7-day average.
+- How each AI did on the work it ran here: success rate, typical time, how often its work passed the first review, and approvals it gave.
+- What kinds of requests you send and where Automatic sent them.
+- How much input each tool reused from its cache, and recent routing decisions with their reasons.
+
+Every figure comes from reported usage, runs here and routing decisions; nothing is estimated.
+
 ## Several AIs at once
 
 The overview's command bar has three modes: **Ask** (the assistant), **AI team** (split the work) and **Ask all** (compare answers).
@@ -191,6 +216,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/runner.js`: background tasks the assistant carries out, with a queue and cancel/retry.
 - `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
 - `server/backup.js`: backups as a JSON file, without secrets, and restoring them.
+- `server/router.js`: smart routing: what kind of task a request is, and which ready AI suits it best, weighed for plan headroom, cost, recent failures and spread.
+- `server/stats.js`: the Statistics page's figures.
 - `server/eta.js`: progress history, finish estimates, and stall and overdue detection.
 - `server/claude.js`: the shared Claude API client, the built-in assistant tool, and token recording.
 - `scripts/dev-fake-claude.js`: development only. It runs the server against a scripted stand-in for Claude, so you can click through the chat without an API key.

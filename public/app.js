@@ -507,7 +507,7 @@ function sparkline(values) {
 function tile(label, value, sub, { cls = '', na = 'Not reported', icon = null, trend = null } = {}) {
   return `<div class="tile ${cls}"><div class="tile-top"><span class="tile-label">${esc(label)}</span>${icon ? `<span class="tile-ico">${ICON[icon]}</span>` : ''}</div>
     ${value == null ? `<div class="tile-value na">${esc(na)}</div>` : `<div class="tile-value">${esc(value)}</div>`}
-    <div class="tile-sub">${esc(sub)}</div>${trend ? sparkline(trend) : ''}</div>`;
+    <div class="tile-sub">${esc(sub)}</div>${trend && value != null ? sparkline(trend) : ''}</div>`;
 }
 
 const dailyTotal = (d, key, n = 14) => d.usage.days.slice(-n).map((_, i) => sumOrNull(d.usage.series.map((s) => s[key][s[key].length - n + i])));
