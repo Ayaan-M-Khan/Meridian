@@ -440,3 +440,63 @@ test('Ask all: every ready AI answers, then the builder combines the answers', a
     setClaudeClientForTests(null);
   }
 });
+
+test('smart routing: kind of task, strengths, plan headroom, recent failures', async () => {
+  const { classify, routeTask, forgetReliability } = await import('../server/router.js');
+  assert.equal(classify('Fix this TypeError crash in my React component').category, 'debug');
+  assert.equal(classify('Write a short email to my landlord about the heating').category, 'writing');
+  assert.equal(classify('Research the best alternatives to Notion and compare them').category, 'research');
+  assert.equal(classify('Make a roadmap and break down the milestones for Q3').category, 'planning');
+  assert.equal(classify('Refactor the login function in python').category, 'code');
+  assert.equal(classify('what time zone is Tokyo in?').category, 'quick');
+
+  setClaudeClientForTests(fakeApi([]));
+  const now = new Date().toISOString();
+  const codexId = Number(db.prepare("INSERT INTO integrations(adapter, name, status, meta, created_at) VALUES('codex', 'Codex', 'ok', ?, ?)")
+    .run(JSON.stringify({ limits: { primary: { used_percent: 20, window_minutes: 300 }, observed_at: now } }), now).lastInsertRowid);
+  try {
+    forgetReliability();
+    assert.equal(routeTask('Plan the roadmap for the launch').engine.id, 'codex', 'Codex is strongest for planning');
+    assert.equal(routeTask('Write a blog post about our launch').engine.id, 'claude-code', 'a plan you pay for comes before the API key');
+
+    db.prepare('UPDATE integrations SET meta = ? WHERE id = ?').run(JSON.stringify({ limits: { primary: { used_percent: 97, window_minutes: 300 }, observed_at: now } }), codexId);
+    const r = routeTask('Plan the roadmap for the launch');
+    assert.notEqual(r.engine.id, 'codex', 'Codex at 97% of its limit is skipped');
+    assert.match(r.why, /Skipped Codex: 97% of its plan limit used/);
+
+    const failed = Number(db.prepare("INSERT INTO tasks(integration_id, external_id, name, status, runner, error, finished_at, created_at, updated_at) VALUES(?, 'f1', 'x', 'failed', 'claude-code', 'Not logged in', ?, ?, ?)")
+      .run(codexId, now, now, now).lastInsertRowid);
+    forgetReliability();
+    const after = routeTask('Refactor the login function in python');
+    assert.notEqual(after.engine.id, 'claude-code', 'an AI whose last run just failed is tried after others');
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(failed);
+  } finally {
+    db.prepare('DELETE FROM integrations WHERE id = ?').run(codexId);
+    forgetReliability();
+    setClaudeClientForTests(null);
+  }
+});
+
+test('on Automatic, a new chat goes to the best AI and stays with it', async () => {
+  const { setRaw, getSettings } = await import('../server/db.js');
+  setRaw('settings', { ...getSettings(), assistant_engine: 'auto' });
+  setClaudeClientForTests(fakeApi([]));
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Here you go.' });
+  try {
+    const thread = createThread();
+    const events = [];
+    await sendMessage(thread.id, 'Refactor this python function to be faster', (e) => events.push(e));
+    const route = events.find((e) => e.type === 'route');
+    assert.equal(route?.engine_label, 'Claude Code');
+    assert.equal(route.category_label, 'Coding');
+    const v = threadView(thread.id);
+    assert.equal(v.engine, 'claude-code');
+    assert.equal(v.route.category_label, 'Coding');
+    const second = [];
+    await sendMessage(thread.id, 'Now write me an email about it', (e) => second.push(e));
+    assert.ok(!second.some((e) => e.type === 'route'), 'the conversation keeps its AI');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM routing_log WHERE kind = 'chat'").get().n >= 1, true);
+  } finally {
+    setClaudeClientForTests(null);
+  }
+});

@@ -11,6 +11,7 @@ import { evaluateAlerts } from './alerts.js';
 import { READ_TOOLS, ToolInputError, definition, runTool } from './assistant-tools.js';
 import { assistantIntegration, claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
 import { chooseEngine } from './engine-list.js';
+import { classify, logRoute } from './router.js';
 import { engineHasTools, runCliEngine } from './engines.js';
 import { dashboardSnapshot } from './assistant.js';
 import { randomToken } from './crypto.js';
@@ -79,16 +80,18 @@ const CANCELLED = 'Cancelled from AI Command Center.';
 
 /** Creates the task and starts it, or queues it when two are already running. */
 export function startClaudeTask({ name, instructions, engine: engineId }) {
-  const engine = chooseEngine(engineId); // fails early, with a readable message, when nothing is ready
+  // On Automatic, the task goes to the best AI for it. Fails early, with a readable message, when nothing is ready.
+  const engine = chooseEngine(engineId, { text: `${name}\n${instructions}`, needsTools: true });
+  if (engine.route) logRoute('task', { engine, category: engine.route.category, why: engine.route.why }, name);
   const integ = assistantIntegration();
   if (!integ.enabled) throw new HttpError(409, 'The built-in assistant tool is turned off on the AI Tools page.');
   const now = nowIso();
   const { lastInsertRowid } = db
     .prepare(
-      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, created_at, updated_at)
-       VALUES(?, ?, ?, ?, 'queued', NULL, ?, ?, ?)`,
+      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, category, created_at, updated_at)
+       VALUES(?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?)`,
     )
-    .run(integ.id, `task-${randomToken(6)}`, name, instructions, engine.id, now, now);
+    .run(integ.id, `task-${randomToken(6)}`, name, instructions, engine.id, engine.route?.category ?? classify(`${name}\n${instructions}`).category, now, now);
   const id = Number(lastInsertRowid);
   announce(integ, id, taskRow(id));
   queue.push(id);

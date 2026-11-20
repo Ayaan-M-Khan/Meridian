@@ -588,8 +588,9 @@ function heroCommand(d) {
   const team = S.heroMode === 'team';
   const all = S.heroMode === 'compare';
   const ready = d.engines.filter((x) => x.ready);
+  const smart = d.engine_choice === 'auto' && ready.length > 1;
   const toggle = `<div class="mode-switch" role="group" aria-label="How to run it">
-    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="ask" aria-pressed="${!team && !all}">${ICON.chat}Ask ${esc(e.label)}</button>
+    <button type="button" class="mode-btn" data-action="hero-mode" data-mode="ask" aria-pressed="${!team && !all}">${ICON.chat}${smart ? 'Ask' : `Ask ${esc(e.label)}`}</button>
     <button type="button" class="mode-btn" data-action="hero-mode" data-mode="team" aria-pressed="${team}">${ICON.team}AI team</button>
     <button type="button" class="mode-btn" data-action="hero-mode" data-mode="compare" aria-pressed="${all}">${ICON.grid}Ask all</button></div>`;
   if (all) {
@@ -603,26 +604,61 @@ function heroCommand(d) {
   }
   if (!team) {
     return `${toggle}<form class="command" data-form="ask">
-        <span class="command-engine" title="${esc(`${e.label}, ${e.via}`)}">${engineLogo(e, 'sm')}</span>
-        <input class="command-input" name="text" placeholder="Ask ${esc(e.label)} about your tools, or tell it what to do…" autocomplete="off" maxlength="8000" aria-label="Ask the assistant">
+        <span class="command-engine" id="route-logo" title="${esc(smart ? 'Automatic: the best AI for each request' : `${e.label}, ${e.via}`)}">${smart ? `<span class="logo sm hue-brand">${ICON.spark}</span>` : engineLogo(e, 'sm')}</span>
+        <input class="command-input" name="text" data-route="ask" placeholder="${smart ? 'Ask anything, or hand it work. The best AI for it answers…' : `Ask ${esc(e.label)} about your tools, or tell it what to do…`}" autocomplete="off" maxlength="8000" aria-label="Ask the assistant">
         <button class="btn primary" type="submit">${ICON.send}<span class="hide-sm">Ask</span></button>
       </form>
+      <div class="route-hint" id="route-hint" aria-live="polite"></div>
       <div class="chips">${suggestions(d).map((p) => `<button class="chip" data-action="ask" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div>
-      <p class="hero-foot">Runs through <b>${esc(e.label)}</b> with ${esc(e.via)} · <a href="#assistant">Open chat</a> · <a href="#settings">Change</a></p>`;
+      <p class="hero-foot">${smart ? `<b>Automatic</b>: each request goes to whichever of your ${ready.length} AIs suits it best, using your plans before any API key` : `Runs through <b>${esc(e.label)}</b> with ${esc(e.via)}`} · <a href="#assistant">Open chat</a> · <a href="#settings">Change</a></p>`;
   }
   return `${toggle}<form class="command" data-form="team-quick">
       <span class="command-engine team-mark">${ICON.team}</span>
-      <input class="command-input" name="goal" placeholder="Describe what the team should make…" autocomplete="off" maxlength="4000" aria-label="Goal for the AI team">
+      <input class="command-input" name="goal" data-route="team" placeholder="Describe what the team should make…" autocomplete="off" maxlength="4000" aria-label="Goal for the AI team">
       <button class="btn primary" type="submit">${ICON.play}<span class="hide-sm">Start</span></button>
     </form>
-    ${lineupStrip(d.team?.lineup)}
+    <div id="team-lineup">${lineupStrip(d.team?.lineup)}</div>
+    <div class="route-hint" id="route-hint" aria-live="polite"></div>
     <p class="hero-foot">Each AI does the part it’s best at, in the background. Follow it on the Tasks page. <button class="link" type="button" data-action="team-folder">${ICON.folder}Work on files in a folder</button> · <a href="#settings">Change who does what</a></p>`;
+}
+
+let routeTimer = 0;
+let routeSeq = 0;
+/** As you type in the command bar, shows where the request would go. No AI is asked, so it costs nothing. */
+function previewRoute(input) {
+  clearTimeout(routeTimer);
+  const text = input.value.trim();
+  const mode = input.dataset.route;
+  const hint = $('#route-hint');
+  if (!hint) return;
+  if (text.length < 4) {
+    hint.innerHTML = '';
+    return;
+  }
+  routeTimer = setTimeout(async () => {
+    const seq = ++routeSeq;
+    const r = await api('/api/route', { method: 'POST', body: { text, mode } }).catch(() => null);
+    if (seq !== routeSeq || !r || !$('#route-hint')) return;
+    if (mode === 'team') {
+      if (r.lineup) $('#team-lineup').innerHTML = lineupStrip(r.lineup);
+      $('#route-hint').innerHTML = `<span class="route-kind">${esc(r.label)}</span><span class="faint">Roles picked for this kind of task</span>`;
+    } else if (r.fixed) {
+      $('#route-hint').innerHTML = `<span class="route-kind">${esc(r.label)}</span>`;
+    } else {
+      const why = r.why.replace(/^[^:]+:\s*/, '');
+      $('#route-hint').innerHTML = `<span class="route-kind">${esc(r.label)}</span>${engineById(r.engine.id, r.engine.label)}<span class="route-why">${esc(why)}</span>`;
+      const logoBox = $('#route-logo');
+      if (logoBox) logoBox.innerHTML = engineLogo({ id: r.engine.id, label: r.engine.label, vendor: r.engine.vendor }, 'sm');
+    }
+  }, 280);
 }
 
 function chatItem(it, i) {
   if (it.role === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
   if (it.role === 'assistant') {
-    const e = S.data?.engine;
+    // The AI that answers this conversation, which on Automatic can differ from conversation to conversation.
+    const tid = S.chat.thread?.route?.engine ?? S.chat.thread?.engine;
+    const e = (tid && S.data?.engines.find((x) => x.id === tid)) || S.data?.engine;
     const copy = it.text && !S.chat.streaming ? `<button class="bubble-copy" data-action="copy-reply" data-index="${i}" aria-label="Copy this reply" title="Copy">${ICON.check}<span>Copy</span></button>` : '';
     return `<div class="msg ai">${e ? engineLogo(e, 'xs') : `<span class="logo xs hue-brand">${ICON.spark}</span>`}<div class="bubble md">${it.text ? md(it.text) : '<span class="typing"><i></i><i></i><i></i></span>'}</div>${copy}</div>`;
   }
@@ -640,8 +676,10 @@ function renderMsgs() {
   const items = c.thread?.items ?? [];
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   const e = S.data.engine;
+  const r = c.thread?.route;
+  const routeNote = r ? `<div class="route-note" title="${esc(r.why ?? '')}">${engineById(r.engine, r.engine_label)}<span>Automatic picked <b>${esc(r.engine_label)}</b> for this ${esc((r.category_label ?? '').toLowerCase())} conversation</span></div>` : '';
   el.innerHTML = items.length
-    ? items.map(chatItem).join('')
+    ? routeNote + items.map(chatItem).join('')
     : `<div class="chat-empty">${e ? engineLogo(e, 'lg') : ''}<h3>What can I do for you?</h3>
         <p>I can read your tools, tasks, spending and alerts, change budgets, sync tools, and run tasks in the background that show up on the Tasks page with live progress.</p>
         <div class="chips">${suggestions(S.data).map((p) => `<button class="chip" data-action="ask-here" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div></div>`;
@@ -728,7 +766,9 @@ async function sendChat(text) {
         buf = buf.slice(nl + 1);
         if (!line) continue;
         const ev = JSON.parse(line);
-        if (ev.type === 'text') {
+        if (ev.type === 'route') {
+          thread.route = ev;
+        } else if (ev.type === 'text') {
           finishPending();
           assistantBubble().text += ev.delta;
         } else if (ev.type === 'searching') {
@@ -898,7 +938,7 @@ const VIEWS = {
           <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
         </form>
       </section>
-      <p class="chat-foot">Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}. ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`}</p>
+      <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: a new conversation goes to the AI best suited to its first message, and stays with it.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`}</p>
     </div>`;
   },
 
@@ -1109,7 +1149,7 @@ const VIEWS = {
           <p class="muted small">The chat, background tasks and the daily summary run through one AI. Apps signed in with your own account need no API key; their usage counts toward your plan.</p>
           <div class="engine-list" role="radiogroup" aria-label="Which AI the assistant uses">
             <label class="engine-opt ${st.assistant_engine === 'auto' ? 'on' : ''}"><input type="radio" name="engine" value="auto" data-action-change="set-engine" ${st.assistant_engine === 'auto' ? 'checked' : ''} ${dis}>
-              <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic</b><span class="faint small block">The first ready one: Claude Code, then a Claude API key, Codex, Gemini CLI, GitHub Copilot, Cursor${d.engine ? `. Now: ${esc(d.engine.label)}` : ''}</span></span></label>
+              <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic (smart)</b><span class="faint small block">Each request goes to the AI best suited to it: coding to Claude Code or Codex, planning to Codex, research to Gemini, quick questions to Copilot. Plans you pay for come before an API key, AIs near their limits or failing are used less, and work is spread across your accounts.</span></span></label>
             ${d.engines.map((e) => `<label class="engine-opt ${st.assistant_engine === e.id ? 'on' : ''} ${e.ready ? '' : 'off'}"><input type="radio" name="engine" value="${e.id}" data-action-change="set-engine" ${st.assistant_engine === e.id ? 'checked' : ''} ${e.ready ? '' : 'disabled'} ${dis}>
               ${engineLogo(e, 'sm')}<span class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(e.ready ? `Ready · ${e.via}` : e.reason)}</span></span>
               ${!e.ready && e.kind === 'cli' && !d.demo ? (e.integration_id ? `<a class="btn small" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small" type="button" data-action="connect-local" data-id="${e.id}">Connect</button>`) : ''}</label>`).join('')}
@@ -2239,6 +2279,7 @@ async function boot() {
     document.addEventListener('input', (e) => {
       if (e.target.id === 'chat-input') autosize(e.target);
       else if (e.target.id === 'tt-folder') refreshLineup();
+      else if (e.target.dataset?.route) previewRoute(e.target);
       else if (e.target.id === 'task-search') {
         S.taskQuery = e.target.value;
         const { groups, labels } = taskGroups(S.data);

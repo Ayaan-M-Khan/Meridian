@@ -21,6 +21,7 @@ import { announce, notifyMine } from './ingest.js';
 import { recordProgress } from './eta.js';
 import { evaluateAlerts } from './alerts.js';
 import { listEngines } from './engine-list.js';
+import { classify, logRoute, rankEngines } from './router.js';
 import { runCliEngine } from './engines.js';
 import { assistantIntegration, claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
 import { randomToken } from './crypto.js';
@@ -58,15 +59,31 @@ const queue = [];
  * Who does each role right now. With a folder, every role needs an app on this computer, because the Claude API
  * engine can't read or change files. A reviewer and debugger other than the builder are preferred, for a second opinion.
  */
-export function teamLineup({ folder = false, settings = getSettings() } = {}) {
+/** What each role draws on for a given kind of task, for smart routing (router.js). */
+const ROLE_BLEND = {
+  planner: (cat) => [['planning', 0.6], [cat, 0.4]],
+  builder: (cat) => [[cat, 1]],
+  reviewer: (cat) => [[cat, 0.7], ['analysis', 0.3]],
+  debugger: (cat) => [['debug', 0.7], [cat, 0.3]],
+};
+
+export function teamLineup({ folder = false, settings = getSettings(), text = null } = {}) {
   const ready = listEngines().filter((e) => e.ready);
   const pool = folder ? ready.filter((e) => e.kind === 'cli') : ready;
   if (!pool.length) return null;
+  const cat = text ? classify(text).category : null;
   const pick = (role, avoid = []) => {
     const choice = settings.team_roles?.[role] ?? 'auto';
     if (choice !== 'auto') {
       const chosen = pool.find((e) => e.id === choice);
       if (chosen) return { ...chosen, chosen: true };
+    }
+    // With the goal known, each role goes to the AI best suited to that part of this kind of task,
+    // weighed for plan headroom and recent failures like any routed request.
+    if (cat) {
+      const ranked = rankEngines(text, { needsFiles: folder, blend: ROLE_BLEND[role](cat === 'quick' ? 'general' : cat) }).ranking.map((x) => x.engine);
+      const best = ranked.find((e) => !avoid.includes(e.id)) ?? ranked[0];
+      if (best) return { ...best, chosen: false };
     }
     const ranked = [...ROLES[role].prefer.map((id) => pool.find((e) => e.id === id)).filter(Boolean), ...pool];
     return { ...(ranked.find((e) => !avoid.includes(e.id)) ?? ranked[0]), chosen: false };
@@ -143,7 +160,8 @@ export function startTeamTask({ goal, folder, mode = 'team' }) {
   if (!['team', 'compare'].includes(mode)) throw new HttpError(400, 'Choose how the AIs work together.');
   const dir = cleanFolder(folder);
   if (dir && mode === 'compare') throw new HttpError(400, 'Asking all AIs works with text only. Leave the folder empty, or split the work instead.');
-  const lineup = teamLineup({ folder: Boolean(dir) });
+  const lineup = teamLineup({ folder: Boolean(dir), text: goal });
+  const kind = classify(goal);
   if (!lineup) {
     throw new HttpError(400, dir
       ? 'Working in a folder needs an AI app on this computer: connect and sign in to Claude Code, Codex, Gemini, GitHub Copilot or Cursor.'
@@ -175,11 +193,18 @@ export function startTeamTask({ goal, folder, mode = 'team' }) {
   const now = nowIso();
   const { lastInsertRowid } = db
     .prepare(
-      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, kind, detail, created_at, updated_at)
-       VALUES(?, ?, ?, ?, 'queued', NULL, 'team', 'team', ?, ?, ?)`,
+      `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, kind, detail, category, created_at, updated_at)
+       VALUES(?, ?, ?, ?, 'queued', NULL, 'team', 'team', ?, ?, ?, ?)`,
     )
-    .run(integ.id, `team-${randomToken(6)}`, name, dir ? `${text}\n\nFolder: ${dir}` : text, JSON.stringify(detail), now, now);
+    .run(integ.id, `team-${randomToken(6)}`, name, dir ? `${text}\n\nFolder: ${dir}` : text, JSON.stringify(detail), kind.category, now, now);
   const id = Number(lastInsertRowid);
+  logRoute(mode === 'compare' ? 'compare' : 'team', {
+    engine: lineup.builder,
+    category: kind.category,
+    why: mode === 'compare'
+      ? `${kind.label}: asked ${detail.lineup.answering.length} AIs; ${lineup.builder.label} combines.`
+      : `${kind.label}: ${lineup.planner.label} plans, ${lineup.builder.label} builds, ${lineup.reviewer.label} reviews, ${lineup.debugger.label} debugs.`,
+  }, text);
   announce(integ, id, taskRow(id));
   queue.push(id);
   pump();

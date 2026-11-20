@@ -115,6 +115,17 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
   updated_at TEXT NOT NULL
 );
 
+-- Smart routing decisions: which AI got a request and why (router.js). Kept to the last 300.
+CREATE TABLE IF NOT EXISTS routing_log (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  category TEXT NOT NULL,
+  engine TEXT NOT NULL,
+  why TEXT,
+  preview TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_usage_day ON usage_daily(day);
 CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at);
 CREATE INDEX IF NOT EXISTS idx_progress_task ON task_progress(task_id, at);
@@ -130,9 +141,10 @@ function addColumns(table, cols) {
   for (const [col, type] of cols) if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 }
 //   tasks.detail   JSON for AI team tasks: the folder, who did each stage, and each stage's output
-addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT'], ['detail', 'TEXT']]);
+//   tasks.category / assistant_threads.route   what smart routing decided (router.js)
+addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT'], ['detail', 'TEXT'], ['category', 'TEXT']]);
 addColumns('integrations', [['meta', 'TEXT']]);
-addColumns('assistant_threads', [['engine', 'TEXT']]);
+addColumns('assistant_threads', [['engine', 'TEXT'], ['route', 'TEXT']]);
 db.prepare("UPDATE integrations SET name = 'Assistant (built in)' WHERE adapter = 'claude-assistant' AND name = 'Claude assistant'").run();
 
 export function tx(fn) {

@@ -6,6 +6,7 @@ import { db, getSettings } from './db.js';
 import { LOCAL_ADAPTERS } from './adapters/local.js';
 import { hasClaudeApi } from './claude.js';
 import { HttpError } from './util.js';
+import { routeTask } from './router.js';
 
 const ORDER = ['claude-code', 'claude-api', 'codex', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli'];
 
@@ -38,8 +39,12 @@ export function listEngines() {
   return out.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 }
 
-/** The engine to use: the one asked for, the one chosen in Settings, or the first that is ready. Throws a readable error. */
-export function chooseEngine(id) {
+/**
+ * The engine to use: the one asked for, the one chosen in Settings, or, on Automatic, the best AI for this request
+ * (router.js) when there's text to judge by, else the first that is ready. Throws a readable error.
+ * A routed engine carries `route`: { category, label, why }.
+ */
+export function chooseEngine(id, { text = null, needsTools = false } = {}) {
   const want = id ?? getSettings().assistant_engine ?? 'auto';
   const list = listEngines();
   if (want !== 'auto') {
@@ -47,6 +52,10 @@ export function chooseEngine(id) {
     if (!e) throw new HttpError(400, 'That assistant isn’t available.');
     if (!e.ready) throw new HttpError(400, e.reason);
     return e;
+  }
+  if (text) {
+    const r = routeTask(text, { needsTools });
+    if (r) return { ...r.engine, route: { category: r.category, label: r.label, why: r.why } };
   }
   const e = list.find((x) => x.ready);
   if (!e) throw new HttpError(400, 'To use the assistant, connect Claude Code, Codex, Gemini, GitHub Copilot or Cursor with your account, or add a Claude API key in Settings.');

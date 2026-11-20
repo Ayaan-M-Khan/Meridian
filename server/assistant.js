@@ -9,7 +9,8 @@
 import { db, getSettings } from './db.js';
 import { ACTION_TOOLS, READ_TOOLS, definition, labelFor, runTool } from './assistant-tools.js';
 import { claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
-import { chooseEngine } from './engine-list.js';
+import { chooseEngine, listEngines } from './engine-list.js';
+import { logRoute } from './router.js';
 import { engineHasTools, runCliEngine } from './engines.js';
 import { FAKE_CALLS } from './adapters/local.js';
 
@@ -97,7 +98,13 @@ export function threadView(id) {
       }
     }
   }
-  return { id: row.id, title: row.title, updated_at: row.updated_at, engine: row.engine ?? null, items, busy: running.has(row.id) };
+  let route = null;
+  try {
+    route = row.route ? JSON.parse(row.route) : null;
+  } catch {
+    route = null;
+  }
+  return { id: row.id, title: row.title, updated_at: row.updated_at, engine: row.engine ?? null, route, items, busy: running.has(row.id) };
 }
 
 /** The conversation so far as plain text, for engines that take one prompt per reply. */
@@ -185,8 +192,19 @@ export function stopThread(id) {
 export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
   const row = threadRow(id);
   if (running.has(row.id)) throw new HttpError(409, 'The assistant is still answering in this conversation.');
-  const engine = chooseEngine(engineId);
   const messages = JSON.parse(row.messages);
+  // On Automatic, a conversation goes to the best AI for its first message and stays with it while it's ready.
+  const auto = (engineId ?? getSettings().assistant_engine ?? 'auto') === 'auto';
+  let engine = auto && messages.length && row.engine ? listEngines().find((e) => e.id === row.engine && e.ready) ?? null : null;
+  if (!engine) {
+    engine = chooseEngine(engineId, { text, needsTools: true });
+    if (engine.route) {
+      logRoute('chat', { engine, category: engine.route.category, why: engine.route.why }, text);
+      const route = { engine: engine.id, engine_label: engine.label, category: engine.route.category, category_label: engine.route.label, why: engine.route.why };
+      db.prepare('UPDATE assistant_threads SET route = ? WHERE id = ?').run(JSON.stringify(route), row.id);
+      emit({ type: 'route', ...route });
+    }
+  }
   const before = messages.length;
   const history = messages.slice();
   messages.push({ role: 'user', content: text });

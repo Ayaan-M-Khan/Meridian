@@ -16,6 +16,7 @@ import { openConsole, forgetResolved } from './local/cli.js';
 import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
 import { ROLES, lineupView, startTeamTask } from './team.js';
 import { makeBackup, restoreBackup } from './backup.js';
+import { classify, routeTask } from './router.js';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -327,7 +328,18 @@ export function apiRoutes(app) {
   });
 
   // ── AI team ──
-  app.get('/api/team', (req, res) => res.json({ lineup: lineupView({ folder: req.query.folder === '1' }) }));
+  app.get('/api/team', (req, res) => res.json({ lineup: lineupView({ folder: req.query.folder === '1', text: typeof req.query.text === 'string' && req.query.text.trim() ? req.query.text.slice(0, 4000) : null }) }));
+
+  /** Where a request would go, for the live hint under the command bar. Costs nothing: no AI is asked. */
+  app.post('/api/route', (req, res) => {
+    const text = typeof req.body?.text === 'string' ? req.body.text.slice(0, 4000) : '';
+    if (!text.trim()) return res.json(null);
+    const kind = classify(text);
+    if (req.body?.mode === 'team') return res.json({ ...kind, lineup: lineupView({ text }) });
+    if ((getSettings().assistant_engine ?? 'auto') !== 'auto') return res.json({ ...kind, fixed: true });
+    const r = routeTask(text, { needsTools: true });
+    res.json(r && { category: r.category, label: r.label, why: r.why, engine: { id: r.engine.id, label: r.engine.label, vendor: r.engine.vendor } });
+  });
   app.post('/api/team-tasks', (req, res) => {
     const t = startTeamTask({ goal: req.body?.goal, folder: req.body?.folder, mode: req.body?.mode ?? 'team' });
     res.status(201).json({ id: t.id, status: t.status, lineup: t.lineup, mode: t.mode });
