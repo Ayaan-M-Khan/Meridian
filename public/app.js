@@ -58,6 +58,8 @@ const ICON = {
   team: svg('<circle cx="8" cy="3.6" r="2"/><circle cx="3.4" cy="11.6" r="2"/><circle cx="12.6" cy="11.6" r="2"/><path d="M7 5.4L4.4 9.8M9 5.4l2.6 4.4M5.4 11.6h5.2"/>'),
   folder: svg('<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>'),
   pulse: svg('<path d="M1.5 8.5h3l1.8-4.5 3.2 8 1.8-3.5h3.2"/>'),
+  repeat: svg('<path d="M2.8 7A5.2 5.2 0 0 1 12.4 4.4M13.2 9a5.2 5.2 0 0 1-9.6 2.6"/><path d="M12.8 1.8v2.9H9.9M3.2 14.2v-2.9h2.9"/>'),
+  pause: svg('<path d="M5.5 3.5v9M10.5 3.5v9"/>', 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"'),
 };
 ICON.claude = ICON.spark;
 
@@ -65,6 +67,7 @@ const PAGES = {
   dashboard: { title: 'Overview', icon: 'grid', short: 'Home' },
   assistant: { title: 'Assistant', icon: 'chat', short: 'Assistant' },
   tasks: { title: 'Tasks', icon: 'tasks', short: 'Tasks' },
+  automations: { title: 'Automations', icon: 'repeat', short: 'Auto' },
   usage: { title: 'Usage & Costs', icon: 'chart', short: 'Usage' },
   stats: { title: 'Statistics', icon: 'pulse', short: 'Stats' },
   notifications: { title: 'Alerts', icon: 'bell', short: 'Alerts' },
@@ -230,7 +233,7 @@ function renderShell() {
     <aside class="sidebar">
       <a class="brand" href="#dashboard"><div class="brand-mark">${ICON.spark}</div><div><div class="brand-name">AI Command Center</div><div class="brand-sub">All your AI, one place</div></div></a>
       <nav class="nav" aria-label="Main">
-        ${nav('dashboard')}${nav('assistant')}${nav('tasks')}${nav('usage')}${nav('stats')}${nav('notifications')}
+        ${nav('dashboard')}${nav('assistant')}${nav('tasks')}${nav('automations')}${nav('usage')}${nav('stats')}${nav('notifications')}
         <div class="nav-label nav-label-row"><span>Connected</span><button class="nav-add" data-action="add-tool" aria-label="Connect a tool" title="Connect a tool">${ICON.plus}</button></div>
         <div class="nav-tools" id="nav-tools"></div>
         <div class="nav-label">Manage</div>
@@ -894,8 +897,8 @@ const VIEWS = {
       </section>
 
       <section class="card a-upcoming">
-        <div class="card-head"><h3>Up next</h3><span class="aside">${plural(d.upcoming.length, 'task')}</span></div>
-        ${d.upcoming.length ? `<div class="rows">${d.upcoming.slice(0, 6).map((t) => taskRow(t, { compact: true })).join('')}</div>` : emptyBlock('Nothing is scheduled', 'Queued and scheduled tasks appear here.')}
+        <div class="card-head"><h3>Up next</h3><a class="aside" href="#automations">Automations ${ICON.chevron}</a></div>
+        ${upNext(d)}
       </section>
 
       <section class="card a-limits">
@@ -1179,12 +1182,32 @@ const VIEWS = {
     const { groups, labels } = taskGroups(d);
     const canRun = !d.demo && d.engine;
     return `<div class="page-head"><div><h2>Tasks</h2><p>What your agents and apps report, live sessions from AI apps on this computer, and work the assistant and the AI team do here.</p></div>
-      ${canRun ? `<div class="form-actions"><button class="btn" data-action="new-claude-task">${ICON.spark}New assistant task</button><button class="btn primary" data-action="new-team-task">${ICON.team}New AI team task</button></div>` : ''}</div>
+      <div class="form-actions"><a class="btn ghost" href="#automations">${ICON.repeat}Automations</a>${canRun ? `<button class="btn" data-action="new-claude-task">${ICON.spark}New assistant task</button><button class="btn primary" data-action="new-team-task">${ICON.team}New AI team task</button>` : ''}</div></div>
       <div class="task-tools">
         <div class="chips" role="group" aria-label="Filter tasks">${Object.keys(groups).map((k) => `<button class="chip" data-action="task-filter" data-filter="${k}" aria-pressed="${S.taskFilter === k}">${labels[k]} <span class="n num">${groups[k].length}</span></button>`).join('')}</div>
         <input class="input task-search" id="task-search" type="search" placeholder="Search tasks" value="${esc(S.taskQuery ?? '')}" aria-label="Search tasks" autocomplete="off">
       </div>
       <section class="card" id="task-list">${taskListHtml(groups, labels)}</section>`;
+  },
+
+  automations() {
+    const d = S.data;
+    const list = d.automations ?? [];
+    const canEdit = !d.demo;
+    const on = list.filter((a) => a.enabled).length;
+    const ideas = AUTO_TEMPLATES.map((t, i) => ({ t, i })).filter(({ t }) => !list.some((a) => a.name === t.name));
+    return `<div class="page-head"><div><h2>Automations</h2><p>Prompts that run on a schedule. Each run goes to the AI best suited to it, shows up in Tasks with live progress, and alerts you when it finishes.</p></div>
+      ${canEdit ? `<button class="btn primary" data-action="new-automation">${ICON.plus}New automation</button>` : ''}</div>
+      ${!d.demo && !d.engine ? '<div class="callout warn">Connect an AI app or add a Claude API key first. Automations need one to run.</div>' : ''}
+      ${list.length ? `<p class="auto-summary">${plural(list.length, 'automation')} · ${on} on${on ? ` · next run ${esc(rel(list.filter((a) => a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at))[0]?.next_run_at) ?? 'not scheduled')}` : ''}</p>
+        <div class="autos">${list.map(autoCard).join('')}</div>` : ''}
+      ${ideas.length ? `<section class="card">
+        <div class="card-head"><h3>${list.length ? 'More ideas' : 'Start from an idea'}</h3><span class="aside">Edit any of them before saving</span></div>
+        <div class="auto-ideas">${ideas.map(({ t, i }) => `<button class="auto-idea" data-action="new-automation" data-template="${i}" ${canEdit ? '' : 'disabled'}>
+          <span class="auto-ico sm">${ICON[t.mode === 'team' ? 'team' : t.mode === 'compare' ? 'chat' : 'repeat']}</span>
+          <span class="min0"><b>${esc(t.name)}</b><span class="faint small block">${esc(scheduleText(t.schedule))} · ${esc(MODE_LABEL[t.mode])}</span></span></button>`).join('')}</div>
+      </section>` : ''}
+      <p class="fine">Times are this computer’s local time. Automations run while AI Command Center is open or in the tray. A run that was due while the app was closed is skipped rather than run late.</p>`;
   },
 
   notifications() {
@@ -1327,6 +1350,89 @@ function taskListHtml(groups, labels) {
   return d.tasks.length
     ? emptyBlock(`No ${labels[S.taskFilter]?.toLowerCase() ?? ''} tasks`, 'Try another filter.')
     : emptyBlock('No tasks yet', 'Connect Claude Code, Codex, Gemini or GitHub Copilot to see their sessions, have your scripts report tasks, or start an assistant or AI team task.');
+}
+
+// ── Automations ──────────────────────────────────────────────────────────
+const MODE_LABEL = { task: 'Assistant task', team: 'AI team', compare: 'Ask all' };
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const scheduleText = (s) => (s.every === 'hour' ? `Every hour at :${s.at.slice(3)}` : s.every === 'day' ? `Every day at ${s.at}` : s.every === 'weekday' ? `Every weekday at ${s.at}` : `Every ${WEEKDAYS[s.day]} at ${s.at}`);
+const AUTO_TEMPLATES = [
+  { name: 'Weekly usage report', mode: 'task', schedule: { every: 'week', at: '09:00', day: 1 },
+    prompt: 'Summarize last week’s AI usage by tool: tokens, cost where reported, and plan limits. Flag anything close to a budget or limit, and suggest where to cut back.' },
+  { name: 'Morning briefing', mode: 'task', schedule: { every: 'weekday', at: '08:30' },
+    prompt: 'Give me a short briefing: what ran since yesterday, anything that failed and why, and what is scheduled next. Five bullets at most.' },
+  { name: 'Second opinions', mode: 'compare', schedule: { every: 'week', at: '16:00', day: 5 },
+    prompt: 'What are three practical ways I could get more out of the AI tools I use for coding? Be concrete and skip the obvious.' },
+  { name: 'Project check-up', mode: 'team', schedule: { every: 'week', at: '17:00', day: 5 },
+    prompt: 'Review this project for out-of-date docs, obvious bugs and leftover TODOs. Fix the small, safe things and list the rest.' },
+];
+
+/** The dashboard's Up next: queued and scheduled tasks, then the next automation runs. */
+function upNext(d) {
+  const autos = (d.automations ?? []).filter((a) => a.enabled && a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at));
+  const tasks = d.upcoming.slice(0, 6);
+  const rows = [
+    ...tasks.map((t) => taskRow(t, { compact: true })),
+    ...autos.slice(0, Math.max(0, 6 - tasks.length)).map((a) => `<a class="row" href="#automations"><div class="status-ico s-scheduled">${ICON.repeat}</div>
+      <div class="row-main"><div class="row-title">${esc(a.name)}</div><div class="row-sub">${esc(a.schedule_text)} · ${esc(a.mode_label)}</div></div>
+      <div class="row-time" title="${esc(when(a.next_run_at))}">${esc(rel(a.next_run_at))}</div></a>`),
+  ];
+  return rows.length ? `<div class="rows">${rows.join('')}</div>` : emptyBlock('Nothing is scheduled', 'Queued tasks and your next automation runs appear here.', !d.demo ? '<button class="btn small" data-action="new-automation">New automation</button>' : '');
+}
+
+function autoCard(a) {
+  const d = S.data;
+  const dis = d.demo ? 'disabled' : '';
+  const last = a.last_task;
+  const lastStatus = last ? TASK_STATUS[last.status] : null;
+  const confirm = S.confirmAuto === a.id;
+  return `<section class="card auto ${a.enabled ? '' : 'off'}">
+    <div class="auto-head">
+      <span class="auto-ico">${ICON[a.mode === 'team' ? 'team' : a.mode === 'compare' ? 'chat' : 'repeat']}</span>
+      <div class="min0"><div class="row-title">${esc(a.name)}</div><div class="row-sub">${esc(a.schedule_text)} · ${esc(a.mode_label)}</div></div>
+      <label class="switch mini" title="${a.enabled ? 'On' : 'Paused'}"><input type="checkbox" data-auto-toggle="${a.id}" ${a.enabled ? 'checked' : ''} ${dis} aria-label="${esc(a.name)} is ${a.enabled ? 'on' : 'paused'}"></label>
+    </div>
+    <p class="auto-prompt">${esc(a.prompt)}</p>
+    ${a.folder ? `<div class="faint small auto-folder">${ICON.folder}<code>${esc(a.folder)}</code></div>` : ''}
+    <dl class="auto-meta">
+      <div><dt>Next run</dt><dd>${a.enabled && a.next_run_at ? `<span title="${esc(when(a.next_run_at))}">${esc(when(a.next_run_at))}</span>` : '<span class="faint">Paused</span>'}</dd></div>
+      <div><dt>Last run</dt><dd>${last ? `<button class="link" data-action="open-task" data-id="${last.id}">${esc(lastStatus?.label ?? last.status)} · ${esc(rel(a.last_run_at))}</button>` : a.last_run_at ? esc(rel(a.last_run_at)) : '<span class="faint">Not yet</span>'}</dd></div>
+    </dl>
+    ${a.last_error ? `<div class="callout warn small">${esc(a.last_error)}</div>` : ''}
+    <div class="auto-actions">
+      ${confirm
+        ? `<span class="small err-text">Delete this automation? Tasks it already ran stay.</span><button class="btn small danger" data-action="confirm-delete-automation" data-id="${a.id}">Delete</button><button class="btn small ghost" data-action="cancel-delete-automation">Keep</button>`
+        : `<button class="btn small" data-action="run-automation" data-id="${a.id}" ${dis || (d.engine ? '' : 'disabled')}>${ICON.play}Run now</button>
+           <button class="btn small ghost" data-action="edit-automation" data-id="${a.id}" ${dis}>${ICON.pencil}Edit</button>
+           <button class="btn small ghost icon-btn" data-action="delete-automation" data-id="${a.id}" aria-label="Delete ${esc(a.name)}" title="Delete" ${dis}>${ICON.trash}</button>`}
+    </div>
+  </section>`;
+}
+
+function openAutomation(a = {}) {
+  const s = a.schedule ?? { every: 'day', at: '09:00', day: 1 };
+  const mode = a.mode ?? 'task';
+  const opt = (v, label, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${label}</option>`;
+  openPanel(a.id ? 'Edit automation' : 'New automation', `
+    <form class="form" data-form="automation" ${a.id ? `data-id="${a.id}"` : ''}>
+      <div class="field"><label for="au-name">Name</label><input class="input" id="au-name" name="name" maxlength="80" required value="${esc(a.name ?? '')}" placeholder="Weekly usage report"></div>
+      <div class="field"><label for="au-prompt">What should it do each time?</label><textarea class="input" id="au-prompt" name="prompt" rows="5" maxlength="4000" required placeholder="Summarize last week’s AI usage and flag anything close to a limit.">${esc(a.prompt ?? '')}</textarea>
+        <span class="help">Write it as you would for a one-off task. The AI starts fresh each run.</span></div>
+      <div class="field"><label>How it runs</label>
+        <div class="choice-row" role="radiogroup">${Object.entries(MODE_LABEL).map(([k, v]) => `<label class="choice"><input type="radio" name="mode" value="${k}" ${mode === k ? 'checked' : ''} data-auto-mode><span><b>${v}</b><span class="faint small block">${k === 'task' ? 'The best AI for it works alone' : k === 'team' ? 'Plan, build, review, fix' : 'Every AI answers, then a merge'}</span></span></label>`).join('')}</div></div>
+      <div class="field" id="au-folder-field" ${mode === 'team' ? '' : 'hidden'}><label for="au-folder">Folder to work in (optional)</label>
+        <div class="folder-row"><input class="input" id="au-folder" name="folder" autocomplete="off" placeholder="Leave empty for a text result" value="${esc(a.folder ?? '')}"><button class="btn" type="button" data-action="pick-folder" data-target="au-folder">${ICON.folder}Choose…</button></div>
+        <span class="help">With a folder, the builder can change files in it on every run. Use a folder you have a copy of, such as a git project.</span></div>
+      <div class="form-row">
+        <div class="field"><label for="au-every">Repeats</label><select class="input" id="au-every" name="every" data-auto-every>
+          ${opt('hour', 'Every hour', s.every)}${opt('day', 'Every day', s.every)}${opt('weekday', 'Every weekday (Mon–Fri)', s.every)}${opt('week', 'Once a week', s.every)}</select></div>
+        <div class="field" id="au-day-field" ${s.every === 'week' ? '' : 'hidden'}><label for="au-day">On</label><select class="input" id="au-day" name="day">${WEEKDAYS.map((w, i) => opt(i, w, s.day ?? 1)).join('')}</select></div>
+        <div class="field"><label for="au-at" id="au-at-label">${s.every === 'hour' ? 'Minutes past the hour' : 'At'}</label><input class="input" id="au-at" name="at" type="time" required value="${esc(s.at)}"></div>
+      </div>
+      <div class="form-actions"><button class="btn primary" type="submit">${a.id ? 'Save changes' : `${ICON.repeat}Save automation`}</button>${a.id ? '' : '<span class="faint small">It starts at the next scheduled time. Use Run now to try it first.</span>'}</div>
+      <div class="error-text" data-error></div>
+    </form>`, { center: true });
+  $('#au-name')?.focus();
 }
 
 function welcome() {
@@ -1877,6 +1983,15 @@ const FORMS = {
     closeModal();
     await startedTeam(r);
   },
+  async automation(fd, form) {
+    const body = { name: fd.name, prompt: fd.prompt, mode: fd.mode, folder: fd.mode === 'team' ? fd.folder?.trim() || null : null, schedule: { every: fd.every, at: fd.at, day: Number(fd.day) } };
+    const id = form.dataset.id;
+    const a = await api(id ? `/api/automations/${id}` : '/api/automations', { method: id ? 'PATCH' : 'POST', body });
+    closeModal();
+    toast(a.enabled && a.next_run_at ? `Saved. Next run ${when(a.next_run_at)}` : 'Saved');
+    if (S.page !== 'automations') location.hash = '#automations';
+    await load({ force: true });
+  },
   async 'claude-task'(fd) {
     const r = await api('/api/claude-tasks', { method: 'POST', body: { name: fd.name, instructions: fd.instructions } });
     closeModal();
@@ -2161,16 +2276,46 @@ const ACTIONS = {
     el.disabled = true;
     try {
       const r = await api('/api/pick-folder', { method: 'POST' });
-      if (r.path) {
-        $('#tt-folder').value = r.path;
-        refreshLineup();
+      const input = document.getElementById(el.dataset.target || 'tt-folder');
+      if (r.path && input) {
+        input.value = r.path;
+        if (input.id === 'tt-folder') refreshLineup();
       }
     } catch (err) {
       toast(err.message, true);
-      $('#tt-folder')?.focus();
+      document.getElementById(el.dataset.target || 'tt-folder')?.focus();
     } finally {
       el.disabled = false;
     }
+  },
+  'new-automation'(el) {
+    const t = AUTO_TEMPLATES[Number(el.dataset.template)];
+    openAutomation(t ? { ...t, schedule: { ...t.schedule } } : {});
+  },
+  'edit-automation'(el) {
+    const a = S.data.automations?.find((x) => x.id === Number(el.dataset.id));
+    if (a) openAutomation(a);
+  },
+  async 'run-automation'(el) {
+    el.disabled = true;
+    const r = await api(`/api/automations/${el.dataset.id}/run`, { method: 'POST' });
+    toast(r.status === 'queued' ? 'Queued. It starts when a running task finishes.' : 'Started. Follow it in Tasks.');
+    await load({ force: true });
+    if (r.task_id) openTask(r.task_id);
+  },
+  'delete-automation'(el) {
+    S.confirmAuto = Number(el.dataset.id);
+    renderPage();
+  },
+  'cancel-delete-automation'() {
+    S.confirmAuto = null;
+    renderPage();
+  },
+  async 'confirm-delete-automation'(el) {
+    await api(`/api/automations/${el.dataset.id}`, { method: 'DELETE' });
+    S.confirmAuto = null;
+    toast('Automation deleted');
+    await load({ force: true });
   },
   async 'task-cancel'(el) {
     el.disabled = true;
@@ -2319,6 +2464,26 @@ async function onChange(e) {
     }
     return;
   }
+  if (el.dataset.autoToggle) {
+    try {
+      const a = await api(`/api/automations/${el.dataset.autoToggle}`, { method: 'PATCH', body: { enabled: el.checked } });
+      toast(a.enabled ? `On. Next run ${when(a.next_run_at)}` : 'Paused');
+      await load({ force: true });
+    } catch (err) {
+      el.checked = !el.checked;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if ('autoEvery' in el.dataset) {
+    $('#au-day-field').hidden = el.value !== 'week';
+    $('#au-at-label').textContent = el.value === 'hour' ? 'Minutes past the hour' : 'At';
+    return;
+  }
+  if ('autoMode' in el.dataset) {
+    $('#au-folder-field').hidden = el.value !== 'team';
+    return;
+  }
   if ('summaryMode' in el.dataset) {
     try {
       await api('/api/settings', { method: 'PUT', body: { summary_mode: el.checked ? 'ai' : 'rules' } });
@@ -2394,6 +2559,7 @@ async function boot() {
     window.addEventListener('hashchange', () => {
       Object.assign(S, routeFromHash());
       S.confirmRemove = null;
+      S.confirmAuto = null;
       closeModal();
       updateChrome();
       renderPage();

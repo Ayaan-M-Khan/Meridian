@@ -538,3 +538,66 @@ test('a preferred AI for a kind of task goes first, unless it’s at its limit',
     setClaudeClientForTests(null);
   }
 });
+
+test('automation schedules: next run in local time, described in words', async () => {
+  const { nextRun, describeSchedule } = await import('../server/automations.js');
+  const at = (y, mo, d, h, mi) => new Date(y, mo, d, h, mi);
+  const thu = at(2026, 10, 19, 10, 0); // a Thursday
+  assert.equal(thu.getDay(), 4);
+  assert.deepEqual(nextRun({ every: 'day', at: '11:00' }, thu), at(2026, 10, 19, 11, 0), 'later today');
+  assert.deepEqual(nextRun({ every: 'day', at: '09:00' }, thu), at(2026, 10, 20, 9, 0), 'already past today, so tomorrow');
+  assert.deepEqual(nextRun({ every: 'hour', at: '00:15' }, at(2026, 10, 19, 10, 20)), at(2026, 10, 19, 11, 15));
+  assert.deepEqual(nextRun({ every: 'weekday', at: '08:30' }, at(2026, 10, 20, 18, 0)), at(2026, 10, 23, 8, 30), 'Friday evening, so Monday');
+  const mon = nextRun({ every: 'week', at: '09:00', day: 1 }, thu);
+  assert.equal(mon.getDay(), 1);
+  assert.ok(mon > thu && mon - thu < 7 * 86_400_000);
+  assert.equal(describeSchedule({ every: 'week', at: '09:00', day: 1 }), 'Every Monday at 09:00');
+  assert.equal(describeSchedule({ every: 'hour', at: '00:15' }), 'Every hour at :15');
+});
+
+test('automations: saved with checks, paused and resumed, run when due, skipped when long overdue', async () => {
+  const { createAutomation, updateAutomation, deleteAutomation, listAutomations, runDueAutomations } = await import('../server/automations.js');
+  const { makeBackup } = await import('../server/backup.js');
+  assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'task', schedule: { every: 'day', at: '9am' } }), /Choose a time/);
+  assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'nope', schedule: { every: 'day', at: '09:00' } }), /how it runs/);
+  assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'team', folder: 'relative/path', schedule: { every: 'day', at: '09:00' } }), /full path/);
+  assert.equal(createAutomation({ name: 'No folder', prompt: 'y', mode: 'task', folder: tmp, schedule: { every: 'day', at: '09:00' } }).folder, null, 'only an AI team works in a folder');
+
+  const a = createAutomation({ name: 'Usage digest', prompt: 'Summarize my usage.', mode: 'task', schedule: { every: 'day', at: '09:00' } });
+  assert.equal(a.schedule_text, 'Every day at 09:00');
+  assert.ok(Date.parse(a.next_run_at) > Date.now());
+  const paused = updateAutomation(a.id, { enabled: false });
+  assert.equal(paused.enabled, false);
+  assert.equal(paused.next_run_at, null);
+  assert.ok(updateAutomation(a.id, { enabled: true }).next_run_at);
+  assert.ok(makeBackup().automations.some((x) => x.name === 'Usage digest'), 'backups include automations');
+
+  // Due a minute ago: it runs, as a task named after it, and the next run moves on.
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Usage is fine.' });
+  const now = new Date();
+  db.prepare('UPDATE automations SET next_run_at = ? WHERE id = ?').run(new Date(now - 60_000).toISOString(), a.id);
+  runDueAutomations(now);
+  const ran = listAutomations().find((x) => x.id === a.id);
+  assert.ok(ran.last_task, ran.last_error ?? 'a task was started');
+  assert.ok(Date.parse(ran.next_run_at) > now.getTime());
+  const done = await waitFor(() => {
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(ran.last_task.id);
+    return row.status === 'completed' || row.status === 'failed' ? row : null;
+  });
+  assert.equal(done.status, 'completed', done.error ?? '');
+  assert.equal(done.name, 'Usage digest');
+  assert.equal(done.result, 'Usage is fine.');
+
+  // Due two hours ago, while the app was closed: skipped and noted, not run late.
+  const before = db.prepare('SELECT COUNT(*) AS n FROM tasks').get().n;
+  db.prepare('UPDATE automations SET next_run_at = ? WHERE id = ?').run(new Date(now - 2 * 3_600_000).toISOString(), a.id);
+  runDueAutomations(now);
+  const skipped = listAutomations().find((x) => x.id === a.id);
+  assert.match(skipped.last_error, /Skipped the run due .* because the app wasn’t running then/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tasks').get().n, before);
+  assert.ok(Date.parse(skipped.next_run_at) > now.getTime());
+
+  for (const x of listAutomations()) deleteAutomation(x.id);
+  assert.equal(listAutomations().length, 0);
+  assert.ok(Array.isArray(buildState().automations));
+});

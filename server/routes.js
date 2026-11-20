@@ -18,6 +18,7 @@ import { ROLES, lineupView, startTeamTask } from './team.js';
 import { makeBackup, restoreBackup } from './backup.js';
 import { CATEGORIES, classify, routeTask } from './router.js';
 import { buildStats } from './stats.js';
+import { createAutomation, deleteAutomation, listAutomations, runAutomation, updateAutomation } from './automations.js';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -306,6 +307,16 @@ export function apiRoutes(app) {
   });
 
   app.post('/api/summary/refresh', async (req, res) => res.json(await refreshSummary()));
+
+  // ── Automations ──
+  app.get('/api/automations', (req, res) => res.json(listAutomations()));
+  app.post('/api/automations', (req, res) => res.status(201).json(createAutomation(req.body ?? {})));
+  app.patch('/api/automations/:id', (req, res) => res.json(updateAutomation(req.params.id, req.body ?? {})));
+  app.delete('/api/automations/:id', (req, res) => {
+    deleteAutomation(req.params.id);
+    res.json({ ok: true });
+  });
+  app.post('/api/automations/:id/run', (req, res) => res.json(runAutomation(req.params.id)));
 
   // ── Backups ──
   app.get('/api/backup', (req, res) => {

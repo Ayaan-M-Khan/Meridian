@@ -126,6 +126,22 @@ CREATE TABLE IF NOT EXISTS routing_log (
   preview TEXT
 );
 
+-- Saved prompts that run on a schedule (automations.js). schedule: {"every":"day","at":"09:00"}.
+CREATE TABLE IF NOT EXISTS automations (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  folder TEXT,
+  schedule TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT,
+  last_run_at TEXT,
+  last_task_id INTEGER,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_usage_day ON usage_daily(day);
 CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at);
 CREATE INDEX IF NOT EXISTS idx_progress_task ON task_progress(task_id, at);
@@ -145,6 +161,7 @@ function addColumns(table, cols) {
 addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT'], ['detail', 'TEXT'], ['category', 'TEXT']]);
 addColumns('integrations', [['meta', 'TEXT']]);
 addColumns('assistant_threads', [['engine', 'TEXT'], ['route', 'TEXT']]);
+addColumns('automations', [['folder', 'TEXT']]);
 db.prepare("UPDATE integrations SET name = 'Assistant (built in)' WHERE adapter = 'claude-assistant' AND name = 'Claude assistant'").run();
 
 export function tx(fn) {

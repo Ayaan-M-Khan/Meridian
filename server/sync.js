@@ -5,6 +5,7 @@ import { decrypt } from './crypto.js';
 import { evaluateAlerts } from './alerts.js';
 import { maybeRefreshSummary } from './summary.js';
 import { pruneSessions } from './auth.js';
+import { runDueAutomations } from './automations.js';
 import { AdapterError, addDays, nowIso, startOfUtcDay, startOfUtcMonth, utcDay } from './util.js';
 
 const inFlight = new Map();
@@ -104,6 +105,11 @@ async function tick() {
       return !r.last_sync_at || Date.now() - Date.parse(r.last_sync_at) >= every * 60_000 - 5_000;
     });
   for (const r of due) await syncIntegration(r.id);
+  try {
+    runDueAutomations();
+  } catch (err) {
+    console.error('[acc] automations:', err);
+  }
   evaluateAlerts();
   await maybeRefreshSummary();
   pruneSessions();

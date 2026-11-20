@@ -1,6 +1,7 @@
 import { adapters } from './adapters/index.js';
 import { DEFAULT_SETTINGS } from './db.js';
 import { lastNDays, startOfUtcMonth, utcDay } from './util.js';
+import { nextRun } from './automations.js';
 
 /** Sample statistics in the same shape as buildStats(), for demo mode. */
 export function demoStats(now = new Date()) {
@@ -232,6 +233,11 @@ export function demoState(now = new Date()) {
     settings: { ...DEFAULT_SETTINGS, monthly_ceiling_usd: 300, summary_key_set: false, summary_key_hint: null },
     desktop_app: Boolean(globalThis.accDesktop),
     task_kinds: { code: 'Coding', debug: 'Debugging', writing: 'Writing', research: 'Research', analysis: 'Analysis', planning: 'Planning', quick: 'Quick question', general: 'General' },
+    automations: [
+      { id: 1, name: 'Weekly AI usage report', prompt: 'Summarize last week’s AI usage by tool, flag anything near a limit, and suggest where to cut back.', mode: 'task', mode_label: 'Assistant task', schedule: { every: 'week', at: '09:00', day: 1 }, schedule_text: 'Every Monday at 09:00', enabled: true, next_run_at: nextRun({ every: 'week', at: '09:00', day: 1 }, now).toISOString(), last_run_at: ago(60 * 24 * 6.9), last_error: null, last_task: { id: 7, status: 'completed', finished_at: ago(60 * 24 * 6.9) }, created_at: ago(60 * 24 * 30) },
+      { id: 2, name: 'Morning AI news', prompt: 'What changed in AI tools and models in the last day that matters for a developer? Keep it to five bullets.', mode: 'compare', mode_label: 'Ask all', schedule: { every: 'weekday', at: '08:30' }, schedule_text: 'Every weekday at 08:30', enabled: true, next_run_at: nextRun({ every: 'weekday', at: '08:30' }, now).toISOString(), last_run_at: ago(60 * 10), last_error: null, last_task: null, created_at: ago(60 * 24 * 12) },
+      { id: 3, name: 'Tidy the project README', prompt: 'Review the README for accuracy and fix anything out of date.', mode: 'team', mode_label: 'AI team', schedule: { every: 'week', at: '17:00', day: 5 }, schedule_text: 'Every Friday at 17:00', enabled: false, next_run_at: null, last_run_at: null, last_error: null, last_task: null, created_at: ago(60 * 24 * 3) },
+    ],
     engines: [
       { id: 'claude-code', label: 'Claude Code', via: 'your Claude account', vendor: 'Anthropic', kind: 'cli', integration_id: 7, ready: true, reason: null },
       { id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', integration_id: null, ready: false, reason: 'Add a Claude API key in Settings.' },

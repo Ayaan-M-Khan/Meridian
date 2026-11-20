@@ -99,7 +99,7 @@ export function lineupView(opts) {
   return Object.fromEntries(Object.entries(l).map(([role, e]) => [role, { id: e.id, label: e.label, vendor: e.vendor, chosen: e.chosen }]));
 }
 
-function cleanFolder(f) {
+export function cleanFolder(f) {
   if (f == null || f === '') return null;
   if (typeof f !== 'string') throw new HttpError(400, 'The folder must be a path.');
   const raw = f.trim().replace(/^"(.*)"$/, '$1');
@@ -154,7 +154,7 @@ const MAX_COMPARE = 6;
  * mode 'team' splits the work by role; mode 'compare' ("Ask all") has every ready AI answer the same request on its
  * own, then the builder combines the answers into one.
  */
-export function startTeamTask({ goal, folder, mode = 'team' }) {
+export function startTeamTask({ goal, folder, mode = 'team', name: givenName = null }) {
   if (typeof goal !== 'string' || !goal.trim()) throw new HttpError(400, 'Describe what the team should do.');
   if (goal.length > 4000) throw new HttpError(400, 'Keep the goal under 4,000 characters.');
   if (!['team', 'compare'].includes(mode)) throw new HttpError(400, 'Choose how the AIs work together.');
@@ -170,7 +170,7 @@ export function startTeamTask({ goal, folder, mode = 'team' }) {
   const integ = assistantIntegration();
   if (!integ.enabled) throw new HttpError(409, 'The built-in assistant tool is turned off on the AI Tools page.');
   const text = goal.trim();
-  const name = text.split('\n')[0].replace(/\s+/g, ' ').slice(0, 80);
+  const name = (givenName ?? text.split('\n')[0]).replace(/\s+/g, ' ').slice(0, 80);
   const answering = listEngines().filter((e) => e.ready).slice(0, MAX_COMPARE);
   const detail = mode === 'compare'
     ? {

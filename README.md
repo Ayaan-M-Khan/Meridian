@@ -65,6 +65,17 @@ With the assistant on **Automatic** (Settings → Assistant), every request goes
 
 The command bar shows where a request will go as you type. A chat stays with the AI it started with, and shows which one Automatic picked and why. Background tasks and the AI team's roles are routed the same way. Pick a specific AI in Settings or the chat to turn routing off.
 
+To steer it without turning it off, choose an AI for a kind of task under **Settings → Smart routing**, for example Codex for planning or Gemini for research. Your choice goes first unless it isn't ready or is at its plan limit; then Automatic picks the next best and says why.
+
+## Automations
+
+The **Automations** page keeps prompts that run on a schedule: every hour, every day, every weekday or once a week, at a time you choose (this computer's local time). Each one runs as an assistant task, an AI team task (optionally in a project folder) or Ask all.
+
+- Every run goes through smart routing, shows up in Tasks with live progress, and alerts you when it finishes, like a task you start yourself.
+- **Run now** tries one straight away; pausing keeps it without running it.
+- Runs happen while the app is open or in the tray. A run that was due while the app was closed is skipped and noted, instead of starting late or several times at once.
+- The overview's **Up next** lists the next runs. Start from one of the ideas on the page or write your own.
+
 ## Statistics
 
 The **Statistics** page shows:
@@ -215,7 +226,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/assistant-tools.js`: the app functions the assistant can call. Read-only tools are available everywhere; actions are available only in the chat.
 - `server/runner.js`: background tasks the assistant carries out, with a queue and cancel/retry.
 - `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
-- `server/backup.js`: backups as a JSON file, without secrets, and restoring them.
+- `server/backup.js`: backups as a JSON file (tools, tasks, conversations, alerts, automations and settings), without secrets, and restoring them.
+- `server/automations.js`: saved prompts that run on a schedule; the scheduler in `server/sync.js` starts the ones that are due every minute.
 - `server/router.js`: smart routing: what kind of task a request is, and which ready AI suits it best, weighed for plan headroom, cost, recent failures and spread.
 - `server/stats.js`: the Statistics page's figures.
 - `server/eta.js`: progress history, finish estimates, and stall and overdue detection.

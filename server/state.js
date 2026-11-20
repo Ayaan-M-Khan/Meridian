@@ -4,6 +4,7 @@ import { estimate, pastDurations, progressHistory } from './eta.js';
 import { listEngines } from './engine-list.js';
 import { ROLES, lineupView, teamView } from './team.js';
 import { CATEGORIES } from './router.js';
+import { listAutomations } from './automations.js';
 import { lastNDays, nowIso, rowTokens, startOfUtcMonth, sumField, sumNullable, utcDay } from './util.js';
 
 const ACTIVE_WINDOW_MS = 15 * 60_000;
@@ -212,5 +213,6 @@ export function buildState(now = new Date()) {
     ...engineState(settings),
     team: { lineup: lineupView({ settings }), roles: Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, { title: r.title, does: r.does }])) },
     task_kinds: CATEGORIES,
+    automations: listAutomations(),
   };
 }
