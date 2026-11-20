@@ -162,6 +162,14 @@ addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['r
 addColumns('integrations', [['meta', 'TEXT']]);
 addColumns('assistant_threads', [['engine', 'TEXT'], ['route', 'TEXT']]);
 addColumns('automations', [['folder', 'TEXT']]);
+//   users: a linked Google account (its stable ID and email), two-step verification (encrypted secret, the last code
+//   step used so a code works once, hashes of unused recovery codes), and when the password last changed.
+//   sessions: when it started and was last used, the browser it's in, how you signed in, and "keep me signed in".
+addColumns('users', [['google_sub', 'TEXT'], ['google_email', 'TEXT'], ['totp_secret_enc', 'TEXT'], ['totp_last_step', 'INTEGER'], ['recovery_hashes', 'TEXT'], ['password_changed_at', 'TEXT']]);
+addColumns('sessions', [['created_at', 'INTEGER'], ['last_seen', 'INTEGER'], ['user_agent', 'TEXT'], ['method', 'TEXT'], ['persistent', 'INTEGER']]);
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_sub) WHERE google_sub IS NOT NULL');
+// Sessions from before 0.10 had no "keep me signed in" choice; they were 30-day sessions.
+db.prepare('UPDATE sessions SET persistent = 1 WHERE persistent IS NULL').run();
 db.prepare("UPDATE integrations SET name = 'Assistant (built in)' WHERE adapter = 'claude-assistant' AND name = 'Claude assistant'").run();
 
 export function tx(fn) {
@@ -199,6 +207,7 @@ export const DEFAULT_SETTINGS = {
   privacy: { retention_days: 0, read_sessions: true, session_titles: true },
   notify: {
     my_task_done: true,
+    security: true,
     update: true,
     task_failed: true,
     task_completed: false,

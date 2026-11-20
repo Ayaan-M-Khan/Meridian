@@ -81,7 +81,7 @@ test('your data: an inventory, where it goes, retention, session privacy, and er
   const left = db.prepare("SELECT external_id FROM tasks WHERE kind IS NULL OR kind != 'session' ORDER BY external_id").all().map((r) => r.external_id);
   assert.deepEqual(left, ['new-done', 'old-running']);
   assert.deepEqual(db.prepare('SELECT title FROM assistant_threads').all().map((r) => r.title), ['new chat']);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notifications').get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE title = 'old'").get().n, 0, 'the old alert is gone; today’s sign-in alert stays');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM routing_log').get().n, 0);
   assert.equal(pruneOldData(0), null, '“keep” deletes nothing');
 
@@ -95,7 +95,7 @@ test('your data: an inventory, where it goes, retention, session privacy, and er
 
   // Erasing: needs the word and your password, refuses while work runs, then wipes everything.
   assert.equal((await call('POST', '/api/privacy/erase', { password: PASSWORD, confirm: 'delete' })).status, 400);
-  assert.equal((await call('POST', '/api/privacy/erase', { password: 'wrong password', confirm: 'DELETE' })).status, 401);
+  assert.equal((await call('POST', '/api/privacy/erase', { password: 'wrong password', confirm: 'DELETE' })).status, 403, 'a wrong password isn’t a sign-out');
   fs.mkdirSync(path.join(process.env.ACC_DATA_DIR, 'assistant-workspace'), { recursive: true });
   fs.writeFileSync(path.join(process.env.ACC_DATA_DIR, 'assistant-workspace', 'note.txt'), 'x');
   const erased = await call('POST', '/api/privacy/erase', { password: PASSWORD, confirm: 'DELETE' });

@@ -45,6 +45,35 @@ The installer is written to `dist/`. Use `npm run app` to open the desktop app w
 - **Place cards:** click a place to open its card: status, tokens today and this month, requests routed there, how often its runs finished well, plan limits, and buttons to open it or chat with it.
 - **Without a mouse:** with the map focused, the arrow keys move it, **+** and **−** zoom, **0** shows everything, Tab moves between places, Enter opens one and Escape closes its card. **Every place as a list** under the map has the same facts as a table.
 
+## Sign-in & security
+
+The sign-in page asks for your username and password, or offers **Continue with Google** once you've linked a Google account. **Sign-in & security** in the sidebar has the rest:
+
+- **Password.** Change it there (everyone else signed in is signed out). New passwords need 12+ characters, can't be a common password, and can't contain your username. A strength bar and rule ticks show as you type.
+- **Two-step verification.**
+  - Scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password and others), or type in the key.
+  - Signing in with your password then also needs the 6-digit code. Each code works once.
+  - You get ten recovery codes, each working once, for when you don't have your phone. They're shown once, and only their hashes are kept.
+  - The authenticator secret is encrypted on this computer.
+- **Sign in with Google.** Google needs to know which app is asking, so you register the app once in your own Google Cloud account (free):
+  1. Open [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials) and pick or create a project.
+  2. If asked, set up the consent screen: app name "AI Command Center", audience **External**, your email as the contact. Add the Google account you'll use under **Audience → Test users**.
+  3. **Create credentials → OAuth client ID**, type **Desktop app**.
+  4. Paste the client ID and secret into **Sign-in & security**, then **Link a Google account**.
+- **How Google sign-in works:**
+  - Google's page opens in your normal browser, because Google doesn't allow sign-in inside app windows. You pick your account there, and the app window signs you in.
+  - It uses the authorization code flow with PKCE, a one-time state and nonce, and a direct code exchange with Google. It checks the ID token's RS256 signature against Google's published keys, and the issuer, audience, expiry and verified email.
+  - A Google account signs in only once it's linked to your account here; it never creates one. The browser tab that finishes sign-in never holds a session.
+  - Signing in with Google skips the app's own two-step code, since Google has its own.
+  - **Forgot your password?** Right after signing in with Google, you can set a new one without the old one.
+- **Signed-in sessions.** Every session is listed, with its device, how you signed in, when it started and when it was last active. Sign out any of them, or everywhere else.
+  - "Keep me signed in" lasts 30 days.
+  - Without it, a session ends when the app closes, or after 12 hours without use.
+- **Limits and alerts.**
+  - Sign-in is limited to 10 tries per address per 15 minutes, and 20 wrong passwords lock the account for 15 minutes.
+  - A wrong username takes as long to reject as a wrong password, so usernames can't be probed.
+  - Each new sign-in, password change and two-step change raises a **Sign-in and security** alert.
+
 ## Privacy & data
 
 AI Command Center keeps everything in one folder on your computer. There's no analytics, tracking or advertising, and nothing goes to the makers of this app. **Privacy & data** in the sidebar shows:
@@ -276,6 +305,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/assistant-tools.js`: the app functions the assistant can call. Read-only tools are available everywhere; actions are available only in the chat.
 - `server/runner.js`: background tasks the assistant carries out, with a queue, cancel/retry and follow-ups.
 - `server/updates.js`: checks GitHub for a newer release, and downloads and verifies the installer for the desktop app to run.
+- `server/auth.js`: your account, sign-in (password, two-step codes, Google), sessions and the Sign-in & security routes.
+- `server/totp.js`: authenticator codes (RFC 6238) and recovery codes. `server/google-auth.js`: Sign in with Google (OpenID Connect with PKCE, ID token checks).
 - `server/privacy.js`: what the app keeps and where data goes, retention clean-up, session privacy, and erasing everything.
 - `public/map.js`: the interactive map: its model (places, routes, regions, hand-offs) and the pan, zoom and search.
 - `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
@@ -296,6 +327,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - The ingest endpoint takes only its own bearer token, compared by hash. The MCP bridge endpoint takes only the random token of a run in progress, and stops working when the run ends.
 - Content Security Policy allows scripts only from the app itself. All reported text is escaped before display.
 - The server listens on localhost by default. Before exposing it beyond your machine, put it behind HTTPS.
-- Passwords are stored as salted scrypt hashes; sign-in is rate-limited; session cookies are HttpOnly and SameSite=Strict (and Secure over HTTPS). Erasing all data asks for the password again.
+- Passwords are stored as salted scrypt hashes; sign-in is rate-limited per address and per account; session cookies are HttpOnly and SameSite=Strict (and Secure over HTTPS). Changing the password, turning off two-step verification, unlinking Google and erasing all data each ask for the password again.
+- Responses carry `Permissions-Policy` (no camera, microphone or location), `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and API responses aren't cached.
 - The interface makes no requests to other sites: fonts and the chart library ship with the app.
 - Task names, errors and results that come from other tools are passed to Claude as data, and its instructions say to treat them that way. Background tasks get only read access plus progress reporting, so text inside a reported task can't make one change your settings.

@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { authRoutes, requireAuth, issueSetupCode } from './auth.js';
+import { authRoutes, requireAuth, issueSetupCode, securityRoutes } from './auth.js';
 import { apiRoutes } from './routes.js';
 import { ingestHandler } from './ingest.js';
 import { startScheduler } from './sync.js';
@@ -20,6 +20,11 @@ function createApp() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
+    // No camera, microphone, location or similar for this page, and no sharing a browsing context with other sites.
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
     res.setHeader(
       'Content-Security-Policy',
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -42,6 +47,7 @@ function createApp() {
   app.post('/api/ingest/:id', ingestHandler);
   app.post('/api/bridge/:run', bridgeHandler);
   app.use('/api', requireAuth);
+  securityRoutes(app);
   apiRoutes(app);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 

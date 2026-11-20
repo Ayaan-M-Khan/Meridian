@@ -76,6 +76,7 @@ const PAGES = {
   usage: { title: 'Usage & Costs', icon: 'chart', short: 'Usage' },
   stats: { title: 'Statistics', icon: 'pulse', short: 'Stats' },
   notifications: { title: 'Alerts', icon: 'bell', short: 'Alerts' },
+  security: { title: 'Sign-in & security', icon: 'key', short: 'Security' },
   privacy: { title: 'Privacy & data', icon: 'shield', short: 'Privacy' },
   tools: { title: 'AI Tools', icon: 'tools', short: 'Tools' },
   settings: { title: 'Settings', icon: 'gear', short: 'Settings' },
@@ -102,6 +103,7 @@ const CAP_LONG = {
 };
 const NOTIFY_LABELS = {
   my_task_done: ['Your tasks', 'When an assistant or AI team task you started finishes or fails'],
+  security: ['Sign-in and security', 'New sign-ins, password changes and two-step verification changes'],
   update: ['App updates', 'When a new version of AI Command Center is available'],
   task_failed: ['Failed tasks', 'When a reported task fails'],
   task_completed: ['Completed tasks', 'When a reported task finishes'],
@@ -207,31 +209,158 @@ const engineLogo = (e, size = '') => logo({ vendor: e.vendor, name: e.label, ada
 const ENGINE_VENDOR = { 'claude-code': 'Anthropic', 'claude-api': 'Anthropic', codex: 'OpenAI', 'gemini-cli': 'Google', 'antigravity-cli': 'Google', 'copilot-cli': 'GitHub', 'cursor-cli': 'Anysphere' };
 const engineById = (id, label) => engineLogo({ id, label, vendor: ENGINE_VENDOR[id] }, 'xs');
 
-// ── Auth ─────────────────────────────────────────────────────────────────
-async function showAuth() {
+// ── Sign-in ──────────────────────────────────────────────────────────────
+// Google's "G" mark, used as Google's sign-in branding guidelines describe (on a plain button, with "Continue with Google").
+const GOOGLE_G = '<svg viewBox="0 0 48 48" aria-hidden="true" width="18" height="18"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
+const EYE = svg('<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>');
+
+async function showAuth(view = null, message = '') {
   closeModal();
   clearTimeout(S.timer);
+  S.mapInst?.destroy();
+  S.mapInst = null;
   const st = await fetch('/api/auth/status').then((r) => r.json()).catch(() => ({ setupRequired: false }));
-  const setup = st.setupRequired;
+  S.auth = { setup: Boolean(st.setupRequired), google: Boolean(st.google), version: st.version ?? '', view: view ?? (st.setupRequired ? 'setup' : 'login'), challenge: null, flow: null, message };
+  renderAuth();
+}
+
+/** How strong a new password looks, 0–4, from its length and variety. The server's rules decide. */
+function passwordScore(pw, username = '') {
+  if (!pw) return 0;
+  const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^\w\s]/].filter((r) => r.test(pw)).length;
+  let score = pw.length >= 20 ? 3 : pw.length >= 16 ? 2 : pw.length >= 12 ? 1 : 0;
+  if (score && kinds >= 3) score += 1;
+  if (username && pw.toLowerCase().includes(username.toLowerCase())) score = Math.min(score, 1);
+  if (new Set(pw).size < 6) score = 0;
+  return Math.min(4, score);
+}
+const SCORE_LABEL = ['Too short', 'Weak', 'Fair', 'Good', 'Strong'];
+
+function renderAuth() {
+  const a = S.auth;
   const preset = new URLSearchParams(location.search).get('setup');
-  const codeField = preset
-    ? `<input type="hidden" name="setupCode" value="${esc(preset)}">`
-    : '<div class="field"><label for="f-code">Setup code</label><input class="input" id="f-code" name="setupCode" autocomplete="one-time-code" required></div>';
-  $('#root').innerHTML = `
-  <div class="auth"><div class="auth-card">
-    <div class="brand-mark lg">${ICON.spark}</div>
-    <h1>${setup ? 'Create your account' : 'Welcome back'}</h1>
-    <p>${setup ? `This is the only account for this AI Command Center.${preset ? '' : ' The setup code is printed in the server console.'}` : 'Sign in to AI Command Center.'}</p>
-    <form class="form" data-form="${setup ? 'setup' : 'login'}">
-      <div class="field"><label for="f-user">Username</label><input class="input" id="f-user" name="username" autocomplete="username" required></div>
-      <div class="field"><label for="f-pass">Password</label><input class="input" id="f-pass" name="password" type="password" autocomplete="${setup ? 'new-password' : 'current-password'}" minlength="${setup ? 10 : 1}" required>${setup ? '<span class="help">At least 10 characters.</span>' : ''}</div>
-      ${setup ? codeField : ''}
-      <button class="btn primary lg" type="submit">${setup ? 'Create account' : 'Sign in'}</button>
-      <div class="error-text" data-error></div>
-    </form>
-    ${setup ? '<p class="auth-privacy">Your account and everything the app keeps stay on this computer. There’s no analytics or tracking. Data goes to an AI company only when you use that AI, under your own account with it. You can see, export or delete all of it under <b>Privacy &amp; data</b>.</p>' : ''}
-  </div></div>`;
-  $('#f-user')?.focus();
+  const passField = (id, label, auto, extra = '') => `<div class="si-field"><label for="${id}">${label}</label>
+    <div class="si-pass"><input class="si-input" id="${id}" name="${id === 'f-pass' ? 'password' : id === 'f-pass2' ? 'confirm' : 'password'}" type="password" autocomplete="${auto}" required maxlength="200" ${extra}>
+      <button type="button" class="si-eye" data-action="toggle-pass" data-target="${id}" aria-label="Show password" aria-pressed="false" title="Show password">${EYE}</button></div></div>`;
+  const remember = `<label class="si-check"><input type="checkbox" name="remember" id="f-remember" value="1"><span>Keep me signed in on this computer for 30 days</span></label>`;
+  const errorBox = `<div class="si-error" data-error role="alert">${esc(a.message ?? '')}</div>`;
+  let main;
+  if (a.view === 'setup') {
+    main = `<form class="si-form" data-form="setup" autocomplete="on">
+      <div class="si-step">First run</div>
+      <h1>Create your account</h1>
+      <p class="si-lead">This is the only account for AI Command Center on this computer. You’ll use it to sign in each time.</p>
+      <div class="si-field"><label for="f-user">Username</label><input class="si-input" id="f-user" name="username" autocomplete="username" required autocapitalize="off" spellcheck="false" maxlength="64"></div>
+      ${passField('f-pass', 'Password', 'new-password', 'minlength="12" aria-describedby="pw-rules"')}
+      <div class="si-meter" aria-hidden="true"><i id="pw-bar"></i></div>
+      <ul class="si-rules" id="pw-rules"><li data-rule="len">At least 12 characters</li><li data-rule="mix">A mix of letters, numbers or symbols</li><li data-rule="user">Doesn’t contain your username</li></ul>
+      ${passField('f-pass2', 'Confirm password', 'new-password')}
+      ${preset ? `<input type="hidden" name="setupCode" value="${esc(preset)}">` : '<div class="si-field"><label for="f-code">Setup code</label><input class="si-input" id="f-code" name="setupCode" autocomplete="one-time-code" required spellcheck="false"><span class="si-help">Printed in the server console when it started.</span></div>'}
+      ${remember}
+      <button class="si-btn primary" type="submit">Create account</button>
+      ${errorBox}
+      <p class="si-fine">Your account and everything the app keeps stay on this computer. There’s no analytics or tracking. Data goes to an AI company only when you use that AI, under your own account with it. You can see, export or delete all of it under Privacy &amp; data.</p>
+    </form>`;
+  } else if (a.view === 'verify') {
+    main = `<form class="si-form" data-form="verify" autocomplete="off">
+      <div class="si-step">Two-step verification</div>
+      <h1>Enter your code</h1>
+      <p class="si-lead">Open your authenticator app and enter the 6-digit code for AI Command Center.</p>
+      <div class="si-field"><label for="f-code2">Verification code</label><input class="si-input si-code" id="f-code2" name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="12" spellcheck="false" placeholder="123 456"></div>
+      <button class="si-btn primary" type="submit">Verify and sign in</button>
+      ${errorBox}
+      <p class="si-fine">Lost your phone? Enter one of your recovery codes, like 7KQ4-M2XP, instead. Each works once.</p>
+      <button type="button" class="si-link" data-action="auth-back">Use a different account</button>
+    </form>`;
+  } else if (a.view === 'google-wait') {
+    main = `<div class="si-form">
+      <div class="si-step">Sign in with Google</div>
+      <h1>Continue in your browser</h1>
+      <p class="si-lead">Google’s sign-in page opened in your web browser. Choose your account there; this window signs you in as soon as you’re done.</p>
+      <div class="si-wait"><span class="spin"></span><span>Waiting for Google…</span></div>
+      ${errorBox}
+      <div class="si-row"><button type="button" class="si-btn" data-action="google-reopen">Open the page again</button><button type="button" class="si-link" data-action="google-cancel">Cancel</button></div>
+      <p class="si-fine">Google doesn’t allow its sign-in page inside apps, so it opens in your browser. Nothing from your browser is shared with this app except the sign-in result.</p>
+    </div>`;
+  } else {
+    main = `<form class="si-form" data-form="login" autocomplete="on">
+      <h1>Sign in</h1>
+      <p class="si-lead">Use your AI Command Center account on this computer.</p>
+      <div class="si-field"><label for="f-user">Username</label><input class="si-input" id="f-user" name="username" autocomplete="username" required autocapitalize="off" spellcheck="false" maxlength="64"></div>
+      ${passField('f-pass', 'Password', 'current-password')}
+      <div class="si-caps" id="caps" hidden>Caps Lock is on</div>
+      ${remember}
+      <button class="si-btn primary" type="submit">Sign in</button>
+      ${errorBox}
+      ${a.google ? `<div class="si-or" role="separator"><span>or</span></div><button type="button" class="si-btn google" data-action="google-signin">${GOOGLE_G}<span>Continue with Google</span></button>` : ''}
+      <p class="si-fine">Forgot your password? ${a.google ? 'Continue with Google, then set a new one in Sign-in &amp; security.' : 'There’s no email reset, because nothing leaves this computer. Once signed in, link a Google account in Sign-in &amp; security, and you can use it to set a new password if you forget this one.'}</p>
+    </form>`;
+  }
+  $('#root').innerHTML = `<div class="si">
+    <div class="si-shell">
+      <aside class="si-brand" aria-label="About AI Command Center">
+        <div class="si-mark">${ICON.spark}</div>
+        <div class="si-name">AI Command Center</div>
+        <h2 class="si-tag">Your AI tools, usage and work, in one secure place.</h2>
+        <ul class="si-points">
+          <li>${ICON.shield}<span><b>Stays on this computer.</b> Your data leaves it only when you use an AI, under your own account.</span></li>
+          <li>${ICON.key}<span><b>Protected.</b> Passwords are hashed, keys are encrypted, and sign-in attempts are limited.</span></li>
+          <li>${svg('<rect x="4" y="1.8" width="8" height="12.4" rx="1.6"/><path d="M7 11.6h2"/>')}<span><b>Two-step verification.</b> Add a code from your phone for extra protection.</span></li>
+        </ul>
+        <div class="si-foot">${a.version ? `Version ${esc(a.version)} · ` : ''}Not affiliated with the AI companies whose tools it shows.</div>
+      </aside>
+      <main class="si-main">${main}</main>
+    </div></div>`;
+  ($('#f-user') ?? $('#f-code2') ?? $('.si-main button'))?.focus();
+}
+
+/** Opens Google's sign-in page in the browser and waits for the result. */
+async function googleFlow(path, body, onDone) {
+  const r = await api(path, { method: 'POST', body });
+  S.googleFlow = { flow: r.flow, url: r.url, started: Date.now() };
+  window.open(r.url, '_blank', 'noopener');
+  const tick = async () => {
+    const g = S.googleFlow;
+    if (!g || g.flow !== r.flow) return;
+    if (Date.now() - g.started > 10 * 60_000) {
+      S.googleFlow = null;
+      return onDone({ status: 'expired' });
+    }
+    try {
+      const p = await api('/api/auth/google/poll', { method: 'POST', body: { flow: g.flow } });
+      if (p.status === 'pending') {
+        g.timer = setTimeout(tick, 1500);
+        return;
+      }
+      S.googleFlow = null;
+      onDone(p);
+    } catch (err) {
+      g.timer = setTimeout(tick, 3000);
+    }
+  };
+  S.googleFlow.timer = setTimeout(tick, 1500);
+}
+function stopGoogleFlow() {
+  const g = S.googleFlow;
+  if (!g) return;
+  clearTimeout(g.timer);
+  S.googleFlow = null;
+  api('/api/auth/google/cancel', { method: 'POST', body: { flow: g.flow } }).catch(() => {});
+}
+
+/** The strength bar and rule ticks under a new password. */
+function updatePasswordRules(form) {
+  const pw = form.querySelector('#f-pass, #cp-next')?.value ?? '';
+  const user = form.querySelector('#f-user')?.value ?? S.user?.username ?? '';
+  const score = passwordScore(pw, user);
+  const bar = form.querySelector('#pw-bar, #cp-bar');
+  if (bar) {
+    bar.style.width = `${pw ? Math.max(8, score * 25) : 0}%`;
+    bar.dataset.score = String(score);
+    bar.parentElement.title = pw ? SCORE_LABEL[score] : '';
+  }
+  const rules = { len: pw.length >= 12, mix: [/[a-z]/i, /\d/, /[^\w\s]/].filter((r) => r.test(pw)).length >= 2, user: !user || !pw.toLowerCase().includes(user.toLowerCase()) };
+  for (const li of form.querySelectorAll('[data-rule]')) li.classList.toggle('ok', Boolean(pw) && rules[li.dataset.rule]);
 }
 
 // ── Shell ────────────────────────────────────────────────────────────────
@@ -248,7 +377,7 @@ function renderShell() {
         <div class="nav-label nav-label-row"><span>Connected</span><button class="nav-add" data-action="add-tool" aria-label="Connect a tool" title="Connect a tool">${ICON.plus}</button></div>
         <div class="nav-tools" id="nav-tools"></div>
         <div class="nav-label">Manage</div>
-        ${nav('tools')}${nav('privacy')}${nav('settings')}
+        ${nav('tools')}${nav('security')}${nav('privacy')}${nav('settings')}
       </nav>
       <a class="update-pill" id="update-pill" href="#settings" data-action="go-update" hidden></a>
       <div class="sidebar-foot"><span class="avatar">${esc(S.user.username.slice(0, 1).toUpperCase())}</span><span class="who">${esc(S.user.username)}</span><button class="btn small ghost" data-action="logout">Sign out</button></div>
@@ -335,7 +464,7 @@ async function load({ force = false } = {}) {
   updateChrome();
   const typing = document.activeElement?.closest?.('#content') && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
   // Settings and the chat keep their own state on screen, so background refreshes leave them alone.
-  const keep = ['settings', 'assistant', 'privacy', 'map'].includes(S.page) && $('#content')?.dataset.page === S.page;
+  const keep = ['settings', 'assistant', 'privacy', 'map', 'security'].includes(S.page) && $('#content')?.dataset.page === S.page;
   if (keep && S.page === 'map') refreshMap();
   if (force ? !(S.page === 'assistant' && keep && S.chat.streaming) : !(typing || keep)) renderPage();
   refreshOpenTask();
@@ -1251,6 +1380,100 @@ const VIEWS = {
       <details class="map-list card" ${tools.length ? '' : 'hidden'}><summary>${ICON.tasks}<span>Every place as a list</span></summary><div id="map-list"></div></details>`;
   },
 
+  security() {
+    const d = S.data;
+    const x = S.sec;
+    const head = `<div class="page-head"><div><h2>Sign-in &amp; security</h2><p>How you sign in to AI Command Center, and who is signed in.</p></div></div>`;
+    if (d.demo) return `${head}<div class="callout warn">Exit the demo to change how you sign in.</div>`;
+    if (!x) return `${head}<section class="card"><div class="empty">Loading…</div></section>`;
+    const pwField = (id, name, label, auto, extra = '') => `<div class="field"><label for="${id}">${label}</label><div class="si-pass"><input class="input" id="${id}" name="${name}" type="password" autocomplete="${auto}" required maxlength="200" ${extra}><button type="button" class="si-eye" data-action="toggle-pass" data-target="${id}" aria-label="Show password" aria-pressed="false">${EYE}</button></div></div>`;
+    const status = (on, yes, no) => `<span class="pill ${on ? 's-ok' : 's-queued'}">${on ? yes : no}</span>`;
+
+    // Password
+    const password = `<section class="card sec-card"><div class="card-head">${ICON.key}<h3>Password</h3><span class="aside">Changed ${esc(rel(x.password_changed_at) ?? 'at setup')}</span></div>
+      <form class="form" data-form="change-password">
+        ${x.can_reset_without_password ? '<div class="callout info small">You signed in with Google just now, so you can set a new password without the old one for a few minutes.</div>' : pwField('cp-current', 'current', 'Current password', 'current-password')}
+        <div class="form-row">${pwField('cp-next', 'next', 'New password', 'new-password', 'minlength="12"')}${pwField('cp-confirm', 'confirm', 'Confirm new password', 'new-password')}</div>
+        <div class="si-meter" aria-hidden="true"><i id="cp-bar"></i></div>
+        <ul class="si-rules"><li data-rule="len">At least 12 characters</li><li data-rule="mix">A mix of letters, numbers or symbols</li><li data-rule="user">Doesn’t contain your username</li></ul>
+        <div class="form-actions"><button class="btn primary" type="submit">Change password</button><span class="faint small">Everyone else signed in is signed out.</span></div>
+        <div class="error-text" data-error></div>
+      </form></section>`;
+
+    // Two-step verification
+    let twoStep;
+    if (S.secCodes) {
+      twoStep = `<div class="callout warn"><b>Save these recovery codes now.</b> Each signs you in once if you lose your phone. They won’t be shown again.</div>
+        <ol class="sec-codes" id="sec-codes">${S.secCodes.map((c) => `<li><code>${esc(c)}</code></li>`).join('')}</ol>
+        <pre id="sec-codes-raw" hidden>${esc(`AI Command Center recovery codes for ${x.username}\nEach works once.\n\n${S.secCodes.join('\n')}`)}</pre>
+        <div class="form-actions"><button class="btn" data-action="copy" data-target="sec-codes-raw">Copy</button><button class="btn" data-action="save-codes">${ICON.download}Save as file</button><button class="btn primary" data-action="codes-done">I’ve saved them</button></div>`;
+    } else if (x.two_factor) {
+      twoStep = `<p class="muted small">Signing in with your password also needs a code from your authenticator app. ${plural(x.recovery_left ?? 0, 'recovery code')} left.</p>
+        ${S.secForm === '2fa-off' || S.secForm === '2fa-recovery' ? `<form class="form sec-inline" data-form="${S.secForm}">
+          <div class="form-row">${pwField('tf-pass', 'password', 'Your password', 'current-password')}${S.secForm === '2fa-off' ? '<div class="field"><label for="tf-code">Code or recovery code</label><input class="input" id="tf-code" name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="12"></div>' : ''}</div>
+          <div class="form-actions"><button class="btn ${S.secForm === '2fa-off' ? 'danger' : 'primary'}" type="submit">${S.secForm === '2fa-off' ? 'Turn off two-step verification' : 'Make new recovery codes'}</button><button class="btn ghost" type="button" data-action="sec-form" data-form-name="">Cancel</button></div>
+          ${S.secForm === '2fa-recovery' ? '<p class="fine">Your old recovery codes stop working.</p>' : ''}
+          <div class="error-text" data-error></div></form>`
+        : `<div class="form-actions"><button class="btn" data-action="sec-form" data-form-name="2fa-recovery">New recovery codes</button><button class="btn danger" data-action="sec-form" data-form-name="2fa-off">Turn off</button></div>`}`;
+    } else if (S.secSetup) {
+      twoStep = `<div class="sec-setup">
+        <div class="sec-qr" role="img" aria-label="QR code for your authenticator app">${S.secSetup.qr}</div>
+        <div class="min0">
+          <ol class="sec-steps"><li>Open an authenticator app on your phone, such as Google Authenticator, Microsoft Authenticator or 1Password.</li><li>Scan this QR code, or enter the key below by hand.</li><li>Type the 6-digit code it shows, and your password.</li></ol>
+          <div class="field"><label>Key</label><div class="secret-box"><code id="sec-key">${esc(S.secSetup.secret)}</code><button class="btn small" data-action="copy" data-target="sec-key">Copy</button></div></div>
+          <form class="form" data-form="2fa-on">
+            <div class="form-row"><div class="field"><label for="tf-code">6-digit code</label><input class="input" id="tf-code" name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="7"></div>${pwField('tf-pass', 'password', 'Your password', 'current-password')}</div>
+            <div class="form-actions"><button class="btn primary" type="submit">Turn on</button><button class="btn ghost" type="button" data-action="sec-2fa-cancel">Cancel</button></div>
+            <div class="error-text" data-error></div></form>
+        </div></div>`;
+    } else {
+      twoStep = `<p class="muted small">Add a second step to signing in with your password: a 6-digit code from an authenticator app on your phone. Someone who learns your password still can’t get in.</p>
+        <div class="form-actions"><button class="btn primary" data-action="sec-2fa-start">Set up two-step verification</button></div>`;
+    }
+    const twoStepCard = `<section class="card sec-card"><div class="card-head">${svg('<rect x="4" y="1.8" width="8" height="12.4" rx="1.6"/><path d="M7 11.6h2"/>')}<h3>Two-step verification</h3>${status(x.two_factor, 'On', 'Off')}</div>${twoStep}</section>`;
+
+    // Google
+    const g = x.google;
+    let google;
+    if (!g.configured) {
+      google = `<p class="muted small">Sign in with your Google account instead of your password. Google needs to know which app is asking, so you register AI Command Center in your own Google Cloud account first. It’s free and takes a few minutes:</p>
+        <ol class="sec-steps">
+          <li>Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console → APIs &amp; Services → Credentials</a> and pick or create a project.</li>
+          <li>If asked, set up the consent screen (Google Auth Platform): app name “AI Command Center”, audience <b>External</b>, your email as the contact. Under <b>Audience → Test users</b>, add the Google account you’ll sign in with.</li>
+          <li>Choose <b>Create credentials → OAuth client ID</b>, application type <b>Desktop app</b>, name it, and create it.</li>
+          <li>Copy the <b>Client ID</b> and <b>Client secret</b> into the boxes below.</li>
+        </ol>
+        <form class="form" data-form="google-client">
+          <div class="form-row"><div class="field"><label for="gc-id">Client ID</label><input class="input" id="gc-id" name="client_id" autocomplete="off" spellcheck="false" required placeholder="1234…apps.googleusercontent.com"></div>
+            <div class="field"><label for="gc-secret">Client secret</label><input class="input" id="gc-secret" name="client_secret" type="password" autocomplete="off" spellcheck="false" required placeholder="GOCSPX-…"></div></div>
+          <div class="form-actions"><button class="btn primary" type="submit">Save</button><span class="faint small">The secret is encrypted on this computer.</span></div>
+          <div class="error-text" data-error></div></form>`;
+    } else if (!g.linked) {
+      google = `<p class="muted small">Your Google client is set up (${esc(g.client_id.slice(0, 14))}…). Now link the Google account you’ll sign in with. Google’s page opens in your browser.</p>
+        ${S.secLinking ? '<div class="si-wait"><span class="spin"></span><span>Waiting for Google in your browser…</span><button class="btn small ghost" data-action="sec-link-cancel">Cancel</button></div>'
+          : `<div class="form-actions"><button class="btn google-btn" data-action="sec-link">${GOOGLE_G}<span>Link a Google account</span></button><button class="btn ghost" data-action="sec-remove-client">Remove client</button></div>`}`;
+    } else {
+      google = `<p class="muted small">Linked to <b>${esc(g.email ?? 'your Google account')}</b>. “Continue with Google” on the sign-in page signs you in. Two-step verification isn’t asked for then, since Google has its own.</p>
+        ${S.secForm === 'unlink' ? `<form class="form sec-inline" data-form="google-unlink"><div class="form-row">${pwField('gu-pass', 'password', 'Your password', 'current-password')}</div>
+          <div class="form-actions"><button class="btn danger" type="submit">Unlink</button><button class="btn ghost" type="button" data-action="sec-form" data-form-name="">Cancel</button></div><div class="error-text" data-error></div></form>`
+          : '<div class="form-actions"><button class="btn" data-action="sec-form" data-form-name="unlink">Unlink</button></div>'}`;
+    }
+    const googleCard = `<section class="card sec-card"><div class="card-head"><span class="sec-g">${GOOGLE_G}</span><h3>Sign in with Google</h3>${status(g.linked, 'Linked', g.configured ? 'Not linked' : 'Not set up')}</div>${google}</section>`;
+
+    // Sessions
+    const others = x.sessions.filter((t) => !t.current).length;
+    const sessions = `<section class="card sec-card"><div class="card-head">${ICON.grid}<h3>Signed-in sessions</h3><span class="aside">${plural(x.sessions.length, 'session')}</span></div>
+      <div class="rows">${x.sessions.map((t) => `<div class="row"><div class="status-ico ${t.current ? 's-ok' : 's-queued'}">${t.device.startsWith('Desktop') ? ICON.grid : ICON.external}</div>
+        <div class="row-main"><div class="row-title">${esc(t.device)} ${t.current ? '<span class="tag accent">This session</span>' : ''}</div>
+          <div class="row-sub">${esc(t.method === 'google' ? 'Signed in with Google' : t.method === 'password+2fa' ? 'Password and code' : 'Password')} · started ${esc(rel(t.created_at) ?? 'earlier')} · active ${esc(rel(t.last_seen) ?? 'earlier')} · ${t.persistent ? 'kept signed in' : 'ends when closed'}</div></div>
+        ${t.current ? '' : `<button class="btn small" data-action="sec-end" data-id="${esc(t.id)}">Sign out</button>`}</div>`).join('')}</div>
+      ${others ? `<div class="form-actions"><button class="btn" data-action="sec-end-others">Sign out everywhere else</button></div>` : ''}
+    </section>`;
+
+    return `${head}<div class="sec-grid">${password}${twoStepCard}${googleCard}${sessions}</div>
+      <p class="fine">Signing in is limited to 10 tries per 15 minutes, and 20 wrong passwords lock the account for 15 minutes. Each new sign-in raises an alert. Turn those alerts on or off in <a href="#settings">Settings</a>.</p>`;
+  },
+
   privacy() {
     const d = S.data;
     const p = S.privacyInfo;
@@ -1509,6 +1732,20 @@ function updateCard(d) {
   </section>`;
 }
 
+// ── Sign-in & security ───────────────────────────────────────────────────
+async function loadSecurity({ render = true } = {}) {
+  S.secLoading = true;
+  try {
+    S.sec = await api('/api/security');
+    S.secAt = Date.now();
+    if (render && S.page === 'security') renderPage();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    S.secLoading = false;
+  }
+}
+
 // ── Map ──────────────────────────────────────────────────────────────────
 const MAP_HELPERS = {
   esc,
@@ -1717,6 +1954,10 @@ function chartBase(text, grid) {
 }
 
 const AFTER = {
+  security() {
+    if (S.data?.demo || S.secLoading || (S.sec && Date.now() - S.secAt < 20_000)) return;
+    loadSecurity();
+  },
   map() {
     mountTheMap();
     const fresh = S.stats && S.stats.demo === S.demo && Date.now() - S.statsAt < 60_000;
@@ -2183,12 +2424,27 @@ function saveFile(name, data, type = 'application/octet-stream') {
 
 const FORMS = {
   async setup(fd) {
-    await api('/api/auth/setup', { method: 'POST', body: fd });
+    if (fd.password !== fd.confirm) throw new Error('The two passwords don’t match.');
+    await api('/api/auth/setup', { method: 'POST', body: { username: fd.username, password: fd.password, setupCode: fd.setupCode, remember: fd.remember === '1' } });
     await boot();
   },
   async login(fd) {
-    await api('/api/auth/login', { method: 'POST', body: fd });
+    const r = await api('/api/auth/login', { method: 'POST', body: { username: fd.username, password: fd.password, remember: fd.remember === '1' } });
+    if (r.twoFactor) {
+      S.auth = { ...S.auth, view: 'verify', challenge: r.challenge, message: '' };
+      return renderAuth();
+    }
     await boot();
+  },
+  async verify(fd) {
+    try {
+      const r = await api('/api/auth/login/verify', { method: 'POST', body: { challenge: S.auth.challenge, code: fd.code } });
+      await boot();
+      if (r.recovery) toast('You signed in with a recovery code. It can’t be used again; make new ones in Sign-in & security if you’re running low.');
+    } catch (err) {
+      if (/Sign in again/.test(err.message)) return showAuth('login', err.message);
+      throw err;
+    }
   },
   async alerts(fd) {
     await api('/api/settings', { method: 'PUT', body: { ...fd, monthly_ceiling_usd: numOrNull(fd.monthly_ceiling_usd) } });
@@ -2228,6 +2484,41 @@ const FORMS = {
     const r = await api('/api/team-tasks', { method: 'POST', body: { goal: fd.goal, folder: fd.folder?.trim() || null } });
     closeModal();
     await startedTeam(r);
+  },
+  async 'change-password'(fd) {
+    if (fd.next !== fd.confirm) throw new Error('The new passwords don’t match.');
+    const r = await api('/api/security/password', { method: 'POST', body: { current: fd.current ?? '', next: fd.next } });
+    toast(r.signed_out ? `Password changed. ${plural(r.signed_out, 'other session')} signed out.` : 'Password changed');
+    await loadSecurity();
+  },
+  async '2fa-on'(fd) {
+    const r = await api('/api/security/2fa/confirm', { method: 'POST', body: { code: fd.code, password: fd.password } });
+    S.secSetup = null;
+    S.secCodes = r.recovery_codes;
+    await loadSecurity();
+  },
+  async '2fa-off'(fd) {
+    await api('/api/security/2fa/disable', { method: 'POST', body: { code: fd.code, password: fd.password } });
+    S.secForm = null;
+    toast('Two-step verification is off');
+    await loadSecurity();
+  },
+  async '2fa-recovery'(fd) {
+    const r = await api('/api/security/2fa/recovery', { method: 'POST', body: { password: fd.password } });
+    S.secForm = null;
+    S.secCodes = r.recovery_codes;
+    await loadSecurity();
+  },
+  async 'google-client'(fd) {
+    await api('/api/security/google-client', { method: 'PUT', body: { client_id: fd.client_id, client_secret: fd.client_secret } });
+    toast('Google client saved. Now link your Google account.');
+    await loadSecurity();
+  },
+  async 'google-unlink'(fd) {
+    await api('/api/security/google/unlink', { method: 'POST', body: { password: fd.password } });
+    S.secForm = null;
+    toast('Google account unlinked');
+    await loadSecurity();
   },
   async erase(fd) {
     if (fd.confirm !== 'DELETE') throw new Error('Type DELETE, in capitals, to confirm.');
@@ -2323,7 +2614,7 @@ async function onSubmit(e) {
   if (errEl) errEl.textContent = '';
   if (btn) {
     btn.disabled = true;
-    btn.textContent = kind === 'add-tool' || kind === 'secret' ? 'Testing connection…' : 'Saving…';
+    btn.textContent = kind === 'add-tool' || kind === 'secret' ? 'Testing connection…' : kind === 'login' ? 'Signing in…' : kind === 'setup' ? 'Creating account…' : kind === 'verify' ? 'Verifying…' : 'Saving…';
   }
   try {
     await FORMS[kind](Object.fromEntries(new FormData(form)), form);
@@ -2569,6 +2860,102 @@ const ACTIONS = {
     const main = $('#content');
     main?.focus();
     main?.scrollTo(0, 0);
+  },
+  async 'sec-2fa-start'(el) {
+    el.disabled = true;
+    S.secSetup = await api('/api/security/2fa/start', { method: 'POST' });
+    renderPage();
+    $('#tf-code')?.focus();
+  },
+  'sec-2fa-cancel'() {
+    S.secSetup = null;
+    renderPage();
+  },
+  'sec-form'(el) {
+    S.secForm = el.dataset.formName || null;
+    renderPage();
+    $('.sec-inline input')?.focus();
+  },
+  'codes-done'() {
+    S.secCodes = null;
+    renderPage();
+    toast('Two-step verification is on');
+  },
+  'save-codes'() {
+    saveFile('ai-command-center-recovery-codes.txt', new Blob([$('#sec-codes-raw').textContent], { type: 'text/plain' }));
+  },
+  async 'sec-end'(el) {
+    el.disabled = true;
+    await api(`/api/security/sessions/${el.dataset.id}/end`, { method: 'POST' });
+    toast('That session is signed out');
+    await loadSecurity();
+  },
+  async 'sec-end-others'(el) {
+    el.disabled = true;
+    const r = await api('/api/security/sessions/end-others', { method: 'POST' });
+    toast(`${plural(r.ended, 'session')} signed out`);
+    await loadSecurity();
+  },
+  async 'sec-link'() {
+    S.secLinking = true;
+    renderPage();
+    try {
+      await googleFlow('/api/security/google/link', {}, async (p) => {
+        S.secLinking = false;
+        if (p.status === 'linked') toast(`Linked ${p.email ?? 'your Google account'}`);
+        else toast(p.status === 'expired' ? 'Linking took too long. Try again.' : p.error ?? 'Linking didn’t finish.', true);
+        await loadSecurity();
+      });
+    } catch (err) {
+      S.secLinking = false;
+      renderPage();
+      throw err;
+    }
+  },
+  'sec-link-cancel'() {
+    stopGoogleFlow();
+    S.secLinking = false;
+    renderPage();
+  },
+  async 'sec-remove-client'() {
+    await api('/api/security/google-client', { method: 'DELETE' });
+    toast('Google client removed');
+    await loadSecurity();
+  },
+  'toggle-pass'(el) {
+    const input = document.getElementById(el.dataset.target);
+    if (!input) return;
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    el.setAttribute('aria-pressed', String(show));
+    el.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    input.focus();
+  },
+  'auth-back'() {
+    showAuth('login');
+  },
+  async 'google-signin'() {
+    const remember = Boolean($('#f-remember')?.checked);
+    S.auth = { ...S.auth, view: 'google-wait', message: '' };
+    renderAuth();
+    try {
+      await googleFlow('/api/auth/google/start', { remember }, (p) => {
+        if (p.status === 'done') return boot();
+        S.auth = { ...S.auth, view: 'login', message: p.status === 'expired' ? 'Google sign-in took too long. Try again.' : p.error ?? 'Google sign-in didn’t finish.' };
+        renderAuth();
+      });
+    } catch (err) {
+      S.auth = { ...S.auth, view: 'login', message: err.message };
+      renderAuth();
+    }
+  },
+  'google-reopen'() {
+    if (S.googleFlow?.url) window.open(S.googleFlow.url, '_blank', 'noopener');
+  },
+  'google-cancel'() {
+    stopGoogleFlow();
+    S.auth = { ...S.auth, view: 'login', message: '' };
+    renderAuth();
   },
   'go-update'() {
     if (S.page !== 'settings') location.hash = '#settings';
@@ -2896,6 +3283,9 @@ async function boot() {
       S.confirmRemove = null;
       S.confirmAuto = null;
       S.eraseOpen = false;
+      S.secForm = null;
+      S.secSetup = null;
+      S.secCodes = null;
       closeModal();
       updateChrome();
       renderPage();
@@ -2905,6 +3295,7 @@ async function boot() {
     document.addEventListener('submit', onSubmit);
     document.addEventListener('change', onChange);
     document.addEventListener('input', (e) => {
+      if (e.target.closest?.('form[data-form="setup"], form[data-form="change-password"]') && ['f-pass', 'f-user', 'cp-next'].includes(e.target.id)) updatePasswordRules(e.target.form);
       if (e.target.id === 'chat-input') autosize(e.target);
       else if (e.target.id === 'tt-folder') refreshLineup();
       else if (e.target.dataset?.route) previewRoute(e.target);
@@ -2913,6 +3304,10 @@ async function boot() {
         const { groups, labels } = taskGroups(S.data);
         $('#task-list').innerHTML = taskListHtml(groups, labels);
       }
+    });
+    document.addEventListener('keyup', (e) => {
+      const caps = $('#caps');
+      if (caps && e.getModifierState) caps.hidden = !e.getModifierState('CapsLock');
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' && $('#modal-root .panel')) {

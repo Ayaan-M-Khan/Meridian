@@ -27,6 +27,12 @@ export const DATA_FLOWS = [
     terms: 'Read only. Keys are encrypted on this computer.',
   },
   {
+    to: 'Google, if you sign in with Google',
+    what: 'Sign-in happens on Google’s own page in your browser. The app receives your Google account’s ID and email, to match it to your account here, and nothing else from Google.',
+    when: 'Only when you link a Google account or choose Continue with Google.',
+    terms: 'Uses the OAuth client you registered in your own Google Cloud account. Your client secret is encrypted on this computer.',
+  },
+  {
     to: 'GitHub',
     what: 'A request for the latest release of AI Command Center. Nothing about you or your data.',
     when: 'Every few hours in the desktop app, or when you press Check now. You can turn it off.',

@@ -338,7 +338,7 @@ export function apiRoutes(app) {
     const { password, confirm } = req.body ?? {};
     if (confirm !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm.');
     const row = db.prepare('SELECT pass_hash FROM users WHERE id = ?').get(req.user.id);
-    if (!row || typeof password !== 'string' || !(await verifyPassword(password, row.pass_hash))) throw new HttpError(401, 'That password isn’t right.');
+    if (!row || typeof password !== 'string' || !(await verifyPassword(password, row.pass_hash))) throw new HttpError(403, 'That password isn’t right.');
     const busy = runningCount() + teamRunningCount();
     if (busy) throw new HttpError(409, `${busy} task${busy === 1 ? ' is' : 's are'} running. Cancel ${busy === 1 ? 'it' : 'them'} first, then erase.`);
     eraseEverything();
