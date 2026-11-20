@@ -15,7 +15,17 @@ The desktop app keeps its data in `%APPDATA%\AI Command Center\data`. It syncs, 
 - **Backups:** **Settings → Backup** saves your tools, tasks and results, conversations, alerts and settings to a JSON file, and restores from one. Backups never include your password, API keys or ingest tokens, so the file is safe to keep; you add keys again after restoring. The code is on GitHub; your data stays on your computer and in the backups you save.
 - **Updates:** the app checks this project's GitHub releases every few hours and lets you know when there's a new version. **Settings → Updates** shows what's new and installs it: the app downloads the installer, checks it against the release (size and GitHub's SHA-256 checksum), closes, updates in place and opens again, with your data kept. It won't install while tasks are running. Public releases are read directly; while the repository is private, the check and download use your GitHub CLI sign-in (`gh auth login`), and the app never handles the token. Turn the automatic check off under **Settings → Desktop app**.
 - **Exports:** **Usage & Costs** downloads the last 30 days as CSV, and each task's result saves as a Markdown file.
-- **Shortcuts:** Ctrl+K (or **/**) jumps to the overview's command bar. The Tasks page has a search box.
+- **The layout** works like a code editor:
+  - An icon bar on the left for each section.
+  - An **Explorer** with your connected tools, what's running and what's up next.
+  - **Tabs** for the pages you've opened (middle-click or × closes one), a breadcrumb bar, and a status bar along the bottom. The status bar shows which AI answers, your connections, live work, the next automation and the version.
+  - In narrower windows the explorer folds away. On phones, the bottom tab bar takes over.
+- **Shortcuts:**
+  - **Ctrl+P** or **Ctrl+K** opens the search and command palette: jump to any page, tool or task, or type **>** for commands (new task, new automation, switch theme, check for updates and more).
+  - **Ctrl+Shift+P** opens it straight on commands.
+  - **Ctrl+L** opens the chat as a side panel next to whatever page you're on.
+  - **/** jumps to the overview's command bar.
+  - The Tasks page has a search box.
 
 Build the installer:
 

@@ -61,6 +61,7 @@ const ICON = {
   folder: svg('<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>'),
   pulse: svg('<path d="M1.5 8.5h3l1.8-4.5 3.2 8 1.8-3.5h3.2"/>'),
   repeat: svg('<path d="M2.8 7A5.2 5.2 0 0 1 12.4 4.4M13.2 9a5.2 5.2 0 0 1-9.6 2.6"/><path d="M12.8 1.8v2.9H9.9M3.2 14.2v-2.9h2.9"/>'),
+  search: svg('<circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4l3.6 3.6"/>'),
   shield: svg('<path d="M8 1.6l5.2 2v4.1c0 3.2-2.2 5.6-5.2 6.7-3-1.1-5.2-3.5-5.2-6.7V3.6z"/><path d="M5.8 8l1.6 1.6 2.9-3"/>'),
   map: svg('<path d="M1.8 3.6l4-1.6 4.4 1.8 4-1.6v10.2l-4 1.6-4.4-1.8-4 1.6z"/><path d="M5.8 2v10.2M10.2 3.8V14"/>'),
   pause: svg('<path d="M5.5 3.5v9M10.5 3.5v9"/>', 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"'),
@@ -135,6 +136,7 @@ const S = {
   flashTool: null,
   confirmRemove: null,
   heroMode: ['team', 'compare'].includes(readStore('acc-hero-mode')) ? readStore('acc-hero-mode') : 'ask',
+  dock: readStore('acc-dock') === '1',
   chat: { loaded: false, threads: [], thread: null, streaming: false, pending: null, draft: '' },
 };
 
@@ -216,6 +218,8 @@ const EYE = svg('<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S
 
 async function showAuth(view = null, message = '') {
   closeModal();
+  if (S.pal) closePalette({ restore: false });
+  document.body.classList.remove('dock-open');
   clearTimeout(S.timer);
   S.mapInst?.destroy();
   S.mapInst = null;
@@ -365,27 +369,37 @@ function updatePasswordRules(form) {
 
 // ── Shell ────────────────────────────────────────────────────────────────
 function renderShell() {
-  const nav = (key) => `<a href="#${key}" data-nav="${key}">${ICON[PAGES[key].icon]}<span>${PAGES[key].title}</span><span class="count" data-count="${key}" hidden></span></a>`;
+  const act = (key) => `<a href="#${key}" class="wb-act" data-nav="${key}" title="${esc(PAGES[key].title)}" aria-label="${esc(PAGES[key].title)}">${ICON[PAGES[key].icon]}<span class="dot-badge" data-count="${key}" hidden></span></a>`;
   const tab = (key) => `<a href="#${key}" data-nav="${key}">${ICON[PAGES[key].icon]}<span>${PAGES[key].short}</span><span class="dot-badge" data-count="${key}" hidden></span></a>`;
   $('#root').innerHTML = `
   <button class="skip-link" data-action="skip">Skip to content</button>
-  <div class="app">
-    <aside class="sidebar">
-      <a class="brand" href="#dashboard"><div class="brand-mark">${ICON.spark}</div><div><div class="brand-name">AI Command Center</div><div class="brand-sub">All your AI, one place</div></div></a>
-      <nav class="nav" aria-label="Main">
-        ${nav('dashboard')}${nav('map')}${nav('assistant')}${nav('tasks')}${nav('automations')}${nav('usage')}${nav('stats')}${nav('notifications')}
-        <div class="nav-label nav-label-row"><span>Connected</span><button class="nav-add" data-action="add-tool" aria-label="Connect a tool" title="Connect a tool">${ICON.plus}</button></div>
-        <div class="nav-tools" id="nav-tools"></div>
-        <div class="nav-label">Manage</div>
-        ${nav('tools')}${nav('security')}${nav('privacy')}${nav('settings')}
-      </nav>
-      <a class="update-pill" id="update-pill" href="#settings" data-action="go-update" hidden></a>
+  <div class="wb">
+    <nav class="wb-activity" aria-label="Main">
+      <a class="wb-logo" href="#dashboard" title="AI Command Center" aria-label="AI Command Center overview">${ICON.spark}</a>
+      ${['dashboard', 'map', 'assistant', 'tasks', 'automations', 'usage', 'stats', 'notifications'].map(act).join('')}
+      <div class="wb-grow"></div>
+      ${['tools', 'security', 'privacy', 'settings'].map(act).join('')}
+    </nav>
+    <aside class="wb-side sidebar" aria-label="Explorer">
+      <div class="wb-side-head"><span>Explorer</span>
+        <div class="wb-side-actions">
+          <button class="wb-icon" data-action="open-palette" title="Search and commands (Ctrl+P)" aria-label="Search and commands">${ICON.search}</button>
+          <button class="wb-icon" data-action="add-tool" title="Connect a tool" aria-label="Connect a tool">${ICON.plus}</button>
+          <button class="wb-icon" data-action="reload" title="Refresh" aria-label="Refresh">${ICON.refresh}</button>
+        </div></div>
+      <div class="wb-tree nav">
+        <details class="wb-sec" open><summary>${ICON.chevron}<span>Connected</span><span class="wb-sec-n" id="sec-n-tools"></span></summary><div class="nav-tools" id="nav-tools"></div></details>
+        <details class="wb-sec" open><summary>${ICON.chevron}<span>Running</span><span class="wb-sec-n" id="sec-n-running"></span></summary><div id="nav-running"></div></details>
+        <details class="wb-sec" open><summary>${ICON.chevron}<span>Up next</span><span class="wb-sec-n" id="sec-n-next"></span></summary><div id="nav-next"></div></details>
+      </div>
       <div class="sidebar-foot"><span class="avatar">${esc(S.user.username.slice(0, 1).toUpperCase())}</span><span class="who">${esc(S.user.username)}</span><button class="btn small ghost" data-action="logout">Sign out</button></div>
     </aside>
-    <div class="main">
-      <header class="topbar">
-        <div class="topbar-title"><h1 id="page-title"></h1><span class="updated" id="updated"></span></div>
-        <button class="btn icon-btn ghost" data-action="reload" aria-label="Refresh" title="Refresh">${ICON.refresh}</button>
+    <div class="wb-main main">
+      <div class="wb-tabs" id="wb-tabs" role="tablist" aria-label="Open pages"></div>
+      <header class="wb-bar topbar">
+        <nav class="wb-crumbs topbar-title" aria-label="You are here"><span class="wb-crumb-root">AI Command Center</span><span class="wb-crumb-sep" aria-hidden="true">›</span><h1 id="page-title"></h1></nav>
+        <button class="wb-search" data-action="open-palette" aria-label="Search or run a command">${ICON.search}<span>Search or run a command</span><kbd>Ctrl P</kbd></button>
+        <button class="btn icon-btn ghost" data-action="toggle-dock" aria-pressed="false" aria-label="Chat panel" title="Chat panel (Ctrl+L)">${ICON.chat}</button>
         <a class="btn icon-btn ghost" href="#notifications" aria-label="Alerts" title="Alerts">${ICON.bell}<span class="dot-badge" id="bell-count" hidden></span></a>
         <a class="btn icon-btn ghost hide-lg" href="#settings" aria-label="Settings">${ICON.gear}</a>
       </header>
@@ -393,10 +407,117 @@ function renderShell() {
         <span>You’re looking at demo data. None of it comes from your accounts.</span>
         <button class="btn small" data-action="toggle-demo">Exit demo</button>
       </div>
-      <main class="content" id="content" tabindex="-1"></main>
+      <div class="wb-body">
+        <main class="content" id="content" tabindex="-1"></main>
+        <aside class="wb-dock" id="dock" aria-label="Chat" hidden></aside>
+      </div>
       <nav class="tabbar" aria-label="Main">${['dashboard', 'map', 'assistant', 'tasks', 'tools'].map(tab).join('')}</nav>
     </div>
-  </div>`;
+  </div>
+  <footer class="wb-status" id="wb-status" aria-label="Status">
+    <div class="wb-status-left" id="wb-status-left"></div>
+    <div class="wb-status-right"><span class="wb-si updated" id="updated"></span><a class="wb-si update-pill" id="update-pill" href="#settings" data-action="go-update" hidden></a><span class="wb-si" id="wb-version"></span></div>
+  </footer>
+  <div id="palette-root"></div>`;
+}
+
+// ── Tabs, explorer and status bar ────────────────────────────────────────
+const tabKey = () => (S.page === 'tool' ? `tool-${S.toolId}` : S.page);
+S.tabs = (() => {
+  try {
+    const t = JSON.parse(readStore('acc-tabs') ?? '[]');
+    return Array.isArray(t) ? t.filter((k) => typeof k === 'string' && (PAGES[k] || /^tool-\d+$/.test(k))).slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+})();
+const saveTabs = () => writeStore('acc-tabs', JSON.stringify(S.tabs));
+
+function tabLabel(key) {
+  const m = key.match(/^tool-(\d+)$/);
+  if (m) {
+    const t = S.data?.tools.find((x) => x.id === Number(m[1]));
+    return t ? { text: t.name, icon: logo(t, 'xs') } : null;
+  }
+  return PAGES[key] ? { text: PAGES[key].title, icon: ICON[PAGES[key].icon] } : null;
+}
+
+/** Open pages as tabs, like an editor: the current page is added, and tabs for removed tools disappear. */
+function updateTabs() {
+  const el = $('#wb-tabs');
+  if (!el) return;
+  const cur = tabKey();
+  if (!S.tabs.includes(cur)) {
+    S.tabs.push(cur);
+    while (S.tabs.length > 10) S.tabs.splice(S.tabs.findIndex((k) => k !== cur), 1);
+  }
+  // Until the data arrives, tool tabs can't be named yet; keep them rather than dropping them.
+  if (S.data) S.tabs = S.tabs.filter((k) => tabLabel(k) || k === cur);
+  saveTabs();
+  el.innerHTML = S.tabs.map((k) => {
+    const l = tabLabel(k) ?? { text: currentTitle(), icon: ICON.grid };
+    const on = k === cur;
+    return `<div class="wb-tab ${on ? 'on' : ''}" role="presentation"><a role="tab" aria-selected="${on}" href="#${k}" title="${esc(l.text)}">${l.icon}<span>${esc(l.text)}</span></a>
+      <button class="wb-tab-x" data-action="close-tab" data-key="${esc(k)}" aria-label="Close ${esc(l.text)}" title="Close">${ICON.close}</button></div>`;
+  }).join('');
+  el.querySelector('.wb-tab.on')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+}
+
+function closeTab(key) {
+  const i = S.tabs.indexOf(key);
+  if (i < 0) return;
+  S.tabs.splice(i, 1);
+  saveTabs();
+  if (key === tabKey()) location.hash = `#${S.tabs[Math.min(i, S.tabs.length - 1)] ?? 'dashboard'}`;
+  else updateTabs();
+}
+
+/** The explorer's Running and Up next sections. */
+function updateExplorer() {
+  const d = S.data;
+  const run = $('#nav-running');
+  const next = $('#nav-next');
+  if (!d || !run || !next) return;
+  const running = d.tasks.filter((t) => t.status === 'running').sort((a, b) => (a.kind === 'session') - (b.kind === 'session')).slice(0, 6);
+  run.innerHTML = running.length
+    ? running.map((t) => `<button class="wb-item" data-action="open-task" data-id="${t.id}" title="${esc(`${t.name} · ${t.tool_name}`)}"><span class="nav-dot d-ok pulse"></span><span class="wb-item-name">${esc(t.name)}</span><span class="wb-item-meta">${t.progress != null && t.kind !== 'session' ? `${Math.round(t.progress)}%` : t.kind === 'session' ? 'live' : ''}</span></button>`).join('')
+    : '<div class="wb-empty">Nothing running</div>';
+  const autos = (d.automations ?? []).filter((a) => a.enabled && a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at));
+  const items = [
+    ...d.upcoming.slice(0, 3).map((t) => `<button class="wb-item" data-action="open-task" data-id="${t.id}" title="${esc(t.name)}">${ICON.clock}<span class="wb-item-name">${esc(t.name)}</span><span class="wb-item-meta">${esc(t.status)}</span></button>`),
+    ...autos.slice(0, 4).map((a) => `<a class="wb-item" href="#automations" title="${esc(`${a.name} · ${a.schedule_text}`)}">${ICON.repeat}<span class="wb-item-name">${esc(a.name)}</span><span class="wb-item-meta">${esc(rel(a.next_run_at))}</span></a>`),
+  ];
+  next.innerHTML = items.length ? items.join('') : '<div class="wb-empty">Nothing scheduled</div>';
+  const setN = (id, n) => {
+    const e = $(id);
+    if (e) e.textContent = n ? String(n) : '';
+  };
+  setN('#sec-n-tools', d.tools.filter((t) => t.kind !== 'builtin').length);
+  setN('#sec-n-running', running.length);
+  setN('#sec-n-next', items.length);
+}
+
+/** The status bar: which AI answers, connections, live work, the next automation, and the app's version. */
+function updateStatus() {
+  const d = S.data;
+  const left = $('#wb-status-left');
+  if (!left) return;
+  if (!d) {
+    left.innerHTML = '';
+    return;
+  }
+  const s = d.stats;
+  const engine = d.engine_choice === 'auto' ? 'Automatic' : d.engine?.label ?? 'No AI';
+  const next = (d.automations ?? []).filter((a) => a.enabled && a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at))[0];
+  left.innerHTML = [
+    d.demo ? '<button class="wb-si wb-si-demo" data-action="toggle-demo" title="Exit demo">Demo data</button>' : '',
+    `<a class="wb-si" href="#settings" title="Which AI answers">${ICON.spark}<span>${esc(engine)}</span></a>`,
+    `<a class="wb-si ${s.needs_attention ? 'warn' : ''}" href="#tools" title="Connected tools"><span class="nav-dot ${s.needs_attention ? 'd-warn' : 'd-ok'}"></span><span>${plural(s.connected, 'tool')}${s.needs_attention ? ` · ${s.needs_attention} need attention` : ''}</span></a>`,
+    `<a class="wb-si" href="#tasks" title="Running now">${ICON.play}<span>${s.running} running</span></a>`,
+    next ? `<a class="wb-si hide-md" href="#automations" title="${esc(next.name)}">${ICON.repeat}<span>${esc(next.name)} ${esc(rel(next.next_run_at))}</span></a>` : '',
+  ].join('');
+  const v = $('#wb-version');
+  if (v) v.textContent = d.update?.current ? `v${d.update.current}` : '';
 }
 
 function navTools() {
@@ -450,6 +571,9 @@ function updateChrome() {
     up.hidden = !d?.update?.available || d.demo;
     up.innerHTML = d?.update?.available ? `${ICON.download}<span>Update to ${esc(d.update.latest)}</span>` : '';
   }
+  updateTabs();
+  updateExplorer();
+  updateStatus();
   navTools();
 }
 
@@ -496,6 +620,8 @@ function renderPage() {
   el.dataset.page = key;
   el.innerHTML = `<div class="page page-${S.page}">${S.loadError ? `<div class="callout err">Couldn’t refresh: ${esc(S.loadError)}</div>` : ''}${VIEWS[S.page]()}</div>`;
   AFTER[S.page]?.();
+  const dock = $('#dock');
+  if (dock && dock.hidden === dockShown()) renderDock();
 }
 
 // ── Shared fragments ─────────────────────────────────────────────────────
@@ -862,7 +988,7 @@ async function loadThreads() {
 
 async function openThread(id) {
   S.chat.thread = await api(`/api/assistant/threads/${id}`);
-  if (S.page === 'assistant') renderPage();
+  if (chatOnScreen()) renderChat();
 }
 
 /** Sends a message and reads the reply as it streams in. */
@@ -961,8 +1087,8 @@ async function sendChat(text) {
   } finally {
     c.streaming = false;
     finishPending();
-    if (S.page === 'assistant') {
-      renderPage();
+    if (chatOnScreen()) {
+      renderChat();
       $('#chat-input')?.focus();
     }
     load({ force: true }); // the assistant may have changed budgets or started tasks
@@ -973,9 +1099,9 @@ async function sendChat(text) {
 function askAssistant(prompt) {
   S.chat.thread = null;
   S.chat.pending = prompt;
-  if (S.page === 'assistant') {
-    renderPage();
-  } else location.hash = '#assistant';
+  if (S.page === 'assistant') renderPage();
+  else if (dockShown()) renderDock();
+  else location.hash = '#assistant';
 }
 
 async function useEngine(id, { quiet = false } = {}) {
@@ -1075,27 +1201,7 @@ const VIEWS = {
     const d = S.data;
     if (d.demo) return `<div class="card">${emptyBlock('The assistant works with your real data', 'Exit demo to chat about your tools and tasks.', '<button class="btn" data-action="toggle-demo">Exit demo</button>')}</div>`;
     if (!d.engine) return assistantSetup(d);
-    const c = S.chat;
-    const e = d.engine;
-    const options = c.threads.map((t) => `<option value="${t.id}" ${c.thread?.id === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('');
-    return `<div class="chat-page">
-      <div class="chat-bar">
-        <label class="engine-pick">${engineLogo(e, 'xs')}<select class="input" id="engine-pick" data-action-change="pick-engine" aria-label="Which AI answers" ${c.streaming ? 'disabled' : ''}>${engineOptions(d)}</select></label>
-        <select class="input" id="thread-pick" data-action-change="pick-thread" aria-label="Conversation" ${c.streaming ? 'disabled' : ''}>
-          ${c.thread ? '' : '<option value="" selected>New conversation</option>'}${options}</select>
-        <button class="btn" data-action="new-chat" ${c.streaming ? 'disabled' : ''}>${ICON.plus}<span class="hide-sm">New chat</span></button>
-        ${c.thread ? `<button class="btn icon-btn ghost" data-action="delete-chat" aria-label="Delete this conversation" title="Delete this conversation" ${c.streaming ? 'disabled' : ''}>${ICON.trash}</button>` : ''}
-      </div>
-      <section class="card chat">
-        <div class="msgs" id="msgs" aria-live="polite"></div>
-        <form class="composer" id="chat-form" data-form="chat">
-          <textarea class="input" id="chat-input" name="text" rows="1" maxlength="8000" placeholder="Message ${esc(e.label)}…" aria-label="Message the assistant">${esc(c.draft)}</textarea>
-          <button class="btn primary icon-btn" type="submit" data-role="send" aria-label="Send">${ICON.send}</button>
-          <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
-        </form>
-      </section>
-      <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: a new conversation goes to the AI best suited to its first message, and stays with it.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`} Replies are AI-generated and can be wrong. <a href="#privacy">What’s shared</a></p>
-    </div>`;
+    return `<div class="chat-page">${chatBody(d)}</div>`;
   },
 
   tools() {
@@ -1732,6 +1838,211 @@ function updateCard(d) {
   </section>`;
 }
 
+// ── Command palette (Ctrl+P, Ctrl+Shift+P for commands) ──────────────────
+function paletteItems() {
+  const d = S.data;
+  const items = [];
+  const cmd = (label, run, { icon = ICON.chevron, hint = 'Command', keys = '' } = {}) => items.push({ kind: 'cmd', label, run, icon, hint, keys });
+  for (const [k, pg] of Object.entries(PAGES)) if (k !== 'tool') items.push({ kind: 'page', label: pg.title, hint: 'Page', icon: ICON[pg.icon], run: () => (location.hash = `#${k}`) });
+  for (const t of d?.tools ?? []) if (t.kind !== 'builtin') items.push({ kind: 'tool', label: t.name, hint: `${t.vendor} · ${toolStatus(t).label}`, icon: logo(t, 'xs'), run: () => (location.hash = `#tool-${t.id}`) });
+  for (const t of (d?.tasks ?? []).filter((x) => x.kind !== 'session').slice(0, 40)) items.push({ kind: 'task', label: t.name, hint: `Task · ${TASK_STATUS[t.status]?.label ?? t.status}`, icon: ICON.tasks, run: () => openTask(t.id) });
+  const real = d && !d.demo;
+  if (real && d.engine) {
+    cmd('Open the chat panel', () => toggleDock(true), { icon: ICON.chat, keys: 'Ctrl L' });
+    cmd('New assistant task', () => openNewTask(), { icon: ICON.spark });
+    cmd('New AI team task', () => openTeamTask(), { icon: ICON.team });
+  }
+  if (real) cmd('New automation', () => openAutomation({}), { icon: ICON.repeat });
+  if (real) cmd('Connect a tool', () => openAddTool(), { icon: ICON.plus });
+  cmd('Refresh', () => load({ force: true }), { icon: ICON.refresh });
+  cmd('Theme: dark', () => setTheme('dark'), { icon: ICON.sun });
+  cmd('Theme: light', () => setTheme('light'), { icon: ICON.sun });
+  cmd('Theme: match the system', () => setTheme('system'), { icon: ICON.sun });
+  cmd(d?.demo ? 'Exit demo data' : 'Show demo data', () => toggleDemo(), { icon: ICON.grid });
+  if (real) cmd('Check for updates', async () => {
+    const u = await api('/api/update/check', { method: 'POST' });
+    toast(u.error ? `Couldn’t check: ${u.error}` : u.available ? `Version ${u.latest} is available. Open Settings to install it.` : 'You have the newest version', Boolean(u.error));
+    load({ force: true });
+  }, { icon: ICON.download });
+  if (real) cmd('Download a copy of my data', () => ACTIONS['backup-download']({ disabled: false, isConnected: false }), { icon: ICON.download });
+  cmd('Sign out', () => ACTIONS.logout(), { icon: ICON.signin });
+  return items;
+}
+
+/** Ranks how well `q` matches `text`: whole words first, then substrings, then letters in order. 0 means no match. */
+function matchScore(text, q) {
+  const t = text.toLowerCase();
+  if (!q) return 1;
+  const i = t.indexOf(q);
+  if (i === 0) return 300 - t.length / 100;
+  if (i > 0) return (/\W/.test(t[i - 1]) ? 250 : 200) - i;
+  let pos = -1;
+  let gaps = 0;
+  for (const ch of q) {
+    const n = t.indexOf(ch, pos + 1);
+    if (n < 0) return 0;
+    gaps += n - pos - 1;
+    pos = n;
+  }
+  return Math.max(1, 100 - gaps);
+}
+
+function openPalette(prefix = '') {
+  if (!S.user || !$('#palette-root')) return;
+  closeModal();
+  S.pal = { q: prefix, active: 0, back: document.activeElement, items: paletteItems() };
+  $('#palette-root').innerHTML = `<div class="pal-overlay" data-pal="overlay">
+    <div class="pal" role="dialog" aria-modal="true" aria-label="Search and commands">
+      <div class="pal-input">${ICON.search}<input id="pal-q" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list" placeholder="Search pages, tools and tasks, or type > for commands" value="${esc(prefix)}"></div>
+      <ul class="pal-list" id="pal-list" role="listbox" aria-label="Results"></ul>
+      <div class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span><span><kbd>&gt;</kbd> commands</span></div>
+    </div></div>`;
+  renderPalette();
+  const input = $('#pal-q');
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function paletteResults() {
+  const raw = S.pal.q;
+  const cmdOnly = raw.startsWith('>');
+  const q = (cmdOnly ? raw.slice(1) : raw).trim().toLowerCase();
+  let list = S.pal.items.filter((it) => (cmdOnly ? it.kind === 'cmd' : true));
+  if (!q && !cmdOnly) list = [...list.filter((it) => it.kind === 'page'), ...list.filter((it) => it.kind === 'cmd')];
+  return list
+    .map((it) => ({ it, score: matchScore(it.label, q) + (it.kind === 'page' ? 2 : it.kind === 'tool' ? 1 : 0) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => (q ? b.score - a.score : 0))
+    .slice(0, 40)
+    .map((x) => x.it);
+}
+
+function renderPalette() {
+  const list = $('#pal-list');
+  if (!list) return;
+  S.pal.results = paletteResults();
+  S.pal.active = Math.min(S.pal.active, Math.max(0, S.pal.results.length - 1));
+  list.innerHTML = S.pal.results.length
+    ? S.pal.results.map((it, i) => `<li id="pal-${i}" role="option" aria-selected="${i === S.pal.active}" class="pal-item ${i === S.pal.active ? 'on' : ''}" data-pal="pick" data-i="${i}">
+        <span class="pal-ico">${it.icon}</span><span class="pal-label">${esc(it.label)}</span><span class="pal-hint">${esc(it.hint)}</span>${it.keys ? `<kbd>${esc(it.keys)}</kbd>` : ''}</li>`).join('')
+    : '<li class="pal-none">No matches. Type &gt; to see commands.</li>';
+  $('#pal-q')?.setAttribute('aria-activedescendant', S.pal.results.length ? `pal-${S.pal.active}` : '');
+  $(`#pal-${S.pal.active}`)?.scrollIntoView({ block: 'nearest' });
+}
+
+function closePalette({ restore = true } = {}) {
+  const back = S.pal?.back;
+  S.pal = null;
+  const root = $('#palette-root');
+  if (root) root.innerHTML = '';
+  if (restore && back?.isConnected) back.focus?.({ preventScroll: true });
+}
+
+function runPalette(i) {
+  const it = S.pal?.results?.[i];
+  if (!it) return;
+  closePalette({ restore: it.kind === 'cmd' });
+  Promise.resolve(it.run()).catch((err) => toast(err.message, true));
+}
+
+// ── Chat, on its page or in the side panel ──────────────────────────────
+/** The chat: which AI answers, the conversation picker, the messages and the composer. One copy is on screen at a time. */
+function chatBody(d, { docked = false } = {}) {
+  const c = S.chat;
+  const e = d.engine;
+  const options = c.threads.map((t) => `<option value="${t.id}" ${c.thread?.id === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('');
+  return `<div class="chat-bar">
+      <label class="engine-pick">${engineLogo(e, 'xs')}<select class="input" id="engine-pick" data-action-change="pick-engine" aria-label="Which AI answers" ${c.streaming ? 'disabled' : ''}>${engineOptions(d)}</select></label>
+      <select class="input" id="thread-pick" data-action-change="pick-thread" aria-label="Conversation" ${c.streaming ? 'disabled' : ''}>
+        ${c.thread ? '' : '<option value="" selected>New conversation</option>'}${options}</select>
+      <button class="btn ${docked ? 'icon-btn' : ''}" data-action="new-chat" title="New chat" aria-label="New chat" ${c.streaming ? 'disabled' : ''}>${ICON.plus}${docked ? '' : '<span class="hide-sm">New chat</span>'}</button>
+      ${c.thread ? `<button class="btn icon-btn ghost" data-action="delete-chat" aria-label="Delete this conversation" title="Delete this conversation" ${c.streaming ? 'disabled' : ''}>${ICON.trash}</button>` : ''}
+    </div>
+    <section class="card chat">
+      <div class="msgs" id="msgs" aria-live="polite"></div>
+      <form class="composer" id="chat-form" data-form="chat">
+        <textarea class="input" id="chat-input" name="text" rows="1" maxlength="8000" placeholder="Message ${esc(e.label)}…" aria-label="Message the assistant">${esc(c.draft)}</textarea>
+        <button class="btn primary icon-btn" type="submit" data-role="send" aria-label="Send">${ICON.send}</button>
+        <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
+      </form>
+    </section>
+    <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: a new conversation goes to the AI best suited to its first message, and stays with it.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`} Replies are AI-generated and can be wrong. <a href="#privacy">What’s shared</a></p>`;
+}
+
+const chatOnScreen = () => S.page === 'assistant' || dockShown();
+const dockShown = () => Boolean(S.dock) && S.page !== 'assistant' && Boolean(S.data) && !S.data.demo && Boolean(S.data.engine);
+
+/** Draws the messages, loads conversations the first time, and sends a prompt that's waiting. */
+function mountChat() {
+  if (!S.data || S.data.demo || !S.data.engine || !$('#msgs')) return;
+  renderMsgs();
+  autosize($('#chat-input'));
+  const ready = S.chat.loaded ? Promise.resolve() : loadThreads();
+  if (S.chat.pending) {
+    const prompt = S.chat.pending;
+    S.chat.pending = null;
+    ready.then(() => sendChat(prompt)).catch((err) => toast(err.message, true));
+    return;
+  }
+  if (!S.chat.loaded) {
+    ready
+      .then(() => {
+        if (!chatOnScreen()) return;
+        if (!S.chat.thread && S.chat.threads[0] && !S.chat.streaming) return openThread(S.chat.threads[0].id);
+        renderChat();
+      })
+      .catch((err) => toast(err.message, true));
+  }
+}
+
+/** Redraws whichever chat is showing: the Assistant page, or the side panel. */
+function renderChat() {
+  if (S.page === 'assistant') renderPage();
+  else renderDock();
+}
+
+/** The chat side panel (Ctrl+L), next to any page. */
+function renderDock() {
+  const el = $('#dock');
+  if (!el) return;
+  const show = dockShown();
+  el.hidden = !show;
+  document.body.classList.toggle('dock-open', show);
+  $('[data-action="toggle-dock"]')?.setAttribute('aria-pressed', String(Boolean(S.dock)));
+  if (!show) {
+    el.innerHTML = '';
+    return;
+  }
+  // Keep what you were typing, and where you were typing it, across a redraw.
+  const ta = $('#dock #chat-input');
+  if (ta?.value) S.chat.draft = ta.value;
+  const refocus = document.activeElement === ta || (S.dockFocusUntil ?? 0) > Date.now();
+  el.innerHTML = `<div class="dock-head"><span class="dock-title">${ICON.chat}Chat</span><span class="faint small">Ctrl+L</span>
+      <a class="btn icon-btn ghost" href="#assistant" title="Open as a page" aria-label="Open the chat as a page">${ICON.external}</a>
+      <button class="btn icon-btn ghost" data-action="toggle-dock" aria-label="Close the chat panel" title="Close (Ctrl+L)">${ICON.close}</button></div>
+    <div class="dock-body">${chatBody(S.data, { docked: true })}</div>`;
+  mountChat();
+  if (refocus) {
+    const input = $('#dock #chat-input');
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
+function toggleDock(force) {
+  if (S.data?.demo) return toast('The chat works with your real data. Exit the demo to use it.');
+  if (!S.data?.engine) {
+    location.hash = '#assistant';
+    return;
+  }
+  S.dock = force ?? !S.dock;
+  writeStore('acc-dock', S.dock ? '1' : null);
+  // The conversation loads a moment later and redraws the panel; keep the cursor in the message box through that.
+  S.dockFocusUntil = S.dock ? Date.now() + 4000 : 0;
+  if (S.dock && S.page === 'assistant') location.hash = '#dashboard';
+  renderDock();
+}
+
 // ── Sign-in & security ───────────────────────────────────────────────────
 async function loadSecurity({ render = true } = {}) {
   S.secLoading = true;
@@ -2035,26 +2346,7 @@ const AFTER = {
     if ((!tools.length || !S.data.engine) && !S.demo && S.local === null) loadLocal().then(() => S.page === 'dashboard' && renderPage());
   },
   assistant() {
-    const d = S.data;
-    if (d.demo || !d.engine) return;
-    renderMsgs();
-    autosize($('#chat-input'));
-    const ready = S.chat.loaded ? Promise.resolve() : loadThreads();
-    if (S.chat.pending) {
-      const p = S.chat.pending;
-      S.chat.pending = null;
-      ready.then(() => sendChat(p)).catch((err) => toast(err.message, true));
-      return;
-    }
-    if (!S.chat.loaded) {
-      ready
-        .then(() => {
-          if (S.page !== 'assistant') return;
-          if (!S.chat.thread && S.chat.threads[0] && !S.chat.streaming) return openThread(S.chat.threads[0].id);
-          renderPage();
-        })
-        .catch((err) => toast(err.message, true));
-    }
+    mountChat();
   },
   tool() {
     const series = S.data.usage.series.find((x) => x.id === S.toolId);
@@ -2738,21 +3030,21 @@ const ACTIONS = {
   'new-chat'() {
     S.chat.thread = null;
     S.chat.draft = '';
-    renderPage();
+    renderChat();
     $('#chat-input')?.focus();
   },
   'delete-chat'(el) {
     el.closest('.chat-bar').innerHTML = `<span class="muted small grow">Delete “${esc(S.chat.thread.title)}”? This can’t be undone.</span>
       <button class="btn danger" data-action="confirm-delete-chat">Delete</button><button class="btn ghost" data-action="cancel-delete-chat">Cancel</button>`;
   },
-  'cancel-delete-chat': () => renderPage(),
+  'cancel-delete-chat': () => renderChat(),
   async 'confirm-delete-chat'() {
     const id = S.chat.thread.id;
     await api(`/api/assistant/threads/${id}`, { method: 'DELETE' });
     S.chat.threads = S.chat.threads.filter((t) => t.id !== id);
     S.chat.thread = null;
     toast('Conversation deleted');
-    renderPage();
+    renderChat();
   },
   async 'stop-chat'() {
     if (S.chat.thread) await api(`/api/assistant/threads/${S.chat.thread.id}/stop`, { method: 'POST' });
@@ -2921,6 +3213,15 @@ const ACTIONS = {
     await api('/api/security/google-client', { method: 'DELETE' });
     toast('Google client removed');
     await loadSecurity();
+  },
+  'open-palette'() {
+    openPalette();
+  },
+  'toggle-dock'() {
+    toggleDock();
+  },
+  'close-tab'(el) {
+    closeTab(el.dataset.key);
   },
   'toggle-pass'(el) {
     const input = document.getElementById(el.dataset.target);
@@ -3118,6 +3419,12 @@ const ACTIONS = {
 };
 
 async function onClick(e) {
+  const pal = e.target.closest('[data-pal]');
+  if (pal) {
+    if (pal.dataset.pal === 'pick') return runPalette(Number(pal.dataset.i));
+    if (pal.dataset.pal === 'overlay' && e.target === pal) return closePalette();
+  }
+  if (e.button === 1) return;
   const el = e.target.closest('[data-action]');
   if (!el || !ACTIONS[el.dataset.action]) return;
   // Links that also close a dialog keep their navigation.
@@ -3141,11 +3448,11 @@ async function onChange(e) {
   if (act === 'pick-engine' || act === 'set-engine') {
     try {
       await useEngine(el.value);
-      renderPage();
     } catch (err) {
       toast(err.message, true);
-      renderPage();
     }
+    renderPage();
+    if (S.page !== 'assistant') renderDock();
     return;
   }
   if (act === 'backup-file') {
@@ -3286,16 +3593,28 @@ async function boot() {
       S.secForm = null;
       S.secSetup = null;
       S.secCodes = null;
+      if (S.pal) closePalette({ restore: false });
       closeModal();
       updateChrome();
       renderPage();
       $('#content')?.scrollTo(0, 0);
     });
     document.addEventListener('click', onClick);
+    document.addEventListener('auxclick', (e) => {
+      const tab = e.button === 1 && e.target.closest('.wb-tab');
+      if (!tab) return;
+      e.preventDefault();
+      closeTab(tab.querySelector('[data-action="close-tab"]').dataset.key);
+    });
     document.addEventListener('submit', onSubmit);
     document.addEventListener('change', onChange);
     document.addEventListener('input', (e) => {
       if (e.target.closest?.('form[data-form="setup"], form[data-form="change-password"]') && ['f-pass', 'f-user', 'cp-next'].includes(e.target.id)) updatePasswordRules(e.target.form);
+      if (e.target.id === 'pal-q' && S.pal) {
+        S.pal.q = e.target.value;
+        S.pal.active = 0;
+        return renderPalette();
+      }
       if (e.target.id === 'chat-input') autosize(e.target);
       else if (e.target.id === 'tt-folder') refreshLineup();
       else if (e.target.dataset?.route) previewRoute(e.target);
@@ -3338,10 +3657,37 @@ async function boot() {
         e.target.form.requestSubmit();
         return;
       }
+      if (S.pal) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          return closePalette();
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const n = S.pal.results?.length ?? 0;
+          if (n) S.pal.active = (S.pal.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+          return renderPalette();
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          return runPalette(S.pal.active);
+        }
+        if (e.key === 'Tab') e.preventDefault();
+      }
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      if (S.user && S.data && mod && !e.altKey && (k === 'p' || k === 'k')) {
+        e.preventDefault();
+        return S.pal ? closePalette() : openPalette(e.shiftKey && k === 'p' ? '>' : '');
+      }
+      if (S.user && S.data && mod && !e.altKey && !e.shiftKey && k === 'l') {
+        e.preventDefault();
+        return toggleDock();
+      }
       if (e.key === 'Escape') closeModal();
-      // Ctrl+K (or / outside a text box) jumps to the command bar on the overview.
+      // / outside a text box jumps to the command bar on the overview.
       const typingNow = /INPUT|SELECT|TEXTAREA/.test(e.target.tagName ?? '') || e.target.isContentEditable;
-      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') || (e.key === '/' && !typingNow && !e.ctrlKey && !e.metaKey)) {
+      if (e.key === '/' && !typingNow && !e.ctrlKey && !e.metaKey) {
         if (!S.user || !S.data) return;
         e.preventDefault();
         closeModal();
