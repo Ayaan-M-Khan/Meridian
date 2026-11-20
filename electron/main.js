@@ -7,6 +7,9 @@ import { moveAppFolder } from './migrate.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICON = path.join(root, 'public', 'icon-512.png');
+// The window buttons' colors, matching the app's frame in each theme.
+const TITLE_BAR = { dark: { color: '#141414', symbolColor: '#b5b5b5' }, light: { color: '#f0f0f0', symbolColor: '#4a4a4a' } };
+const TITLE_BAR_HEIGHT = 35;
 
 // The app ID stays the same through the rename to Meridian, so installs update in place and keep their taskbar pin.
 app.setAppUserModelId('com.aicommandcenter.desktop');
@@ -122,6 +125,9 @@ if (!app.requestSingleInstanceLock()) {
 
     const origin = `http://127.0.0.1:${server.port}`;
     Menu.setApplicationMenu(null);
+    // No Windows title bar: the app's own top row is the bar, with Windows' minimize, maximize and close buttons drawn
+    // over its right end in the app's colors. The window keeps its rounded corners, shadow and resizable edges.
+    const startTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
     win = new BrowserWindow({
       width: 1320,
       height: 860,
@@ -129,7 +135,9 @@ if (!app.requestSingleInstanceLock()) {
       minHeight: 560,
       title: 'Meridian',
       icon: ICON,
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#090a0f' : '#f4f5fa', // matches the page, so there's no flash
+      backgroundColor: TITLE_BAR[startTheme].color, // matches the page, so there's no flash
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { ...TITLE_BAR[startTheme], height: TITLE_BAR_HEIGHT },
       show: false,
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
     });
@@ -189,6 +197,16 @@ if (!app.requestSingleInstanceLock()) {
       else if (win?.isVisible()) removeTray();
     };
     globalThis.accApplyDesktopSettings();
+    /** The page tells the window which theme it's showing, so the window buttons match it. */
+    globalThis.accSetTitleBar = (theme) => {
+      if (!win || !TITLE_BAR[theme]) return;
+      try {
+        win.setTitleBarOverlay({ ...TITLE_BAR[theme], height: TITLE_BAR_HEIGHT });
+        win.setBackgroundColor(TITLE_BAR[theme].color);
+      } catch {
+        /* platforms without a title bar overlay */
+      }
+    };
     globalThis.accOpenDataFolder = async () => {
       const err = await shell.openPath(process.env.ACC_DATA_DIR);
       if (err) throw new Error(err);

@@ -1310,3 +1310,18 @@ a.wb-si:hover, button.wb-si:hover { background: var(--surface-2); color: var(--t
 .wb-logo svg { width: 17px; height: 17px; }
 .si-mark svg { width: 22px; height: 22px; }
 .si-name { letter-spacing: 0.32em; font-size: 12px; color: rgba(233, 236, 246, 0.85); }
+
+/* ── Borderless window (1.3): the top row is the title bar in the desktop app ── */
+.drag-strip { display: none; }
+html.wco .drag-strip { display: block; position: fixed; top: 0; left: 0; right: 0; height: env(titlebar-area-height, 35px); -webkit-app-region: drag; app-region: drag; pointer-events: none; }
+html.wco :is(button, a, input, select, textarea, summary, label, .wb-tab, .si-shell, .overlay, .pal-overlay, .panel, #toast) { -webkit-app-region: no-drag; app-region: no-drag; }
+html.wco .wb-tabs { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
+@media (max-width: 760px) { html.wco .wb-bar.topbar { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); } }
+
+/* ── Sleeker details ── */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text-3) 38%, transparent) transparent; }
+::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.btn, .wb-act, .wb-tab, .wb-item, .wb-tree a.nav-tool, .chip, .row, .wb-icon, .wb-si { transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease; }
+.wb-bar.topbar { border-bottom-color: transparent; }
+.card, .tile { border-color: color-mix(in srgb, var(--border) 80%, transparent); }
+.demo-banner { padding-top: 5px; padding-bottom: 5px; font-size: 12px; background: color-mix(in srgb, var(--warn) 9%, var(--canvas)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); }

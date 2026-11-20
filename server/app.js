@@ -44,6 +44,13 @@ function createApp() {
   });
 
   authRoutes(app);
+  // Desktop app only: recolor the window buttons to the theme the page shows (also before signing in).
+  app.post('/api/desktop/titlebar', (req, res) => {
+    const theme = req.body?.theme;
+    if (theme !== 'dark' && theme !== 'light') throw new HttpError(400, 'Theme is dark or light.');
+    if (typeof globalThis.accSetTitleBar === 'function') globalThis.accSetTitleBar(theme);
+    res.json({ ok: true });
+  });
   app.post('/api/ingest/:id', ingestHandler);
   app.post('/api/bridge/:run', bridgeHandler);
   app.use('/api', requireAuth);

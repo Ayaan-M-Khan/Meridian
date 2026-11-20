@@ -2940,7 +2940,19 @@ function setTheme(v) {
     writeStore('acc-theme', v);
     document.documentElement.dataset.theme = v;
   }
+  syncTitleBar();
   renderPage();
+}
+
+/** In the desktop app, the window's own buttons follow the theme the page shows. */
+let titleBarTheme = null;
+function syncTitleBar() {
+  if (!document.documentElement.classList.contains('wco')) return;
+  const set = document.documentElement.dataset.theme;
+  const theme = set === 'light' || set === 'dark' ? set : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  if (theme === titleBarTheme) return;
+  titleBarTheme = theme;
+  fetch('/api/desktop/titlebar', { method: 'POST', headers: { 'x-acc-request': '1', 'content-type': 'application/json' }, body: JSON.stringify({ theme }) }).catch(() => {});
 }
 
 const ACTIONS = {
@@ -3585,6 +3597,7 @@ async function onChange(e) {
 // ── Boot ─────────────────────────────────────────────────────────────────
 let wired = false;
 async function boot() {
+  syncTitleBar();
   if (!wired) {
     wired = true;
     window.addEventListener('hashchange', () => {
@@ -3702,7 +3715,10 @@ async function boot() {
       }
     });
     document.addEventListener('visibilitychange', () => !document.hidden && S.user && load());
-    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => S.data && renderPage());
+    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+      syncTitleBar();
+      if (S.data) renderPage();
+    });
   }
   let st;
   try {

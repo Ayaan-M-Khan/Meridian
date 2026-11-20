@@ -1,7 +1,7 @@
 {
   "name": "ai-command-center",
   "productName": "Meridian",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Meridian: your AI command center. Usage, limits, tasks and a map of every AI tool you use, in one private desktop app.",
   "author": "Meridian",
   "private": true,
