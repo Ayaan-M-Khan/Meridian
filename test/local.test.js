@@ -611,7 +611,7 @@ test('updates: versions compare by number, a newer release is offered once, and 
 
   const body = (tag, assets) => ({ tag_name: tag, html_url: `https://github.com/Ayaan-M-Khan/ai-command-center/releases/tag/${tag}`, body: '## New\n- Things', assets });
   const publicRelease = (tag, assets) => async (url, opts) => {
-    assert.match(url, /^https:\/\/api\.github\.com\/repos\/Ayaan-M-Khan\/ai-command-center\/releases\/latest$/);
+    assert.match(url, /^https:\/\/api\.github\.com\/repos\/Ayaan-M-Khan\/Meridian\/releases\/latest$/);
     assert.equal(opts.headers['user-agent'], 'Meridian-updater', 'a generic client name, nothing about the person');
     return new Response(JSON.stringify(body(tag, assets)), { status: 200 });
   };
@@ -637,7 +637,7 @@ test('updates: versions compare by number, a newer release is offered once, and 
       return { code: 0, stdout: JSON.stringify(body('v9.0.0', [good])), stderr: '' };
     };
     await checkForUpdate({ force: true, current: '0.8.0', fetchImpl: notFound, gh });
-    assert.deepEqual(ghCalls[0], ['api', 'repos/Ayaan-M-Khan/ai-command-center/releases/latest']);
+    assert.deepEqual(ghCalls[0], ['api', 'repos/Ayaan-M-Khan/Meridian/releases/latest']);
     assert.equal(alerts(), 1, 'one alert per version');
     assert.equal(updateView('0.8.0').can_install, false, 'only the desktop app installs');
     await assert.rejects(installUpdate(), /desktop app/);
@@ -652,7 +652,7 @@ test('updates: versions compare by number, a newer release is offered once, and 
     await assert.rejects(downloadInstaller(asset, { dir, fetchImpl: async () => new Response('tampered!!!!!!!!!') }), /didn’t match the release/);
     await assert.rejects(downloadInstaller({ ...asset, url: 'https://example.com/x.exe' }, { dir }), /isn’t from Meridian’s releases/);
     const viaGh = await downloadInstaller({ ...asset, via: 'gh' }, { dir, gh: async (args) => {
-      assert.deepEqual(args.slice(0, 5), ['release', 'download', 'v9.0.0', '--repo', 'Ayaan-M-Khan/ai-command-center']);
+      assert.deepEqual(args.slice(0, 5), ['release', 'download', 'v9.0.0', '--repo', 'Ayaan-M-Khan/Meridian']);
       fs.writeFileSync(path.join(args[args.indexOf('--dir') + 1], good.name), installer);
       return { code: 0, stdout: '', stderr: '' };
     } });
@@ -717,5 +717,25 @@ test('a follow-up continues a finished task: same kind of run, and it sees the e
     assert.equal(db.prepare('SELECT name FROM tasks WHERE id = ?').get(again.task_id).name, 'Follow-up: Launch email', 'no “Follow-up: Follow-up:”');
   } finally {
     delete process.env.FAKE_CLAUDE_LOG;
+  }
+});
+
+test('updates: release links under the repository’s old name are still trusted, and nothing else is', async () => {
+  const { checkForUpdate, updateView } = await import('../server/updates.js');
+  const { setRaw } = await import('../server/db.js');
+  const rel = (url) => async () => new Response(JSON.stringify({ tag_name: 'v9.1.0', html_url: 'https://github.com/Ayaan-M-Khan/ai-command-center/releases/tag/v9.1.0', assets: [{ name: 'Meridian-Setup-9.1.0.exe', browser_download_url: url, size: 10 }] }), { status: 200 });
+  globalThis.accInstallUpdate = async () => {};
+  try {
+    await checkForUpdate({ force: true, current: '1.0.0', fetchImpl: rel('https://github.com/Ayaan-M-Khan/ai-command-center/releases/download/v9.1.0/Meridian-Setup-9.1.0.exe'), gh: async () => null });
+    assert.equal(updateView('1.0.0').can_install, true, 'the old name');
+    assert.equal(updateView('1.0.0').url, 'https://github.com/Ayaan-M-Khan/ai-command-center/releases/tag/v9.1.0');
+    await checkForUpdate({ force: true, current: '1.0.0', fetchImpl: rel('https://github.com/Ayaan-M-Khan/Meridian/releases/download/v9.1.0/Meridian-Setup-9.1.0.exe'), gh: async () => null });
+    assert.equal(updateView('1.0.0').can_install, true, 'the new name');
+    await checkForUpdate({ force: true, current: '1.0.0', fetchImpl: rel('https://github.com/someone-else/Meridian/releases/download/v9.1.0/Meridian-Setup-9.1.0.exe'), gh: async () => null });
+    assert.equal(updateView('1.0.0').can_install, false, 'another repository is never trusted');
+  } finally {
+    delete globalThis.accInstallUpdate;
+    setRaw('update_check', undefined);
+    db.prepare("DELETE FROM notifications WHERE kind = 'update'").run();
   }
 });

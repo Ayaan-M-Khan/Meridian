@@ -16,10 +16,13 @@ import { resolveCli, runCli } from './local/cli.js';
 import { APP_VERSION } from './version.js';
 import { HttpError, nowIso } from './util.js';
 
-export const REPO = 'Ayaan-M-Khan/ai-command-center';
+export const REPO = 'Ayaan-M-Khan/Meridian';
+// The repository was called ai-command-center before the rename; GitHub redirects that name, and links may still use it.
+const REPO_NAMES = [REPO, 'Ayaan-M-Khan/ai-command-center'];
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 /** Installers are only ever downloaded from this project's own releases. */
 export const DOWNLOAD_PREFIX = `https://github.com/${REPO}/releases/download/`;
+const fromThisProject = (url, kind = 'releases/download/') => REPO_NAMES.some((r) => String(url ?? '').toLowerCase().startsWith(`https://github.com/${r}/${kind}`.toLowerCase()));
 export const UPDATE_DIR = path.join(os.tmpdir(), 'meridian-update');
 const CHECK_EVERY_MS = 6 * 3_600_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -78,12 +81,12 @@ export function checkForUpdate({ force = false, fetchImpl = fetch, gh = runGh, c
     try {
       const { release: r, via } = await latestRelease(fetchImpl, gh);
       const tag = String(r.tag_name ?? '');
-      const asset = (r.assets ?? []).find((a) => /^[\w.-]*setup[\w.-]*\.exe$/i.test(a.name ?? '') && String(a.browser_download_url ?? '').startsWith(DOWNLOAD_PREFIX));
+      const asset = (r.assets ?? []).find((a) => /^[\w.-]*setup[\w.-]*\.exe$/i.test(a.name ?? '') && fromThisProject(a.browser_download_url));
       out = {
         checked_at: nowIso(),
         latest: tag.replace(/^v/i, '') || null,
         name: r.name ?? null,
-        url: typeof r.html_url === 'string' && r.html_url.startsWith(`https://github.com/${REPO}/`) ? r.html_url : `https://github.com/${REPO}/releases`,
+        url: typeof r.html_url === 'string' && fromThisProject(r.html_url, '') ? r.html_url : `https://github.com/${REPO}/releases`,
         notes: typeof r.body === 'string' ? r.body.slice(0, 6000) : null,
         published_at: r.published_at ?? null,
         via,
@@ -135,7 +138,7 @@ export function updateView(current = APP_VERSION) {
  * lists one). Returns the file's path. Nothing is run here.
  */
 export async function downloadInstaller(a, { fetchImpl = fetch, gh = runGh, dir = UPDATE_DIR } = {}) {
-  if (!a?.url?.startsWith(DOWNLOAD_PREFIX) || !/^[\w.-]+$/.test(a.name ?? '') || !/^[\w.-]+$/.test(a.tag ?? '')) throw new Error('That download isn’t from Meridian’s releases.');
+  if (!fromThisProject(a?.url) || !/^[\w.-]+$/.test(a.name ?? '') || !/^[\w.-]+$/.test(a.tag ?? '')) throw new Error('That download isn’t from Meridian’s releases.');
   await fs.promises.rm(dir, { recursive: true, force: true });
   await fs.promises.mkdir(dir, { recursive: true });
   const file = path.join(dir, a.name);
