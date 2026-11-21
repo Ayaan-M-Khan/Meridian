@@ -1118,9 +1118,9 @@ async function useEngine(id, { quiet = false } = {}) {
   if (!quiet) toast(id === 'auto' ? 'The assistant picks an AI automatically' : `The assistant now uses ${S.data.engines.find((e) => e.id === id)?.label ?? id}`);
 }
 
-function engineOptions(d) {
-  const auto = d.engines.find((e) => e.ready);
-  return `<option value="auto" ${d.engine_choice === 'auto' ? 'selected' : ''}>Automatic${auto ? ` (${esc(auto.label)})` : ''}</option>
+/** `answering`: on Automatic, the AI answering the open conversation, named beside "Automatic". */
+function engineOptions(d, answering = null) {
+  return `<option value="auto" ${d.engine_choice === 'auto' ? 'selected' : ''}>Automatic${answering ? ` (${esc(answering.label)})` : ''}</option>
     ${d.engines.map((e) => `<option value="${e.id}" ${d.engine_choice === e.id ? 'selected' : ''} ${e.ready ? '' : 'disabled'}>${esc(e.label)} · ${esc(e.ready ? e.via : e.reason)}</option>`).join('')}`;
 }
 
@@ -1954,10 +1954,13 @@ function runPalette(i) {
 /** The chat: which AI answers, the conversation picker, the messages and the composer. One copy is on screen at a time. */
 function chatBody(d, { docked = false } = {}) {
   const c = S.chat;
-  const e = d.engine;
+  // On Automatic, each message can go to a different AI: name the one answering this conversation now.
+  const auto = d.engine_choice === 'auto';
+  const answering = auto && c.thread?.engine ? d.engines.find((x) => x.id === c.thread.engine) ?? null : null;
+  const e = answering ?? d.engine;
   const options = c.threads.map((t) => `<option value="${t.id}" ${c.thread?.id === t.id ? 'selected' : ''}>${esc(t.title)}</option>`).join('');
   return `<div class="chat-bar">
-      <label class="engine-pick">${engineLogo(e, 'xs')}<select class="input" id="engine-pick" data-action-change="pick-engine" aria-label="Which AI answers" ${c.streaming ? 'disabled' : ''}>${engineOptions(d)}</select></label>
+      <label class="engine-pick">${engineLogo(e, 'xs')}<select class="input" id="engine-pick" data-action-change="pick-engine" aria-label="Which AI answers" ${c.streaming ? 'disabled' : ''}>${engineOptions(d, answering)}</select></label>
       <select class="input" id="thread-pick" data-action-change="pick-thread" aria-label="Conversation" ${c.streaming ? 'disabled' : ''}>
         ${c.thread ? '' : '<option value="" selected>New conversation</option>'}${options}</select>
       <button class="btn ${docked ? 'icon-btn' : ''}" data-action="new-chat" title="New chat" aria-label="New chat" ${c.streaming ? 'disabled' : ''}>${ICON.plus}${docked ? '' : '<span class="hide-sm">New chat</span>'}</button>
@@ -1966,12 +1969,12 @@ function chatBody(d, { docked = false } = {}) {
     <section class="card chat">
       <div class="msgs" id="msgs" aria-live="polite"></div>
       <form class="composer" id="chat-form" data-form="chat">
-        <textarea class="input" id="chat-input" name="text" rows="1" maxlength="8000" placeholder="Message ${esc(e.label)}…" aria-label="Message the assistant">${esc(c.draft)}</textarea>
+        <textarea class="input" id="chat-input" name="text" rows="1" maxlength="8000" placeholder="${auto && !answering ? 'Message the assistant…' : `Message ${esc(e.label)}…`}" aria-label="Message the assistant">${esc(c.draft)}</textarea>
         <button class="btn primary icon-btn" type="submit" data-role="send" aria-label="Send">${ICON.send}</button>
         <button class="btn icon-btn" type="button" data-action="stop-chat" data-role="stop" aria-label="Stop" hidden>${ICON.stop}</button>
       </form>
     </section>
-    <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: a new conversation goes to the AI best suited to its first message, and stays with it.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`} Replies are AI-generated and can be wrong. <a href="#privacy">What’s shared</a></p>`;
+    <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: each request goes to the AI best suited to that kind of work, and quick follow-ups stay with the AI answering.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`} Replies are AI-generated and can be wrong. <a href="#privacy">What’s shared</a></p>`;
 }
 
 const chatOnScreen = () => S.page === 'assistant' || dockShown();

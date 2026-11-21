@@ -7,16 +7,22 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DATA_DIR, getSettings } from './db.js';
+import { DATA_DIR, db, getSettings } from './db.js';
 import { adapters } from './adapters/index.js';
 import { FAKE_CALLS, workspaceDir } from './adapters/local.js';
 import { nodeRuntime, runCli } from './local/cli.js';
 import { runTool } from './assistant-tools.js';
-import { HttpError } from './util.js';
+import { HttpError, nowIso } from './util.js';
 import { markUnusable } from './blocked.js';
 import { gitGuardEnv } from './local/git-guard.js';
 
 /** `unusable`: the app couldn't take the work at all (not installed, or its account can't use it), so nothing ran. */
+/** Notes a run in one of your folders (see app_runs in db.js). Keeps 40 days. */
+function noteAppRun(engineId, folder) {
+  db.prepare('DELETE FROM app_runs WHERE started_at < ?').run(new Date(Date.now() - 40 * 86_400_000).toISOString());
+  return Number(db.prepare('INSERT INTO app_runs(engine, folder, started_at) VALUES(?, ?, ?)').run(engineId, folder, nowIso()).lastInsertRowid);
+}
+
 export class EngineError extends Error {
   constructor(message, { unusable = false } = {}) {
     super(message);
@@ -137,12 +143,18 @@ export async function runCliEngine(engineId, { system, prompt, tools = [], emit 
     const inv = adapter.engine.invocation({ system, prompt, mcp: bridge, access: folder ? access : 'none', cwd });
     if (model) inv.args.splice(adapter.engine.modelAt ?? 0, 0, ...adapter.engine.modelArgs(model));
     let run;
+    // A run in your folder, or in this run's own folder (Gemini CLI, Cursor), leaves a session in that app's logs that the
+    // log readers can't tell from yours by its folder alone; noting when and where keeps it off your sessions list.
+    const runCwd = inv.cwd ?? cwd;
+    const runId = folder || path.resolve(runCwd) !== path.resolve(workspaceDir(DATA_DIR)) ? noteAppRun(engineId, runCwd) : null;
     try {
       // With git access, every push in this run goes through the push check (no force-pushes, no remote deletes).
       const env = folder && access === 'git' ? { ...inv.env, ...gitGuardEnv(DATA_DIR) } : inv.env;
       run = await runCli(cli, inv.args, { input: inv.input, env, cwd: inv.cwd ?? cwd, timeoutMs, signal, onLine: parser.onLine });
     } catch (err) {
       throw new EngineError(`Couldn’t start ${adapter.name}: ${err.message}`);
+    } finally {
+      if (runId) db.prepare('UPDATE app_runs SET finished_at = ? WHERE id = ?').run(nowIso(), runId);
     }
     if (run.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
     if (run.timedOut) throw new EngineError(`${adapter.name} took longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`);

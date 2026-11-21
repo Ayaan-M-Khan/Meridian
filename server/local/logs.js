@@ -86,6 +86,23 @@ const under = (child, parent) => {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
 
+/**
+ * A session the app itself ran in one of your folders (a task with a folder, an AI team stage): it started in that
+ * folder while the app's run there was going. `ownRuns` come from the app_runs table: { folder, started_at, finished_at }.
+ * `match(folder)` says whether the session belongs to that folder (by its cwd, or Gemini's project hash).
+ */
+function ownFolderRun(ownRuns, match, firstAt) {
+  const t = Date.parse(firstAt ?? '');
+  if (!ownRuns?.length || Number.isNaN(t)) return false;
+  return ownRuns.some((r) => {
+    const from = Date.parse(r.started_at) - 60_000;
+    const to = (r.finished_at ? Date.parse(r.finished_at) : Date.now()) + 60_000;
+    return t >= from && t <= to && match(r.folder);
+  });
+}
+const sameFolder = (cwd) => (folder) => Boolean(cwd) && path.relative(path.resolve(folder), path.resolve(cwd)) === '';
+const projectHash = (p) => crypto.createHash('sha256').update(path.resolve(p)).digest('hex');
+
 // ── Claude Code: <config>/projects/<project>/<session>.jsonl ─────────────
 export const claudeHome = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 
@@ -125,7 +142,7 @@ function parseClaude(text, file) {
   return { usage, session: sub || !s.id ? null : s };
 }
 
-export function readClaudeCode({ since, workspace } = {}) {
+export function readClaudeCode({ since, workspace, ownRuns = [] } = {}) {
   const files = walkFiles(path.join(claudeHome(), 'projects'), '.jsonl', { since: since?.getTime?.() ?? 0 });
   const rows = new Map();
   const seen = new Set();
@@ -144,7 +161,7 @@ export function readClaudeCode({ since, workspace } = {}) {
       if (u.day >= sinceDay) addRow(rows, u.day, u.model, u);
     }
     const s = p.session;
-    if (s && !sessions.has(s.id) && !under(s.cwd, workspace) && !appRun(s.cwd)) {
+    if (s && !sessions.has(s.id) && !under(s.cwd, workspace) && !appRun(s.cwd) && !ownFolderRun(ownRuns, sameFolder(s.cwd), s.first)) {
       sessions.set(s.id, {
         id: s.id,
         name: s.title ?? s.prompt ?? 'Claude Code session',
@@ -227,7 +244,7 @@ function parseCodex(text) {
   return { usage, session: s, limits, limitsAt: limits?.observed_at ?? null };
 }
 
-export function readCodex({ since, workspace } = {}) {
+export function readCodex({ since, workspace, ownRuns = [] } = {}) {
   const files = walkFiles(path.join(codexHome(), 'sessions'), '.jsonl', { since: since?.getTime?.() ?? 0 });
   const rows = new Map();
   const sessions = new Map();
@@ -244,7 +261,7 @@ export function readCodex({ since, workspace } = {}) {
     if (p.limits && (!limits || (p.limitsAt ?? '') > (limits.observed_at ?? ''))) limits = p.limits;
     const s = p.session;
     const id = s.id ?? path.basename(f.path, '.jsonl');
-    if (!sessions.has(id) && !under(s.cwd, workspace) && !appRun(s.cwd)) {
+    if (!sessions.has(id) && !under(s.cwd, workspace) && !appRun(s.cwd) && !ownFolderRun(ownRuns, sameFolder(s.cwd), s.first)) {
       sessions.set(id, {
         id,
         name: s.prompt ?? 'Codex session',
@@ -304,7 +321,7 @@ function parseCopilot(text, file) {
   return { usage, session: s };
 }
 
-export function readCopilot({ since, workspace } = {}) {
+export function readCopilot({ since, workspace, ownRuns = [] } = {}) {
   const root = path.join(copilotHome(), 'session-state');
   const files = walkFiles(root, '.jsonl', { since: since?.getTime?.() ?? 0, maxDepth: 2 });
   const rows = new Map();
@@ -319,7 +336,7 @@ export function readCopilot({ since, workspace } = {}) {
       if (u.day >= sinceDay) addRow(rows, u.day, u.model, u);
     }
     const s = p.session;
-    if (!sessions.has(s.id) && s.first && !under(s.cwd, workspace) && !appRun(s.cwd)) {
+    if (!sessions.has(s.id) && s.first && !under(s.cwd, workspace) && !appRun(s.cwd) && !ownFolderRun(ownRuns, sameFolder(s.cwd), s.first)) {
       sessions.set(s.id, {
         id: s.id,
         name: s.prompt ?? 'GitHub Copilot session',
@@ -387,7 +404,7 @@ function parseGemini(text, file) {
   };
 }
 
-export function readGemini({ since, workspace } = {}) {
+export function readGemini({ since, workspace, ownRuns = [] } = {}) {
   const tmp = path.join(geminiHome(), 'tmp');
   const files = [
     ...walkFiles(tmp, '.jsonl', { since: since?.getTime?.() ?? 0 }),
@@ -406,7 +423,7 @@ export function readGemini({ since, workspace } = {}) {
       if (u.day >= sinceDay) addRow(rows, u.day, u.model, u);
     }
     const s = p.session;
-    if (!sessions.has(s.id) && (!ownHash || s.projectHash !== ownHash)) {
+    if (!sessions.has(s.id) && (!ownHash || s.projectHash !== ownHash) && !ownFolderRun(ownRuns, (folder) => s.projectHash === projectHash(folder), s.first)) {
       sessions.set(s.id, {
         id: s.id,
         name: s.title ?? s.prompt ?? 'Gemini CLI session',

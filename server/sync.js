@@ -66,7 +66,9 @@ async function runSync(id) {
 
   try {
     const secret = isLocal ? null : decrypt(row.secret_enc, row.id);
-    const out = await adapter.sync({ secret, since, workspace: workspaceDir(DATA_DIR) });
+    // The app's own runs in your folders, so their sessions aren't listed as yours.
+    const ownRuns = isLocal ? db.prepare('SELECT folder, started_at, finished_at FROM app_runs WHERE engine = ?').all(row.adapter) : [];
+    const out = await adapter.sync({ secret, since, workspace: workspaceDir(DATA_DIR), ownRuns });
     let status = isLocal ? localStatusOf(out.localStatus) : 'ok';
     // Signed in, but a run found the account can't use the app (blocked.js): it stays not ready, with the reason.
     const blocked = isLocal && status === 'ok' ? stillBlocked(row, out.localStatus) : null;

@@ -97,6 +97,7 @@ export function pruneOldData(days, now = Date.now()) {
     out.alerts = Number(db.prepare('DELETE FROM notifications WHERE created_at < ?').run(cutoff).changes);
     out.activity = Number(db.prepare('DELETE FROM events WHERE created_at < ?').run(cutoff).changes);
     out.routing = Number(db.prepare('DELETE FROM routing_log WHERE at < ?').run(cutoff).changes);
+    db.prepare('DELETE FROM app_runs WHERE started_at < ?').run(cutoff);
   });
   setRaw('last_prune', { at: new Date(now).toISOString(), days, ...out });
   return out;

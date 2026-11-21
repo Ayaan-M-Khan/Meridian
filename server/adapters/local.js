@@ -75,10 +75,10 @@ function local({ id, statusCheck, ...def }) {
     },
     forgetStatus: () => statusCache.delete(id),
 
-    async sync({ since, workspace }) {
+    async sync({ since, workspace, ownRuns = [] }) {
       let read = { rows: [], sessions: null };
       try {
-        if (def.readLogs) read = def.readLogs({ since, workspace });
+        if (def.readLogs) read = def.readLogs({ since, workspace, ownRuns });
       } catch (err) {
         throw new AdapterError(`Couldn’t read ${def.name}’s logs: ${err.message}`);
       }
@@ -340,9 +340,11 @@ export const geminiCli = local({
     via: 'your Google account',
     modelArgs: (m) => ['-m', m],
     modelHint: 'auto, pro, flash or a full model name',
-    invocation({ system, prompt, mcp, access = 'none' }) {
+    invocation({ system, prompt, mcp, access = 'none', cwd }) {
       // --skip-trust trusts only the folder of this run, for this run, so project settings and tools load.
       const args = ['--output-format', 'json', '--skip-trust'];
+      // It runs in this run's own folder for the app's functions (below), so your folder is added to its workspace.
+      if (mcp && cwd && access !== 'none') args.push('--include-directories', cwd);
       if (access === 'edit') args.push('--approval-mode', 'auto_edit'); // file edits only; shell commands still need approval, so they don't run
       // Windows Gemini CLI only accepts a system settings file from an administrator-owned folder, so the app's
       // functions come from a project settings file (.gemini/settings.json) in this run's own folder instead.
@@ -587,10 +589,13 @@ export const cursorCli = local({
     modelArgs: (m) => ['--model', m],
     modelHint: 'a model from agent models',
     invocation({ system, prompt, mcp, access = 'none', cwd }) {
-      const runIn = mcp?.runDir ?? cwd;
+      // Cursor loads the app's functions only from its workspace's .cursor/mcp.json, so a task in your folder works
+      // there without them; other runs use this run's own folder, which has that file.
+      const inFolder = access !== 'none' && Boolean(cwd);
+      const runIn = inFolder ? cwd : mcp?.runDir ?? cwd;
       const args = ['-p', clip(`${system}\n\n---\n\n${prompt}`), '--output-format', 'json', '--trust'];
       if (runIn) args.push('--workspace', runIn);
-      if (mcp) args.push('--approve-mcps');
+      if (mcp && !inFolder) args.push('--approve-mcps');
       else if (access !== 'edit') args.push('--mode', 'ask'); // read-only answers
       return { args, input: null, cwd: runIn };
     },

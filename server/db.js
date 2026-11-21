@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
   updated_at TEXT NOT NULL
 );
 
+-- When and where the app ran an AI app in one of your folders (tasks with a folder, AI team stages), so the session
+-- that run leaves in that app's logs isn't listed again as one of yours (local/logs.js). Kept 40 days.
+CREATE TABLE IF NOT EXISTS app_runs (
+  id INTEGER PRIMARY KEY,
+  engine TEXT NOT NULL,
+  folder TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT
+);
+
 -- Smart routing decisions: which AI got a request and why (router.js). Kept to the last 300.
 CREATE TABLE IF NOT EXISTS routing_log (
   id INTEGER PRIMARY KEY,

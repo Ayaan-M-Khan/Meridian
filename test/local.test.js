@@ -965,3 +965,46 @@ test('a quick follow-up stays with the AI that did the task; new work in a follo
     forgetReliability();
   }
 });
+
+test('the app’s own runs in your folders aren’t listed again as your sessions', async () => {
+  const runs = db.prepare('SELECT folder, started_at, finished_at FROM app_runs').all();
+  assert.ok(runs.some((r) => r.folder === fs.realpathSync.native(path.join(tmp, 'repo')) && r.finished_at), 'folder runs are noted, with when they ended');
+
+  const home = path.join(tmp, 'claude-own-runs');
+  const project = path.join(tmp, 'project-own');
+  fs.mkdirSync(path.join(home, 'projects', 'p'), { recursive: true });
+  const at = (ms) => new Date(Date.parse('2026-11-20T10:00:00Z') + ms).toISOString();
+  const session = (id, startMs) => [
+    { type: 'user', sessionId: id, cwd: project, timestamp: at(startMs), message: { role: 'user', content: `Task: ${id}` } },
+    { type: 'assistant', sessionId: id, cwd: project, timestamp: at(startMs + 5000), message: { id: `m-${id}`, model: 'claude-test', usage: { input_tokens: 10, output_tokens: 5 } } },
+  ].map((o) => JSON.stringify(o)).join('\n');
+  fs.writeFileSync(path.join(home, 'projects', 'p', 'own.jsonl'), session('own', 2000));
+  fs.writeFileSync(path.join(home, 'projects', 'p', 'yours.jsonl'), session('yours', 3_600_000));
+  const before = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = home;
+  try {
+    const ownRuns = [{ folder: project, started_at: at(0), finished_at: at(30_000) }];
+    const ids = readClaudeCode({ since: new Date('2026-11-01'), ownRuns }).sessions.map((s) => s.id);
+    assert.deepEqual(ids, ['yours'], 'the session the app ran is left out; yours an hour later in the same folder stays');
+    assert.equal(readClaudeCode({ since: new Date('2026-11-01'), ownRuns }).rows[0].output_tokens, 10, 'its usage still counts');
+    assert.deepEqual(readClaudeCode({ since: new Date('2026-11-01') }).sessions.map((s) => s.id).sort(), ['own', 'yours']);
+  } finally {
+    process.env.CLAUDE_CONFIG_DIR = before;
+  }
+});
+
+test('Gemini CLI and Cursor work in the task’s folder, not only in the run’s own folder', () => {
+  const mcp = { runDir: path.join(tmp, 'run-x') };
+  const folder = path.join(tmp, 'project');
+  const g = geminiCli.engine.invocation({ system: 'S', prompt: 'P', mcp, access: 'edit', cwd: folder });
+  assert.equal(g.cwd, mcp.runDir, 'the app’s functions load from the run’s folder');
+  assert.equal(g.args[g.args.indexOf('--include-directories') + 1], folder, 'and the task’s folder is in its workspace');
+  assert.ok(!geminiCli.engine.invocation({ system: 'S', prompt: 'P', mcp, access: 'none', cwd: path.join(tmp, 'ws') }).args.includes('--include-directories'));
+  const c = cursorCli.engine.invocation({ system: 'S', prompt: 'P', mcp, access: 'edit', cwd: folder });
+  assert.equal(c.cwd, folder);
+  assert.equal(c.args[c.args.indexOf('--workspace') + 1], folder);
+  assert.ok(!c.args.includes('--approve-mcps'));
+  const chat = cursorCli.engine.invocation({ system: 'S', prompt: 'P', mcp, access: 'none', cwd: path.join(tmp, 'ws') });
+  assert.equal(chat.cwd, mcp.runDir, 'without a folder, it runs where its functions are');
+  assert.ok(chat.args.includes('--approve-mcps'));
+});
