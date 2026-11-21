@@ -29,6 +29,16 @@ One dashboard for your AI tools: what's running, what's next, what you've spent,
 
 > Meridian was called **AI Command Center** up to version 1.1. Updating moves your data folder to the new name automatically, and you stay signed in.
 
+## Screenshots
+
+| Overview | The map |
+| --- | --- |
+| ![Meridian's overview: running work, usage tiles and the daily summary](docs/screenshots/dashboard.png) | ![The map: the command center in the middle, AI tools grouped by company, and the routes requests take](docs/screenshots/map.png) |
+| **Tasks** | **Statistics** |
+| ![Tasks with live progress and estimated finish times](docs/screenshots/tasks.png) | ![Statistics: share of usage, 30 days of tokens, and how each AI performs](docs/screenshots/stats.png) |
+
+<p align="center"><img src="docs/screenshots/map-light.png" width="720" alt="The map in the light theme"><br><sub>The light theme. All screenshots use the built-in demo data, not real accounts.</sub></p>
+
 ## Desktop app (Windows)
 
 Download `Meridian-Setup-<version>.exe` from the Releases page, or build it yourself (below), and run it. It installs Meridian with a Start Menu entry and a desktop shortcut. Open it like any other app. On first launch, choose a username and password.

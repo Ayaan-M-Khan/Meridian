@@ -113,21 +113,18 @@ code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-siz
   backdrop-filter: blur(12px); padding-left: env(safe-area-inset-left, 0px); overflow-y: auto;
 }
 .brand { display: flex; align-items: center; gap: 11px; padding: 18px 16px 16px; color: var(--text); text-decoration: none !important; }
-.brand-mark {
-  width: 32px; height: 32px; border-radius: 10px; background: var(--accent-grad); display: grid; place-items: center; flex-shrink: 0;
-  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--accent) 70%, transparent);
-}
-.brand-mark svg { width: 16px; height: 16px; color: #fff; }
-.brand-mark.lg { width: 46px; height: 46px; border-radius: 14px; }
-.brand-mark.lg svg { width: 22px; height: 22px; }
-.brand-name { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: -0.01em; line-height: 1.2; }
-.brand-sub { font-size: 11.5px; color: var(--text-3); }
+
+
+
+
+
+
 .nav { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 2px; }
-.nav-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-3); padding: 16px 8px 6px; }
-.nav-label-row { display: flex; align-items: center; justify-content: space-between; }
-.nav-add { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); display: grid; place-items: center; cursor: pointer; padding: 0; }
-.nav-add:hover { color: var(--text); border-color: var(--border-strong); }
-.nav-add svg { width: 12px; height: 12px; }
+
+
+
+
+
 .nav a {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm);
   color: var(--text-2); text-decoration: none; font-weight: 500; font-size: 13.5px; position: relative;
@@ -302,9 +299,9 @@ select.input { cursor: pointer; }
 .eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
 .hero h2 { font-family: var(--display); font-size: 27px; font-weight: 700; margin: 4px 0 0; letter-spacing: -0.025em; text-wrap: balance; }
 .hero p { margin: 0; color: var(--text-2); max-width: 68ch; }
-.hero-pulse { display: flex; gap: 6px; flex-wrap: wrap; }
-.hero-pulse span { font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 20px; background: color-mix(in srgb, var(--surface) 70%, transparent); border: 1px solid var(--border); color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
-.hero-pulse span.live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: ping 1.8s ease-out infinite; }
+
+
+
 .command {
   display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 14px;
   background: var(--bg); border: 1px solid var(--border-strong); box-shadow: 0 8px 24px -16px rgba(0, 0, 0, 0.5);
@@ -700,17 +697,17 @@ pre.code { margin: 0; padding: 11px 13px; background: var(--bg); border: 1px sol
 body { background: var(--bg); }
 .sidebar { background: var(--bg); border-right-color: var(--border-sub); backdrop-filter: none; }
 .brand { padding: 18px 16px 14px; }
-.brand-sub { display: none; }
-.brand-mark { box-shadow: none; border-radius: 9px; width: 30px; height: 30px; }
+
+
 .nav { gap: 1px; }
 .nav a { padding: 7px 10px; font-size: 13.5px; font-weight: 500; }
 .nav a:hover { background: var(--surface); }
 .nav a[aria-current="page"] { background: var(--surface-2); color: var(--text); }
 .nav a[aria-current="page"]::before { display: none; }
 .nav a[aria-current="page"] > svg { color: var(--text); }
-.nav-label { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; padding: 18px 10px 6px; }
-.nav-add { background: transparent; border-color: transparent; }
-.nav-add:hover { background: var(--surface-2); }
+
+
+
 .sidebar-foot { border-top-color: var(--border-sub); }
 .topbar { background: transparent; border-bottom: 0; backdrop-filter: none; min-height: 50px; }
 .topbar h1 { font-size: 13.5px; font-weight: 500; color: var(--text-2); letter-spacing: 0; }
@@ -728,7 +725,7 @@ body { background: var(--bg); }
 .hero::after { display: none; }
 .hero h2 { font-size: 26px; }
 .eyebrow { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
-.hero-pulse span { background: transparent; }
+
 .summary { background: var(--surface); }
 .summary .card-head h3 { color: var(--text); text-transform: none; letter-spacing: -0.01em; font-family: var(--font); font-size: 14px; }
 .summary .card-head svg { color: var(--accent-ink); }
@@ -860,7 +857,7 @@ th { color: var(--text-3); }
 .pv-licenses summary { cursor: pointer; font-size: 13px; color: var(--text-2); }
 .pv-licenses ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.7; }
 .tag.ai-tag { background: color-mix(in srgb, var(--accent-2, var(--accent)) 16%, transparent); color: var(--text-2); font-weight: 500; margin-left: 6px; }
-.auth-privacy { margin: 14px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-3); text-align: left; }
+
 @media (max-width: 640px) { .pv-hero { flex-direction: column; } .pv-select { min-width: 0; width: 100%; } }
 
 /* ── Map (0.9) ─────────────────────────────────────────────────────── */
@@ -1327,3 +1324,14 @@ html.wco .wb-tabs { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(
 .demo-banner { padding-top: 5px; padding-bottom: 5px; font-size: 12px; background: color-mix(in srgb, var(--warn) 9%, var(--canvas)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); }
 .page.page-enter { animation: page-in 0.18s ease-out both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(4px); } }
+
+/* ── Cleanup (1.4) ── */
+.wb-tabs { scrollbar-width: none; }
+.wb-tabs::-webkit-scrollbar { display: none; }
+/* Charts and bars follow the blue accent instead of the old violet. */
+:root { --c1: #4c8dff; --c2: #3ddc97; --c3: #2fc6d9; --c4: #f5b84e; --c5: #f472b6; --c6: #a78bfa; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --c1: #1f6feb; --c2: #12945f; --c3: #0e98ad; --c4: #d9860c; --c5: #d63d87; --c6: #7c5ce6; } }
+:root[data-theme="light"] { --c1: #1f6feb; --c2: #12945f; --c3: #0e98ad; --c4: #d9860c; --c5: #d63d87; --c6: #7c5ce6; }
+.bar.info > i { background: var(--accent); }
+.hero-top { margin-bottom: 4px; }
+.tool .tool-activity { margin-top: auto; }

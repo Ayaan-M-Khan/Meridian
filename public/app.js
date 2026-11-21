@@ -839,14 +839,8 @@ function connectPrompt(d) {
 
 function hero(d) {
   const e = d.engine;
-  const s = d.stats;
   const hour = new Date().getHours();
   const greet = hour < 5 ? 'Working late' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const pulse = [
-    s.running ? `${plural(s.running, 'task')} running` : 'Nothing running',
-    s.needs_attention ? `${s.needs_attention} need${s.needs_attention === 1 ? 's' : ''} attention` : null,
-    d.unread ? `${plural(d.unread, 'unread alert')}` : null,
-  ].filter(Boolean);
   const ask = d.demo
     ? `<p class="hero-note">The assistant works with your real data. Exit demo to ask it something.</p>${d.team?.lineup ? `<div class="lineup-label">AI team lineup</div>${lineupStrip(d.team.lineup)}` : ''}`
     : !e
@@ -854,8 +848,7 @@ function hero(d) {
       : heroCommand(d);
   return `<section class="hero a-hero">
     <div class="hero-top"><div><div class="eyebrow">${esc(new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</div>
-      <h2>${esc(greet)}, ${esc(S.user.username)}</h2></div>
-      <div class="hero-pulse">${pulse.map((p, i) => `<span class="${i === 0 && s.running ? 'live' : ''}">${esc(p)}</span>`).join('')}</div></div>
+      <h2>${esc(greet)}, ${esc(S.user.username)}</h2></div></div>
     ${ask}
   </section>`;
 }
@@ -1213,7 +1206,6 @@ const VIEWS = {
     const warnAt = d.settings.usage_warn_pct;
     const card = (t) => {
       const st = toolStatus(t);
-      const caps = Object.entries(t.capabilities).filter(([, v]) => v !== 'none').map(([k, v]) => `<span class="cap">${CAP_NAME[k]}: <b>${esc(capShort(k, v))}</b></span>`).join('');
       const activity = t.last_error
         ? `<span class="dotx err"></span><span class="err-text">${esc(t.last_error)}</span>`
         : t.current_activity
@@ -1229,7 +1221,6 @@ const VIEWS = {
           <div><dt>Spend this month</dt><dd class="${t.cost_mtd == null ? 'na' : ''}">${or(fmtUsd(t.cost_mtd), t.kind === 'local' ? 'Included in plan' : 'Not available')}</dd></div>
         </dl>
         ${t.budget_usd ? `<div class="meter flat"><div class="meter-top"><span class="muted">Monthly budget</span><b>${t.budget_pct == null ? '<span class="faint">No cost data</span>' : `${esc(fmtPct(t.budget_pct))} of ${esc(fmtUsd(t.budget_usd))}`}</b></div>${bar(t.budget_pct ?? 0, barCls(t.budget_pct ?? 0, warnAt))}</div>` : ''}
-        <div class="caps">${caps}</div>
         <div class="tool-activity">${activity}</div>
         <div class="tool-foot"><span>${esc(last)}</span><span class="go">Open ${ICON.chevron}</span></div>
       </a>`;
@@ -1664,7 +1655,7 @@ const VIEWS = {
           <p class="muted small">The chat, background tasks and the daily summary run through one AI. Apps signed in with your own account need no API key; their usage counts toward your plan.</p>
           <div class="engine-list" role="radiogroup" aria-label="Which AI the assistant uses">
             <label class="engine-opt ${st.assistant_engine === 'auto' ? 'on' : ''}"><input type="radio" name="engine" value="auto" data-action-change="set-engine" ${st.assistant_engine === 'auto' ? 'checked' : ''} ${dis}>
-              <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic (smart)</b><span class="faint small block">Each request goes to the AI best suited to it: coding to Claude Code or Codex, planning to Codex, research to Gemini, quick questions to Copilot. Plans you pay for come before an API key, AIs near their limits or failing are used less, and work is spread across your accounts.</span></span></label>
+              <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic</b><span class="faint small block">Each request goes to the AI best suited to it, using your plans first. Details in Smart routing below.</span></span></label>
             ${d.engines.map((e) => `<label class="engine-opt ${st.assistant_engine === e.id ? 'on' : ''} ${e.ready ? '' : 'off'}"><input type="radio" name="engine" value="${e.id}" data-action-change="set-engine" ${st.assistant_engine === e.id ? 'checked' : ''} ${e.ready ? '' : 'disabled'} ${dis}>
               ${engineLogo(e, 'sm')}<span class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(e.ready ? `Ready · ${e.via}` : e.reason)}</span></span>
               ${!e.ready && e.kind === 'cli' && !d.demo ? (e.integration_id ? `<a class="btn small" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small" type="button" data-action="connect-local" data-id="${e.id}">Connect</button>`) : ''}</label>`).join('')}
@@ -3617,6 +3608,13 @@ async function boot() {
       $('#content')?.scrollTo(0, 0);
     });
     document.addEventListener('click', onClick);
+    // The tab strip has no scrollbar; the mouse wheel scrolls it sideways, like an editor's tabs.
+    document.addEventListener('wheel', (e) => {
+      const tabs = e.target.closest?.('.wb-tabs');
+      if (!tabs || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      tabs.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
     document.addEventListener('auxclick', (e) => {
       const tab = e.button === 1 && e.target.closest('.wb-tab');
       if (!tab) return;

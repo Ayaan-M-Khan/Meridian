@@ -126,17 +126,15 @@ export function buildMapModel(data, stats, h) {
 
   const regions = vendors.map((v) => {
     const ns = nodes.filter((n) => n.vendor === v.vendor).sort((a, b) => a.angle - b.angle);
-    const cx = ns.reduce((s, n) => s + n.x, 0) / ns.length;
-    const cy = ns.reduce((s, n) => s + n.y, 0) / ns.length;
-    const a = Math.atan2(cy, cx) || ns[0].angle;
-    const out = Math.max(...ns.map((n) => Math.hypot(n.x, n.y) + n.r)) + LAND + 22;
+    // The company's name sits just above its land, where no place's name or figures are drawn.
+    const top = ns.reduce((t, n) => (n.y - n.r < t.y - t.r ? n : t), ns[0]);
     return {
       vendor: v.vendor,
       hue: ns[0].hue,
       land: ns.map((n) => ({ x: n.x, y: n.y, r: r1(n.r + LAND) })),
       bridges: ns.slice(1).map((n, i) => ({ x1: ns[i].x, y1: ns[i].y, x2: n.x, y2: n.y })),
-      lx: r1(Math.cos(a) * out),
-      ly: r1(Math.sin(a) * out + 4),
+      lx: r1(top.x),
+      ly: r1(top.y - top.r - LAND - 10),
       count: ns.length,
     };
   });

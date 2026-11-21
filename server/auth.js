@@ -15,7 +15,7 @@ import { db, notify } from './db.js';
 import { sha256, randomToken, safeEqual, encrypt, decrypt } from './crypto.js';
 import { HttpError, nowIso } from './util.js';
 import { APP_VERSION } from './version.js';
-import { currentStep, newRecoveryCodes, newSecret, normalizeRecovery, otpauthUri, qrSvg, verifyCode } from './totp.js';
+import { newRecoveryCodes, newSecret, normalizeRecovery, otpauthUri, qrSvg, verifyCode } from './totp.js';
 import {
   cancelGoogleFlow, callbackPage, finishGoogleFlow, googleStatus, pollGoogleFlow, removeGoogleClient, saveGoogleClient, startGoogleFlow,
 } from './google-auth.js';
@@ -415,4 +415,3 @@ export function securityRoutes(app) {
   });
 }
 
-export const currentStepForTests = currentStep;
