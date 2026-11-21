@@ -619,8 +619,10 @@ function renderPage() {
     return;
   }
   const key = S.page === 'tool' ? `tool-${S.toolId}` : S.page;
+  // A short fade only when you move to another page, not when the same page refreshes.
+  const entering = el.dataset.page !== key;
   el.dataset.page = key;
-  el.innerHTML = `<div class="page page-${S.page}">${S.loadError ? `<div class="callout err">Couldn’t refresh: ${esc(S.loadError)}</div>` : ''}${VIEWS[S.page]()}</div>`;
+  el.innerHTML = `<div class="page page-${S.page}${entering ? ' page-enter' : ''}">${S.loadError ? `<div class="callout err">Couldn’t refresh: ${esc(S.loadError)}</div>` : ''}${VIEWS[S.page]()}</div>`;
   AFTER[S.page]?.();
   const dock = $('#dock');
   if (dock && dock.hidden === dockShown()) renderDock();

@@ -1325,3 +1325,5 @@ html.wco .wb-tabs { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(
 .wb-bar.topbar { border-bottom-color: transparent; }
 .card, .tile { border-color: color-mix(in srgb, var(--border) 80%, transparent); }
 .demo-banner { padding-top: 5px; padding-bottom: 5px; font-size: 12px; background: color-mix(in srgb, var(--warn) 9%, var(--canvas)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); }
+.page.page-enter { animation: page-in 0.18s ease-out both; }
+@keyframes page-in { from { opacity: 0; transform: translateY(4px); } }
