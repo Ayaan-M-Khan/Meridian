@@ -47,6 +47,7 @@ The app isn't code-signed yet, so Windows SmartScreen may warn you the first tim
 
 The desktop app keeps its data in `%APPDATA%\Meridian\data`. It syncs, raises alerts, runs tasks and accepts task reports only while it's running. Its local server listens on port 4317, or a free port if 4317 is taken.
 
+- **The window** has no Windows title bar: the top row (tabs and explorer header) is the bar. Drag it to move the window, double-click to maximize; minimize, maximize and close are Windows' own buttons in the app's colors.
 - **Closing the window** quits the app, unless tasks are running: then it asks whether to keep them going in the background. **Settings → Desktop app** can keep it running in the system tray every time, and start it in the tray when you sign in to Windows.
 - **Windows notifications** show new alerts while the app isn't in front, including "AI team finished" and "Task failed" for tasks you started. Click one to open it.
 - **Backups:** **Settings → Backup** saves your tools, tasks and results, conversations, alerts and settings to a JSON file, and restores from one. Backups never include your password, API keys or ingest tokens, so the file is safe to keep; you add keys again after restoring. The code is on GitHub; your data stays on your computer and in the backups you save.
@@ -75,7 +76,7 @@ The installer is written to `dist/`. Use `npm run app` to open the desktop app w
 
 ## The map
 
-**Map** in the sidebar shows your setup as a map you can explore:
+**Map** in the icon bar on the left shows your setup as a map you can explore:
 
 - **The command center** sits in the middle ("You are here"). Your AI tools are places around it, grouped into regions by company: Anthropic, OpenAI, Google, GitHub and so on.
 - **Distance means usage.** The closer a place is to the center, the more you used it this month. A tool with no usage reported sits out at the edge, so nothing is guessed.
@@ -94,7 +95,7 @@ The installer is written to `dist/`. Use `npm run app` to open the desktop app w
 
 ## Sign-in & security
 
-The sign-in page asks for your username and password, or offers **Continue with Google** once you've linked a Google account. **Sign-in & security** in the sidebar has the rest:
+The sign-in page asks for your username and password, or offers **Continue with Google** once you've linked a Google account. **Sign-in & security** in the icon bar has the rest:
 
 - **Password.** Change it there (everyone else signed in is signed out). New passwords need 12+ characters, can't be a common password, and can't contain your username. A strength bar and rule ticks show as you type.
 - **Two-step verification.**
@@ -123,7 +124,7 @@ The sign-in page asks for your username and password, or offers **Continue with 
 
 ## Privacy & data
 
-Meridian keeps everything in one folder on your computer. There's no analytics, tracking or advertising, and nothing goes to the makers of this app. **Privacy & data** in the sidebar shows:
+Meridian keeps everything in one folder on your computer. There's no analytics, tracking or advertising, and nothing goes to the makers of this app. **Privacy & data** in the icon bar shows:
 
 - **What's kept here:** counts of everything stored, the folder, and the database size. Only counts are shown, never the content.
 - **Where data goes:**
@@ -162,7 +163,7 @@ These connect through the provider's own command-line app on your computer and t
 | GitHub Copilot | GitHub (Copilot plan) | `copilot` | Sessions, and tokens where its logs record them |
 | Cursor | Cursor | `agent` | Nothing: the Cursor CLI doesn't save usage on disk |
 
-Choose **Connect a tool** (the **+** beside Connected in the sidebar). The app looks for each one on this computer and shows whether it's installed and signed in. Once you connect one, it appears in the sidebar with a status dot, and its own page opens. If it still needs installing or signing in, that page walks you through it: **Install** and **Sign in with your account** open a console window that runs the provider's own installer or sign-in (`npm install -g …`, the official install script, `claude auth login`, `codex login`, `copilot login`, `agent login`, or a first run of `gemini` or `agy`). Signing in happens in your browser, on the provider's own page. The app never sees your password.
+Choose **Connect a tool** (the **+** at the top of the Explorer, or Ctrl+P → Connect a tool). The app looks for each one on this computer and shows whether it's installed and signed in. Once you connect one, it appears in the Explorer with a status dot, and its own page opens. If it still needs installing or signing in, that page walks you through it: **Install** and **Sign in with your account** open a console window that runs the provider's own installer or sign-in (`npm install -g …`, the official install script, `claude auth login`, `codex login`, `copilot login`, `agent login`, or a first run of `gemini` or `agy`). Signing in happens in your browser, on the provider's own page. The app never sees your password.
 
 Usage figures come from each app's own session logs, so token counts are exact. Cost isn't shown because plan usage isn't priced per token. Local apps are re-read every 2 minutes. Sessions active in the last 3 minutes show as running tasks. Codex's plan limits are as of its last session.
 
@@ -366,7 +367,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `scripts/dev-fake-claude.js`: development only. It runs the server against a scripted stand-in for Claude, so you can click through the chat without an API key.
 - `test/fixtures/fake-claude.mjs`: a stand-in for the Claude Code CLI that the tests run the whole sign-in path against, MCP bridge included.
 - `server/state.js`: builds the single payload the UI renders. `server/demo.js` returns sample data in the same shape, flagged `demo: true`.
-- `public/`: the frontend, plain JavaScript with Chart.js. Desktop gets a sidebar; phones get a bottom tab bar.
+- `public/`: the frontend, plain JavaScript with Chart.js. Desktop gets an editor-style workbench (icon bar, explorer, tabs, status bar, command palette, chat panel); phones get a bottom tab bar.
 
 ## Security notes
 

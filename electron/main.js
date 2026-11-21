@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, nativeTheme, shell } from 'electron';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,25 @@ function moveDataFromOldName() {
   if (moveAppFolder(legacy, current) === 'keep-legacy') app.setPath('userData', legacy);
 }
 moveDataFromOldName();
+
+/**
+ * Keeps Meridian's entry in Windows' "Installed apps" list showing the right name and version. The installer writes
+ * it, but an update can occasionally leave the old version there. Only the entry that points at this very install is
+ * touched, and only its name and version values.
+ */
+const UNINSTALL_KEY = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\142f0647-14b0-5c03-a7de-b9cdb5cd6a52`; // electron-builder's ID for this app
+function syncInstalledAppsEntry() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  execFile('reg', ['query', UNINSTALL_KEY], { windowsHide: true }, (err, out) => {
+    if (err) return; // installed some other way: leave it alone
+    if (!out.toLowerCase().includes(path.dirname(process.execPath).toLowerCase())) return; // another copy's entry
+    const want = { DisplayName: `Meridian ${app.getVersion()}`, DisplayVersion: app.getVersion() };
+    for (const [name, value] of Object.entries(want)) {
+      const has = new RegExp(String.raw`\s${name}\s+REG_SZ\s+(.*)`).exec(out)?.[1]?.trim();
+      if (has !== value) execFile('reg', ['add', UNINSTALL_KEY, '/v', name, '/t', 'REG_SZ', '/d', value, '/f'], { windowsHide: true }, () => {});
+    }
+  });
+}
 
 /** Shortcuts named "AI Command Center" that now point at a program that no longer exists are removed. */
 function removeDeadOldShortcuts() {
@@ -247,6 +266,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     removeDeadOldShortcuts();
+    syncInstalledAppsEntry();
     return boot();
   }).catch((err) => {
     dialog.showErrorBox('Meridian could not start', String(err?.stack ?? err));
