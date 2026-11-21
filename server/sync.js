@@ -9,6 +9,7 @@ import { runDueAutomations } from './automations.js';
 import { maybeCheckForUpdate } from './updates.js';
 import { maybePrune } from './privacy.js';
 import { AdapterError, addDays, nowIso, startOfUtcDay, startOfUtcMonth, utcDay } from './util.js';
+import { stillBlocked } from './blocked.js';
 
 const inFlight = new Map();
 const LOCAL_SYNC_MINUTES = 2; // local logs are cheap to read, so local tools stay close to live
@@ -66,7 +67,11 @@ async function runSync(id) {
   try {
     const secret = isLocal ? null : decrypt(row.secret_enc, row.id);
     const out = await adapter.sync({ secret, since, workspace: workspaceDir(DATA_DIR) });
-    const status = isLocal ? localStatusOf(out.localStatus) : 'ok';
+    let status = isLocal ? localStatusOf(out.localStatus) : 'ok';
+    // Signed in, but a run found the account can't use the app (blocked.js): it stays not ready, with the reason.
+    const blocked = isLocal && status === 'ok' ? stillBlocked(row, out.localStatus) : null;
+    if (blocked) status = 'error';
+    const meta = out.meta ? JSON.stringify(blocked ? { ...out.meta, blocked } : out.meta) : row.meta;
     tx(() => {
       db.prepare('DELETE FROM usage_daily WHERE integration_id = ? AND source = ? AND day >= ?').run(id, source, utcDay(since));
       const ins = db.prepare(
@@ -79,12 +84,13 @@ async function runSync(id) {
       }
       const privacy = getSettings().privacy ?? {};
       if (out.sessions && privacy.read_sessions !== false) saveSessions(id, out.sessions, Date.now(), { titles: privacy.session_titles !== false, label: row.name });
-      db.prepare('UPDATE integrations SET status = ?, last_sync_at = ?, last_error = NULL, data_refreshed_at = ?, meta = ? WHERE id = ?').run(
-        status, nowIso(), out.dataRefreshedAt ?? null, out.meta ? JSON.stringify(out.meta) : row.meta, id);
+      db.prepare('UPDATE integrations SET status = ?, last_sync_at = ?, last_error = ?, data_refreshed_at = ?, meta = ? WHERE id = ?').run(
+        status, nowIso(), blocked?.reason ?? null, out.dataRefreshedAt ?? null, meta, id);
     });
-    if (row.status === 'error') addEvent(id, 'connection', `${row.name} reconnected`);
+    if (row.status === 'error' && status === 'ok') addEvent(id, 'connection', `${row.name} reconnected`);
     if (isLocal && status !== row.status && row.status !== 'pending') {
-      addEvent(id, 'connection', status === 'ok' ? `${row.name} is signed in and ready` : status === 'signin' ? `${row.name} is no longer signed in` : `${row.name} was not found on this computer`);
+      addEvent(id, 'connection', status === 'ok' ? `${row.name} is signed in and ready` : status === 'signin' ? `${row.name} is no longer signed in`
+        : status === 'error' ? `${row.name} can’t be used with this account: ${blocked?.reason ?? ''}` : `${row.name} was not found on this computer`);
     }
     return { ok: true, rows: out.rows.length, status };
   } catch (err) {

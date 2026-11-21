@@ -20,7 +20,7 @@ if (args[0] === 'auth' && args[1] === 'status') {
 }
 
 const prompt = fs.readFileSync(0, 'utf8');
-if (process.env.FAKE_CLAUDE_LOG) fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ args, prompt })}\n`);
+if (process.env.FAKE_CLAUDE_LOG) fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ args, prompt, gitHooks: process.env.GIT_CONFIG_KEY_0 ? { key: process.env.GIT_CONFIG_KEY_0, value: process.env.GIT_CONFIG_VALUE_0 } : null })}\n`);
 let plan = JSON.parse(process.env.FAKE_CLAUDE_PLAN || '{"calls":[],"text":"ok"}');
 
 // AI team runs: FAKE_CLAUDE_TEAM = {"Planner": ["…"], "Builder": ["first reply", "second reply"]}, answered in order per role.

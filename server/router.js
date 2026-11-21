@@ -1,8 +1,9 @@
 /**
  * Smart routing: sends each request to the AI best suited to it, without asking an AI (so routing costs nothing).
  *
- * 1. classify()  reads what the request is about: coding, debugging, writing, research, analysis, planning or a quick
- *                question, from the words in it.
+ * 1. classify()  reads what the request is about: building (coding), debugging, git and version control, writing,
+ *                research, analysis, planning or a quick question, from the words in it.
+ *                Defaults: building goes to Claude Code, debugging to Codex (ChatGPT) and Gemini, git to GitHub Copilot.
  * 2. Each ready AI gets a score: how strong it is at that kind of work (STRENGTHS), times
  *    - headroom:    Codex reports its plan limits; an AI near its limit is used less, one at its limit is skipped
  *    - reliability: an AI whose recent runs here failed (signed out, blocked, timing out) is used less
@@ -24,16 +25,18 @@ export const CATEGORIES = {
   research: 'Research',
   analysis: 'Analysis',
   planning: 'Planning',
+  git: 'Git and version control',
   quick: 'Quick question',
   general: 'General',
 };
 
 const SIGNALS = {
-  code: /\b(code|coding|program|function|method|script|refactor|implement|endpoint|api|class|component|module|library|typescript|javascript|python|java|kotlin|swift|c\+\+|c#|rust|golang|sql|regex|html|css|react|node|unit tests?|write tests?|compile|repo|pull request|commit|build (?:a|an|the|me)? ?(?:app|site|website|tool|cli|feature|page|game|bot))\b/gi,
+  code: /\b(code|coding|program|function|method|script|refactor|implement|endpoint|api|class|component|module|library|typescript|javascript|python|java|kotlin|swift|c\+\+|c#|rust|golang|sql|regex|html|css|react|node|unit tests?|write tests?|compile|(?:build|create|make|scaffold|develop|add)(?:s|ing)? (?:[\w'-]+ ){0,5}?(?:apps?|site|website|web ?app|landing page|page|tool|cli|feature|game|bot|component|dashboard|extension|plugin|backend|frontend|ui|form|screen|server|project|prototype|mvp))\b/gi,
   debug: /\b(debug|bug|\w*error|\w*exception|stack ?trace|traceback|crash(?:es|ing)?|failing|fails|broken|doesn'?t work|not working|segfault|undefined is not|null pointer|fix (?:the|this|a|my)? ?(?:bug|error|issue|crash|test))\b/gi,
   writing: /\b(write|draft|rewrite|reword|email|letter|post|blog|article|essay|copy|tweet|thread|announcement|newsletter|summary|summari[sz]e|proofread|tone|story|poem|caption|bio|cover letter|resume|speech|script for|headline|tagline)\b/gi,
   research: /\b(research|compare|comparison|find out|look up|latest|news|sources?|citations?|market|competitors?|alternatives?|pros and cons|which is better|recommend(?:ation)?s?|best (?:way|tool|option)s?|what is the current|state of the art)\b/gi,
   analysis: /\b(analy[sz]e|analysis|data|dataset|numbers|statistics|stats|trend|usage|spend(?:ing)?|costs?|budget|csv|spreadsheet|chart|graph|metrics?|kpis?|calculate|forecast|breakdown)\b/gi,
+  git: /\b(git|github|commit(?:s|ted|ting)?|push(?:ed|ing)? (?:it|this|that|them|to|my|the|changes|commits?|branch\w*|upstream|origin)|pull(?:ed|ing)? (?:from|the latest|latest|changes|main|master|origin|upstream)|pull requests?|prs?|merge(?:d)? (?:the |my |this )?(?:branch|pr|pull request|main|master)|rebase|cherry-pick|stash|checkout|branch(?:es)?|origin\/\S+|upstream|repo(?:sitory)?|clone|fetch the latest|tag (?:a |the )?release)\b/gi,
   planning: /\b(plan|planning|roadmap|strategy|steps|outline|schedule|prioriti[sz]e|architecture|design (?:a|the|an)|approach|break (?:it )?down|milestones?|timeline)\b/gi,
 };
 
@@ -43,6 +46,8 @@ export function classify(text) {
   const scores = Object.fromEntries(Object.entries(SIGNALS).map(([k, re]) => [k, (t.match(re) ?? []).length]));
   // Signs of a problem outweigh the technology named: "fix this error in my React code" is debugging.
   if (scores.debug) scores.debug = scores.debug * 2 + 0.5;
+  // Git words are specific: "commit and push the fix" is git work, whatever else it mentions.
+  if (scores.git) scores.git = scores.git * 2 + 1;
   const [best, n] = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
   if (n > 0) return { category: best, label: CATEGORIES[best] };
   const words = t.trim().split(/\s+/).filter(Boolean).length;
@@ -52,15 +57,15 @@ export function classify(text) {
 
 /** How strong each AI is at each kind of work, 1 to 5. Starting points, not measurements. */
 export const STRENGTHS = {
-  'claude-code': { code: 5, debug: 5, writing: 5, research: 3, analysis: 4, planning: 4, quick: 3, general: 4 },
-  'claude-api': { code: 4, debug: 4, writing: 5, research: 3, analysis: 5, planning: 4, quick: 4, general: 4 },
-  codex: { code: 5, debug: 4, writing: 3, research: 3, analysis: 4, planning: 5, quick: 3, general: 4 },
-  'gemini-cli': { code: 4, debug: 4, writing: 4, research: 5, analysis: 4, planning: 4, quick: 4, general: 4 },
-  'antigravity-cli': { code: 4, debug: 4, writing: 4, research: 5, analysis: 4, planning: 4, quick: 4, general: 4 },
-  'copilot-cli': { code: 4, debug: 4, writing: 3, research: 2, analysis: 3, planning: 3, quick: 5, general: 3 },
-  'cursor-cli': { code: 5, debug: 4, writing: 2, research: 2, analysis: 3, planning: 3, quick: 3, general: 3 },
+  'claude-code': { code: 5, debug: 4, git: 4, writing: 5, research: 3, analysis: 4, planning: 4, quick: 3, general: 4 },
+  'claude-api': { code: 4, debug: 4, git: 1, writing: 5, research: 3, analysis: 5, planning: 4, quick: 4, general: 4 },
+  codex: { code: 4, debug: 5, git: 3, writing: 3, research: 3, analysis: 4, planning: 5, quick: 3, general: 4 },
+  'gemini-cli': { code: 4, debug: 5, git: 3, writing: 4, research: 5, analysis: 4, planning: 4, quick: 4, general: 4 },
+  'antigravity-cli': { code: 4, debug: 5, git: 2, writing: 4, research: 5, analysis: 4, planning: 4, quick: 4, general: 4 },
+  'copilot-cli': { code: 4, debug: 4, git: 5, writing: 3, research: 2, analysis: 3, planning: 3, quick: 5, general: 3 },
+  'cursor-cli': { code: 4, debug: 4, git: 3, writing: 2, research: 2, analysis: 3, planning: 3, quick: 3, general: 3 },
 };
-const STRONGEST = { code: 'code', debug: 'debugging', writing: 'writing', research: 'research', analysis: 'analysis', planning: 'planning', quick: 'quick answers', general: 'general work' };
+const STRONGEST = { code: 'building', debug: 'debugging', git: 'git and version control', writing: 'writing', research: 'research', analysis: 'analysis', planning: 'planning', quick: 'quick answers', general: 'general work' };
 
 /** Plan headroom from what the AI itself reports. Only Codex writes its limits down. */
 function headroom(engineId, metas) {
@@ -155,10 +160,11 @@ function metasByEngine() {
  * Ranks the ready AIs for a request. `blend` mixes kinds of work, e.g. a planner for a coding task:
  * [['planning', 0.6], ['code', 0.4]]. Returns { category, label, ranking: [{ engine, score, reasons, notes }] }.
  */
-export function rankEngines(text, { needsTools = false, needsFiles = false, exclude = [], blend = null, category = null } = {}) {
+export function rankEngines(text, { needsTools = false, needsFiles = false, needsGit = false, exclude = [], blend = null, category = null } = {}) {
   const c = category ? { category, label: CATEGORIES[category] } : classify(text);
   const mix = blend ?? [[c.category, 1]];
-  const ready = listEngines().filter((e) => e.ready && !exclude.includes(e.id) && (!needsFiles || e.kind === 'cli'));
+  // Running git commands needs an AI app that can be limited to git alone (GitHub Copilot, Claude Code).
+  const ready = listEngines().filter((e) => e.ready && !exclude.includes(e.id) && (!needsFiles || e.kind === 'cli') && (!needsGit || e.git));
   const metas = metasByEngine();
   const rel = reliabilityByEngine();
   const today = usageToday();
@@ -195,7 +201,12 @@ export function rankEngines(text, { needsTools = false, needsFiles = false, excl
     const want = getSettings().route_prefs?.[mix[0][0]];
     if (want && want !== 'auto') {
       const i = ranking.findIndex((x) => x.engine.id === want);
-      if (i < 0) pref = { id: want, label: listEngines().find((e) => e.id === want)?.label ?? want, skipped: 'it isn’t ready' };
+      if (i < 0) {
+        const e = listEngines().find((x) => x.id === want);
+        const skipped = !e?.ready ? 'it isn’t ready' : needsGit && !e.git ? 'it can’t be limited to git commands, so it can’t run git here'
+          : needsFiles && e.kind !== 'cli' ? 'it can’t work in a folder' : 'it isn’t available for this';
+        pref = { id: want, label: e?.label ?? want, skipped };
+      }
       else if (ranking[i].blocked) pref = { id: want, label: ranking[i].engine.label, skipped: ranking[i].notes[0] };
       else {
         const [p] = ranking.splice(i, 1);

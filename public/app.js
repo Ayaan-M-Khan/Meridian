@@ -932,11 +932,15 @@ function previewRoute(input) {
   }, 280);
 }
 
+function routeNote(r) {
+  return `<div class="route-note" title="${esc(r.why ?? '')}">${engineById(r.engine, r.engine_label)}<span>Automatic: ${esc(r.category_label ?? 'this request')} → <b>${esc(r.engine_label)}</b>${r.from ? ` <span class="faint">(switched from ${esc(r.from)})</span>` : ''}${r.handoff ? ` <span class="faint">· ${esc(r.handoff)}</span>` : ''}</span></div>`;
+}
+
 function chatItem(it, i) {
-  if (it.role === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>`;
+  if (it.role === 'user') return `<div class="msg user"><div class="bubble">${esc(it.text)}</div></div>${it.route ? routeNote(it.route) : ''}`;
   if (it.role === 'assistant') {
-    // The AI that answers this conversation, which on Automatic can differ from conversation to conversation.
-    const tid = S.chat.thread?.route?.engine ?? S.chat.thread?.engine;
+    // The AI that wrote this reply: on Automatic, different requests in one conversation can go to different AIs.
+    const tid = it.engine ?? S.chat.thread?.route?.engine ?? S.chat.thread?.engine;
     const e = (tid && S.data?.engines.find((x) => x.id === tid)) || S.data?.engine;
     const copy = it.text && !S.chat.streaming ? `<button class="bubble-copy" data-action="copy-reply" data-index="${i}" aria-label="Copy this reply" title="Copy">${ICON.check}<span>Copy</span></button>` : '';
     return `<div class="msg ai">${e ? engineLogo(e, 'xs') : `<span class="logo xs hue-brand">${ICON.spark}</span>`}<div class="bubble md">${it.text ? md(it.text) : '<span class="typing"><i></i><i></i><i></i></span>'}</div>${copy}</div>`;
@@ -955,10 +959,11 @@ function renderMsgs() {
   const items = c.thread?.items ?? [];
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   const e = S.data.engine;
+  // Conversations from before per-message routing have one route for the whole thread; show it at the top.
   const r = c.thread?.route;
-  const routeNote = r ? `<div class="route-note" title="${esc(r.why ?? '')}">${engineById(r.engine, r.engine_label)}<span>Automatic picked <b>${esc(r.engine_label)}</b> for this ${esc((r.category_label ?? '').toLowerCase())} conversation</span></div>` : '';
+  const top = r && !items.some((it) => it.route) ? routeNote(r) : '';
   el.innerHTML = items.length
-    ? routeNote + items.map(chatItem).join('')
+    ? top + items.map(chatItem).join('')
     : `<div class="chat-empty">${e ? engineLogo(e, 'lg') : ''}<h3>What can I do for you?</h3>
         <p>I can read your tools, tasks, spending and alerts, change budgets, sync tools, and run tasks in the background that show up on the Tasks page with live progress.</p>
         <div class="chips">${suggestions(S.data).map((p) => `<button class="chip" data-action="ask-here" data-prompt="${esc(p)}">${esc(p)}</button>`).join('')}</div></div>`;
@@ -1002,9 +1007,10 @@ async function sendChat(text) {
   c.streaming = true;
   c.draft = '';
   let current = null; // the assistant bubble being written
+  let turnEngine = null; // the AI this request went to, once the server says
   const assistantBubble = () => {
     if (!current) {
-      current = { role: 'assistant', text: '' };
+      current = { role: 'assistant', text: '', engine: turnEngine };
       thread.items.push(current);
     }
     return current;
@@ -1047,6 +1053,10 @@ async function sendChat(text) {
         const ev = JSON.parse(line);
         if (ev.type === 'route') {
           thread.route = ev;
+          turnEngine = ev.engine;
+          const asked = [...thread.items].reverse().find((x) => x.role === 'user');
+          if (asked) asked.route = ev;
+          if (current) current.engine = ev.engine;
         } else if (ev.type === 'text') {
           finishPending();
           assistantBubble().text += ev.delta;
@@ -1064,11 +1074,11 @@ async function sendChat(text) {
           assistantBubble();
         } else if (ev.type === 'notice' || ev.type === 'error') {
           dropEmpty();
-          thread.items.push({ role: ev.type === 'error' ? 'error' : 'notice', text: ev.type === 'error' ? ev.message : ev.text });
+          thread.items.push({ role: ev.type === 'error' ? 'error' : 'notice', text: ev.type === 'error' ? ev.message : ev.text, handoff: Boolean(ev.handoff) });
           if (ev.unsent) c.draft = ev.unsent;
         } else if (ev.type === 'done') {
           if (S.chat.thread?.id === ev.thread.id) {
-            const notes = thread.items.filter((x) => x.role === 'error' || x.role === 'notice');
+            const notes = thread.items.filter((x) => (x.role === 'error' || x.role === 'notice') && !x.handoff);
             S.chat.thread = { ...ev.thread, items: [...ev.thread.items, ...notes] };
           }
           const entry = c.threads.find((x) => x.id === ev.thread.id);
@@ -2462,6 +2472,8 @@ async function openTask(id, { refresh = false } = {}) {
     ${e ? `<div class="callout ${e.cls === 'err' ? 'err' : e.cls === 'warn' ? 'warn' : 'info'}"><b>${esc(e.text)}</b>${e.basis ? `, ${esc(e.basis)}` : ''}.</div>` : ''}
     <dl class="detail-grid">
       ${row('Tool', esc(t.tool_name))}
+      ${row('Folder', t.folder && !t.team && `<code>${esc(t.folder)}</code><div class="faint small">${t.access === 'git' ? 'May read files and run git commands only' : 'May read and change files, no commands'}</div>`)}
+      ${row('Handed over', t.handoff && esc(t.handoff))}
       ${row('Started', at(t.started_at))}
       ${row('Expected finish', t.status === 'running' && t.eta_at && `${at(t.eta_at)}<div class="faint small">${esc(ETA_BASIS[t.eta_source] ?? '')}</div>`)}
       ${row('Usually takes', t.typical_ms && esc(dur(t.typical_ms)))}
@@ -2594,7 +2606,10 @@ function openNewTask(preset = {}) {
       <p class="muted small">${esc(e.label)} works on this in the background and reports its progress, so you can see how far along it is and when it should finish. The result is saved on the task. It can read your dashboard data.</p>
       <div class="field"><label for="ct-name">Name</label><input class="input" id="ct-name" name="name" maxlength="80" required value="${esc(preset.name ?? '')}" placeholder="Monthly usage report"></div>
       <div class="field"><label for="ct-ins">What should it do?</label><textarea class="input" id="ct-ins" name="instructions" rows="6" maxlength="2000" required placeholder="Summarize this month’s usage by tool, flag anything close to a budget or limit, and suggest where to cut back.">${esc(preset.instructions ?? '')}</textarea>
-        <span class="help">Be specific about what you want back. Runs with ${esc(e.via)}.</span></div>
+        <span class="help">Be specific about what you want back. ${S.data.engine_choice === 'auto' ? 'On Automatic it goes to the best AI for it: building to Claude Code, debugging to Codex or Gemini, git to GitHub Copilot.' : `Runs with ${esc(e.via)}.`}</span></div>
+      <div class="field"><label for="ct-folder">Folder to work in (optional)</label>
+        <div class="folder-row"><input class="input" id="ct-folder" name="folder" autocomplete="off" placeholder="Leave empty for a text result" value="${esc(preset.folder ?? '')}"><button class="btn" type="button" data-action="pick-folder" data-target="ct-folder">${ICON.folder}Choose…</button></div>
+        <span class="help">With a folder, the AI can change files in it. For git work (commit, push, pull, branches), give the repository’s folder: it then runs through GitHub Copilot or Claude Code and may only run git commands there. Force-pushes and hard resets are always blocked.</span></div>
       <div class="form-actions"><button class="btn primary" type="submit">Start task</button></div>
       <div class="error-text" data-error></div>
     </form>`, { center: true });
@@ -2832,7 +2847,7 @@ const FORMS = {
     await load({ force: true });
   },
   async 'claude-task'(fd) {
-    const r = await api('/api/claude-tasks', { method: 'POST', body: { name: fd.name, instructions: fd.instructions } });
+    const r = await api('/api/claude-tasks', { method: 'POST', body: { name: fd.name, instructions: fd.instructions, folder: fd.folder?.trim() || null } });
     closeModal();
     toast(r.status === 'queued' ? 'Task queued. It starts when a running assistant task finishes.' : 'Task started');
     S.taskFilter = 'all';

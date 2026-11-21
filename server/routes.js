@@ -2,6 +2,7 @@ import { db, tx, getSettings, setRaw, addEvent } from './db.js';
 import { adapters, catalog } from './adapters/index.js';
 import { encrypt, secretHint, sha256, randomToken } from './crypto.js';
 import { syncIntegration } from './sync.js';
+import { clearUnusable } from './blocked.js';
 import { buildState, publicSettings } from './state.js';
 import { demoState, demoStats } from './demo.js';
 import { refreshSummary, SUMMARY_KEY_AAD } from './summary.js';
@@ -120,6 +121,7 @@ export function apiRoutes(app) {
     a.forgetStatus();
     const view = await localView(a, { fresh: true });
     if (view.connected_id) {
+      clearUnusable(view.connected_id); // checking again means trying it again
       await syncIntegration(view.connected_id);
       evaluateAlerts();
     }
@@ -408,10 +410,10 @@ export function apiRoutes(app) {
   });
 
   app.post('/api/claude-tasks', (req, res) => {
-    const { name, instructions } = req.body ?? {};
+    const { name, instructions, folder } = req.body ?? {};
     if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) throw new HttpError(400, 'Give the task a name of 1–80 characters.');
     if (typeof instructions !== 'string' || !instructions.trim() || instructions.length > 2000) throw new HttpError(400, 'Write the instructions, up to 2,000 characters.');
-    const t = startClaudeTask({ name: name.trim(), instructions: instructions.trim() });
+    const t = startClaudeTask({ name: name.trim(), instructions: instructions.trim(), folder: folder || null });
     res.status(201).json({ id: t.id, status: t.status, runner: t.runner });
   });
 

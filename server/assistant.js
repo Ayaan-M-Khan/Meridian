@@ -10,7 +10,7 @@ import { db, getSettings } from './db.js';
 import { ACTION_TOOLS, READ_TOOLS, definition, labelFor, runTool } from './assistant-tools.js';
 import { claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
 import { chooseEngine, listEngines } from './engine-list.js';
-import { logRoute } from './router.js';
+import { classify, logRoute, routeTask } from './router.js';
 import { engineHasTools, runCliEngine } from './engines.js';
 import { FAKE_CALLS } from './adapters/local.js';
 
@@ -85,14 +85,15 @@ export function threadView(id) {
   for (const m of messages) {
     if (m.role === 'user') {
       const textBlocks = typeof m.content === 'string' ? [m.content] : m.content.filter((b) => b.type === 'text').map((b) => b.text);
-      if (textBlocks.length) items.push({ role: 'user', text: textBlocks.join('\n') });
+      if (textBlocks.length) items.push({ role: 'user', text: textBlocks.join('\n'), ...(m.route ? { route: m.route } : {}) });
       continue;
     }
+    const by = m.engine ?? row.engine ?? null;
     for (const b of m.content) {
       if (b.type === 'text' && b.text.trim()) {
         const last = items.at(-1);
-        if (last?.role === 'assistant') last.text += `\n\n${b.text}`;
-        else items.push({ role: 'assistant', text: b.text });
+        if (last?.role === 'assistant' && last.engine === by) last.text += `\n\n${b.text}`;
+        else items.push({ role: 'assistant', text: b.text, engine: by });
       } else if (b.type === 'tool_use' || b.type === 'server_tool_use') {
         items.push({ role: 'action', label: labelFor(b.name, b.input), ok: b.type === 'server_tool_use' ? true : outcome.get(b.id) ?? false });
       }
@@ -189,25 +190,36 @@ export function stopThread(id) {
 }
 
 /** Sends one message and streams the reply. Keeps going after the browser disconnects, so the reply is saved either way. */
-export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
+export async function sendMessage(id, text, emit, { engine: engineId, tried = [], handoff = null } = {}) {
   const row = threadRow(id);
   if (running.has(row.id)) throw new HttpError(409, 'The assistant is still answering in this conversation.');
   const messages = JSON.parse(row.messages);
-  // On Automatic, a conversation goes to the best AI for its first message and stays with it while it's ready.
+  // On Automatic, each new piece of work goes to the AI best suited to it: building to Claude Code, debugging to Codex
+  // or Gemini, git to GitHub Copilot. A conversation stays with the AI already answering when that AI is about as good
+  // for the new message, or the message is a quick follow-up, so it doesn't hop between AIs for "thanks".
   const auto = (engineId ?? getSettings().assistant_engine ?? 'auto') === 'auto';
-  let engine = auto && messages.length && row.engine ? listEngines().find((e) => e.id === row.engine && e.ready) ?? null : null;
-  if (!engine) {
-    engine = chooseEngine(engineId, { text, needsTools: true });
-    if (engine.route) {
-      logRoute('chat', { engine, category: engine.route.category, why: engine.route.why }, text);
-      const route = { engine: engine.id, engine_label: engine.label, category: engine.route.category, category_label: engine.route.label, why: engine.route.why };
-      db.prepare('UPDATE assistant_threads SET route = ? WHERE id = ?').run(JSON.stringify(route), row.id);
-      emit({ type: 'route', ...route });
-    }
+  const current = auto && messages.length && row.engine ? listEngines().find((e) => e.id === row.engine && e.ready) ?? null : null;
+  let engine = null;
+  let route = null;
+  if (current && !tried.length) {
+    const kind = classify(text).category;
+    const r = kind === 'quick' || kind === 'general' ? null : routeTask(text, { needsTools: true });
+    const mine = r?.ranking.find((x) => x.id === current.id);
+    if (!r || (mine && mine.score >= r.ranking[0].score * 0.9)) engine = current;
+    else engine = { ...r.engine, route: { category: r.category, label: r.label, why: r.why } };
+  } else {
+    // `tried`: AIs this message already went to that couldn't take it (see the hand-over below).
+    engine = chooseEngine(engineId, { text, needsTools: true, exclude: tried });
+  }
+  if (engine.route) {
+    logRoute('chat', { engine, category: engine.route.category, why: engine.route.why }, text);
+    route = { engine: engine.id, engine_label: engine.label, category: engine.route.category, category_label: engine.route.label, why: engine.route.why,
+      from: current && current.id !== engine.id ? current.label : null, ...(handoff ? { handoff } : {}) };
+    emit({ type: 'route', ...route });
   }
   const before = messages.length;
   const history = messages.slice();
-  messages.push({ role: 'user', content: text });
+  messages.push({ role: 'user', content: text, ...(route ? { route } : {}) });
   const title = row.title === 'New conversation' ? text.replace(/\s+/g, ' ').trim().slice(0, 70) : row.title;
 
   const tools = [...READ_TOOLS, ...ACTION_TOOLS];
@@ -215,18 +227,25 @@ export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
 
   const ctrl = new AbortController();
   running.set(row.id, ctrl);
-  const save = () =>
-    db.prepare('UPDATE assistant_threads SET title = ?, messages = ?, engine = ?, updated_at = ? WHERE id = ?')
-      .run(messages.length > before ? title : row.title, JSON.stringify(messages), engine.id, nowIso(), row.id);
+  // Until a reply comes back, the conversation stays with the AI that was answering it: if the AI this message went to
+  // fails before replying, the message is handed back to be sent again, and the next try is routed afresh.
+  const save = () => {
+    const replied = messages.length > before;
+    db.prepare('UPDATE assistant_threads SET title = ?, messages = ?, engine = ?, route = COALESCE(?, route), updated_at = ? WHERE id = ?')
+      .run(replied ? title : row.title, JSON.stringify(messages), replied ? engine.id : row.engine ?? null, replied && route ? JSON.stringify(route) : null, nowIso(), row.id);
+  };
 
   if (engine.kind === 'cli') {
     const rec = cliRecorder(messages, emit, save);
+    let handOver = false;
+    let failure = null;
     try {
       const hasTools = engineHasTools(engine.id);
       let prompt = history.length ? `Earlier in this conversation:\n\n${transcriptText(history)}\n\n---\n\nThe person’s new message:\n${text}` : text;
       if (!hasTools) prompt = `Dashboard snapshot (read-only, taken just now):\n${dashboardSnapshot()}\n\n---\n\n${prompt}`;
       const out = await runCliEngine(engine.id, { system: `${system}\n\n${hasTools ? CLI_NOTE : NO_TOOLS_NOTE}`, prompt, tools, emit: rec.emit, signal: ctrl.signal });
       rec.finish(out.text);
+      for (const m of messages.slice(before)) if (m.role === 'assistant') m.engine = engine.id;
       save();
     } catch (err) {
       // Imitation tool calls written as text are not a reply; leave them out of the conversation.
@@ -239,13 +258,26 @@ export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
       if (!gotReply) messages.pop();
       save();
       const unsent = gotReply ? undefined : text;
+      // On Automatic, an AI that couldn't take the message at all (not installed, or its account can't use it)
+      // hands it to the next best one, at most twice.
+      handOver = auto && !gotReply && !isAbort(err) && err.unusable && tried.length < 2;
+      failure = err;
       if (isAbort(err)) emit({ type: 'notice', text: 'Stopped.', unsent });
+      else if (handOver) emit({ type: 'notice', handoff: true, text: `${engine.label} couldn’t answer: ${err.message} Asking the next best AI.` });
       else {
         console.error(`[acc] assistant (${engine.id}):`, err.message);
         emit({ type: 'error', message: err.message, unsent });
       }
     } finally {
       running.delete(row.id);
+    }
+    if (handOver) {
+      try {
+        const note = `${handoff ? `${handoff} ` : ''}${engine.label} couldn’t answer: ${String(failure?.message ?? '').slice(0, 160)}`;
+        return await sendMessage(id, text, emit, { engine: engineId, tried: [...tried, engine.id], handoff: note });
+      } catch (err) {
+        emit({ type: 'error', message: err.message, unsent: text });
+      }
     }
     emit({ type: 'done', thread: threadView(row.id) });
     return;
@@ -258,7 +290,8 @@ export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
   try {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const stream = client.messages.stream(
-        { model: MODEL, max_tokens: 16000, system, tools: defs, messages, cache_control: { type: 'ephemeral' } },
+        // Only role and content go to the API; the app's own notes on each message (which AI, why) stay here.
+        { model: MODEL, max_tokens: 16000, system, tools: defs, messages: messages.map(({ role, content }) => ({ role, content })), cache_control: { type: 'ephemeral' } },
         { signal: ctrl.signal },
       );
       stream.on('text', (delta) => emit({ type: 'text', delta }));
@@ -267,7 +300,7 @@ export async function sendMessage(id, text, emit, { engine: engineId } = {}) {
       });
       const msg = await stream.finalMessage();
       recordUsage(msg.usage, msg.model);
-      messages.push({ role: 'assistant', content: msg.content });
+      messages.push({ role: 'assistant', content: msg.content, engine: engine.id });
       save();
 
       if (msg.stop_reason === 'refusal') {

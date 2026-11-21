@@ -11,6 +11,7 @@ import { syncIntegration } from './sync.js';
 import { evaluateAlerts } from './alerts.js';
 import { cancelClaudeTask, retryClaudeTask, startClaudeTask } from './runner.js';
 import { startTeamTask } from './team.js';
+import { listEngines } from './engine-list.js';
 
 export class ToolInputError extends Error {}
 
@@ -212,15 +213,22 @@ export const ACTION_TOOLS = [
   },
   {
     name: 'start_claude_task',
-    description: 'Start a background task that the assistant carries out on its own, such as drafting a report, writing or rewriting text, analysing the usage data, or planning work. It appears on the Tasks page with live progress and an expected finish time, and its result is saved there. Use it for work that takes more than a quick answer, or when the person asks for a task. It runs through the same AI as this chat and uses that account or key.',
+    description: 'Start a background task that an AI carries out on its own, such as drafting a report, writing or rewriting text, analysing the usage data, planning work, changing files in a folder, or git work (commit, push, pull, branches) in a repository. It appears on the Tasks page with live progress and an expected finish time, and its result is saved there. Use it for work that takes more than a quick answer, or when the person asks for a task. On Automatic it goes to the AI best suited to it: building to Claude Code, debugging to Codex or Gemini, git to GitHub Copilot. For files or git, pass the folder the person named; git tasks may only run git commands there, and force-pushes and hard resets are blocked. Start git work only when the person asked for it.',
     input_schema: obj({
       name: { type: 'string', description: 'Short task name, under 80 characters.' },
       instructions: { type: 'string', description: 'Complete, self-contained instructions. The background task cannot see this chat.' },
+      folder: { type: 'string', description: 'Optional. The full path of the folder or git repository to work in, exactly as the person gave it.' },
     }, ['name', 'instructions']),
     label: (i) => `Started task “${String(i.name ?? '').slice(0, 80)}”`,
     run(input) {
-      const t = startClaudeTask({ name: text(input.name, 'name', 80), instructions: text(input.instructions, 'instructions', 2000) });
-      return { ok: true, task_id: t.id, status: t.status, note: 'It is visible on the Tasks page.' };
+      let t;
+      try {
+        t = startClaudeTask({ name: text(input.name, 'name', 80), instructions: text(input.instructions, 'instructions', 2000), folder: typeof input.folder === 'string' && input.folder.trim() ? input.folder.trim() : null });
+      } catch (err) {
+        throw new ToolInputError(err.message);
+      }
+      const ai = listEngines().find((e) => e.id === t.runner)?.label ?? t.runner;
+      return { ok: true, task_id: t.id, status: t.status, runs_on: ai, note: 'It is visible on the Tasks page.' };
     },
   },
   {

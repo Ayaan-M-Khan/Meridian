@@ -37,7 +37,8 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
   const builtin = adapterOf.get(t.integration_id) === 'claude-assistant';
   const session = t.kind === 'session';
   const team = t.kind === 'team' ? teamView(t) : null;
-  const prev = builtin && t.detail ? parseMeta(t.detail)?.previous : null;
+  const detail = builtin && t.detail ? parseMeta(t.detail) : null;
+  const prev = detail?.previous ?? null;
   // An interactive CLI session has no set end, so it never gets a finish estimate.
   const est = session
     ? estimate({ ...t, status: 'completed' })
@@ -65,6 +66,9 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
     runner_label: !builtin ? null : t.runner === 'team' ? (team?.mode === 'compare' ? 'Ask all' : 'AI team') : adapters[t.runner]?.engine?.label ?? 'Claude API',
     team,
     follows: prev?.task_id ? { id: prev.task_id, name: prev.name } : null,
+    folder: team?.folder ?? detail?.folder ?? null,
+    access: detail?.access ?? null,
+    handoff: detail?.handoff ?? null,
     controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry', 'follow_up'],
   };
 }

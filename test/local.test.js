@@ -317,7 +317,7 @@ test('in a folder, only the builder may change files, and an approved review end
   assert.equal(done.status, 'completed', done.error ?? '');
   const calls = fs.readFileSync(path.join(dir, 'calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(calls.map((c) => c.role), ['Planner', 'Builder', 'Reviewer']);
-  for (const c of calls) assert.equal(path.resolve(c.cwd), path.resolve(project), 'every member works in the folder');
+  for (const c of calls) assert.equal(path.resolve(c.cwd), fs.realpathSync.native(project), 'every member works in the folder (its full path)');
   assert.equal(calls[0].tools, 'Read,Glob,Grep');
   assert.equal(calls[0].acceptEdits, false);
   assert.equal(calls[1].tools, 'Read,Glob,Grep,Edit,Write');
@@ -737,5 +737,231 @@ test('updates: release links under the repository’s old name are still trusted
     delete globalThis.accInstallUpdate;
     setRaw('update_check', undefined);
     db.prepare("DELETE FROM notifications WHERE kind = 'update'").run();
+  }
+});
+
+test('routing by kind of work: building to Claude Code, debugging to Codex and Gemini, git to GitHub Copilot', async () => {
+  const { classify, routeTask, forgetReliability } = await import('../server/router.js');
+  assert.equal(classify('Commit my changes and push them to origin').category, 'git');
+  assert.equal(classify('Pull the latest from main and merge the branch').category, 'git');
+  assert.equal(classify('Open a pull request for the login fix').category, 'git');
+  assert.equal(classify('Fix this TypeError crash in the checkout page').category, 'debug');
+  assert.equal(classify('Build me a landing page app with a pricing section').category, 'code');
+  assert.equal(classify('Add push notifications to my mobile app').category, 'code', 'push notifications are building, not git');
+
+  const now = new Date().toISOString();
+  const add = (adapter, name) => Number(db.prepare("INSERT INTO integrations(adapter, name, status, created_at) VALUES(?, ?, 'ok', ?)").run(adapter, name, now).lastInsertRowid);
+  const ids = [add('codex', 'Codex'), add('gemini-cli', 'Gemini CLI'), add('copilot-cli', 'GitHub Copilot')];
+  try {
+    forgetReliability();
+    assert.equal(routeTask('Build me a landing page app with a pricing section').engine.id, 'claude-code');
+    const debug = routeTask('Fix this TypeError crash in the checkout page');
+    assert.ok(['codex', 'gemini-cli'].includes(debug.engine.id), `debugging goes to Codex or Gemini, not ${debug.engine.id}`);
+    assert.deepEqual(debug.ranking.slice(0, 2).map((x) => x.id).sort(), ['codex', 'gemini-cli']);
+    const git = routeTask('Commit my changes and push them to origin', { needsGit: true });
+    assert.equal(git.engine.id, 'copilot-cli');
+    assert.deepEqual(git.ranking.map((x) => x.id).sort(), ['claude-code', 'copilot-cli'], 'only AIs that can be limited to git get git work');
+    assert.equal(routeTask('Commit my changes and push them to origin').engine.id, 'copilot-cli', 'git questions in the chat go to Copilot too');
+    db.prepare("UPDATE integrations SET status = 'signin' WHERE adapter = 'copilot-cli'").run();
+    assert.equal(routeTask('Commit my changes and push them', { needsGit: true }).engine.id, 'claude-code', 'without Copilot, Claude Code does git');
+  } finally {
+    for (const i of ids) db.prepare('DELETE FROM integrations WHERE id = ?').run(i);
+    forgetReliability();
+  }
+});
+
+test('git access: only git commands, and never force-push or hard reset', () => {
+  const cp = copilotCli.engine.invocation({ system: 'S', prompt: 'P', access: 'git' }).args.join(' ');
+  assert.match(cp, /--allow-tool shell\(git:\*\)/, 'every git subcommand, not just a bare git');
+  assert.match(cp, /--deny-tool shell\(git reset\)/);
+  assert.match(cp, /--deny-tool shell\(git clean\)/);
+  assert.doesNotMatch(cp, /shell\(git push --force\)/, 'Copilot rules can’t match flags; the push check stops force-pushes');
+  assert.match(cp, /--deny-tool write/);
+  assert.doesNotMatch(cp, /--deny-tool shell(?!\()/, 'git access doesn’t deny every command, only the dangerous git ones');
+  const cc = claudeCode.engine.invocation({ system: 'S', prompt: 'P', access: 'git', mcp: { claudeConfigPath: 'x' } }).args;
+  assert.equal(cc[cc.indexOf('--tools') + 1], 'Read,Glob,Grep,Bash');
+  assert.equal(cc[cc.indexOf('--allowedTools') + 1], 'mcp__acc,Bash(git:*)');
+  assert.match(cc[cc.indexOf('--disallowedTools') + 1], /Bash\(git reset:\*\).*Bash\(git clean:\*\).*Bash\(git push --force:\*\)/);
+});
+
+test('a git task runs in its folder with git access, and its folder shows on the task', async () => {
+  const { forgetReliability } = await import('../server/router.js');
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo, { recursive: true });
+  const log = path.join(tmp, 'git-task.log');
+  process.env.FAKE_CLAUDE_LOG = log;
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Committed 2 files as abc123, “Fix login”.' });
+  forgetReliability();
+  try {
+    const t = startClaudeTask({ name: 'Commit and push', instructions: 'Commit my changes with a clear message and push them to origin.', folder: repo });
+    const done = await waitFor(() => {
+      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(t.id);
+      return row.status === 'completed' || row.status === 'failed' ? row : null;
+    });
+    assert.equal(done.status, 'completed', done.error ?? '');
+    assert.equal(done.runner, 'claude-code', 'Copilot isn’t connected here, so Claude Code does git');
+    const calls = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.args);
+    const call = calls.at(-1);
+    assert.equal(call.args[call.args.indexOf('--allowedTools') + 1], 'mcp__acc,Bash(git:*)');
+    assert.match(call.args[call.args.indexOf('--system-prompt') + 1], /git/i);
+    assert.equal(call.gitHooks?.key, 'core.hooksPath', 'pushes go through the push check');
+    const view = buildState().tasks.find((x) => x.id === t.id);
+    assert.equal(view.folder, fs.realpathSync.native(repo), 'the folder’s full path');
+    assert.equal(view.access, 'git');
+    assert.throws(() => startClaudeTask({ name: 'x', instructions: 'Commit everything', folder: 'relative/path' }));
+  } finally {
+    delete process.env.FAKE_CLAUDE_LOG;
+  }
+});
+
+test('in the chat on Automatic, a new kind of request goes to the best AI, and each reply says which AI wrote it', async () => {
+  const { setRaw, getSettings } = await import('../server/db.js');
+  const { forgetReliability } = await import('../server/router.js');
+  const { codex } = await import('../server/adapters/local.js');
+  setRaw('settings', { ...getSettings(), assistant_engine: 'auto' });
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Here you go.' });
+  const codexId = Number(db.prepare("INSERT INTO integrations(adapter, name, status, created_at) VALUES('codex', 'Codex', 'ok', ?)").run(new Date().toISOString()).lastInsertRowid);
+  const saved = { resolve: codex.resolve, engine: codex.engine };
+  forgetReliability();
+  try {
+    const thread = createThread();
+    const first = [];
+    await sendMessage(thread.id, 'Build a React component for the pricing table', (e) => first.push(e));
+    assert.equal(first.find((e) => e.type === 'route')?.engine, 'claude-code');
+    const thanks = [];
+    await sendMessage(thread.id, 'thanks!', (e) => thanks.push(e));
+    assert.ok(!thanks.some((e) => e.type === 'route'), 'a quick follow-up stays with the same AI');
+
+    // Codex isn't installed here: the debugging request goes to it, and Codex hands it to the next best AI.
+    codex.resolve = () => null;
+    const failed = [];
+    await sendMessage(thread.id, 'Now debug this TypeError crash when the table loads', (e) => failed.push(e));
+    assert.deepEqual(failed.filter((e) => e.type === 'route').map((e) => e.engine), ['codex', 'claude-code'], 'debugging goes to Codex, then on');
+    assert.equal(failed.find((e) => e.type === 'route').from, 'Claude Code');
+    assert.match(failed.find((e) => e.type === 'notice')?.text ?? '', /Codex couldn’t answer: Codex isn’t installed/);
+    assert.equal(threadView(thread.id).engine, 'claude-code');
+
+    // Now Codex answers (played by the stand-in, speaking Claude Code's format).
+    codex.resolve = claudeCode.resolve;
+    codex.engine = { ...claudeCode.engine, label: saved.engine.label };
+    const debug = [];
+    await sendMessage(thread.id, 'Now debug this TypeError crash when the table loads', (e) => debug.push(e));
+    assert.equal(debug.find((e) => e.type === 'route')?.engine, 'codex');
+    const v = threadView(thread.id);
+    assert.equal(v.engine, 'codex');
+    const replies = v.items.filter((it) => it.role === 'assistant');
+    assert.deepEqual([replies[0].engine, replies.at(-1).engine], ['claude-code', 'codex'], 'each reply keeps the AI that wrote it');
+    assert.equal(v.items.filter((it) => it.role === 'user').at(-1).route?.engine, 'codex', 'the request says where it went');
+    const after = [];
+    await sendMessage(thread.id, 'ok, and add a test for it', (e) => after.push(e));
+    assert.equal(threadView(thread.id).engine, 'codex', 'a follow-up stays with the AI now answering when it’s about as good');
+  } finally {
+    Object.assign(codex, saved);
+    db.prepare('DELETE FROM integrations WHERE id = ?').run(codexId);
+    forgetReliability();
+  }
+});
+
+test('a preferred AI that can’t run git is passed over for git work, with the reason', async () => {
+  const { routeTask, forgetReliability } = await import('../server/router.js');
+  const { setRaw, getSettings } = await import('../server/db.js');
+  const codexId = Number(db.prepare("INSERT INTO integrations(adapter, name, status, created_at) VALUES('codex', 'Codex', 'ok', ?)").run(new Date().toISOString()).lastInsertRowid);
+  forgetReliability();
+  try {
+    setRaw('settings', { ...getSettings(), route_prefs: { git: 'codex' } });
+    const r = routeTask('Commit my changes and push them', { needsGit: true });
+    assert.equal(r.engine.id, 'claude-code');
+    assert.match(r.why, /Your choice, Codex, was skipped for now: it can’t be limited to git commands/);
+    assert.equal(routeTask('How do I undo my last commit?').engine.id, 'codex', 'a git question without a folder can still go to it');
+  } finally {
+    setRaw('settings', { ...getSettings(), route_prefs: {} });
+    db.prepare('DELETE FROM integrations WHERE id = ?').run(codexId);
+    forgetReliability();
+  }
+});
+
+test('an AI whose account can’t use it is marked not ready, and its task and chat go to the next best AI', async () => {
+  const { forgetReliability } = await import('../server/router.js');
+  const { listEngines } = await import('../server/engine-list.js');
+  const { stillBlocked } = await import('../server/blocked.js');
+  const { setRaw, getSettings } = await import('../server/db.js');
+  setRaw('settings', { ...getSettings(), assistant_engine: 'auto' });
+  const MOVED = 'Google no longer lets personal accounts use Gemini CLI. Connect “Gemini (Antigravity)” to use Gemini with this Google account.';
+  const saved = { resolve: geminiCli.resolve, engine: geminiCli.engine };
+  // Gemini CLI answers every run with Google's "move to Antigravity" error, as it does for personal accounts.
+  geminiCli.resolve = claudeCode.resolve;
+  geminiCli.engine = { ...saved.engine, invocation: claudeCode.engine.invocation, parser: () => ({ onLine() {}, finish: () => ({ unusable: true, error: MOVED }) }) };
+  const gid = Number(db.prepare("INSERT INTO integrations(adapter, name, status, created_at) VALUES('gemini-cli', 'Gemini CLI', 'ok', ?)").run(new Date().toISOString()).lastInsertRowid);
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'The bug: add subtracts. Use a + b.' });
+  forgetReliability();
+  try {
+    const t = startClaudeTask({ name: 'Fix add', instructions: 'Debug this: add(2, 3) returns -1 instead of 5.' });
+    assert.equal(t.runner, 'gemini-cli', 'debugging goes to Gemini first');
+    const done = await waitFor(() => {
+      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(t.id);
+      return row.status === 'completed' || row.status === 'failed' ? row : null;
+    });
+    assert.equal(done.status, 'completed', done.error ?? '');
+    assert.equal(done.runner, 'claude-code', 'Claude Code took it over');
+    const view = buildState().tasks.find((x) => x.id === t.id);
+    assert.match(view.handoff, /Gemini CLI couldn’t take it \(Google no longer lets personal accounts.*\), so Claude Code took over\./);
+    const g = listEngines().find((e) => e.id === 'gemini-cli');
+    assert.equal(g.ready, false);
+    assert.equal(g.reason, MOVED, 'the reason says what’s wrong');
+
+    const row = db.prepare('SELECT * FROM integrations WHERE id = ?').get(gid);
+    assert.ok(stillBlocked(row, { signin_id: null }), 'the same sign-in stays blocked');
+    assert.equal(stillBlocked(row, { signin_id: 'Google account|work@example.com' }), null, 'another sign-in lifts it');
+
+    // The chat, when the mark isn't there yet: the message goes to Gemini, which can't answer, then to the next best.
+    db.prepare("UPDATE integrations SET status = 'ok', last_error = NULL, meta = NULL WHERE id = ?").run(gid);
+    const thread = createThread();
+    const ev = [];
+    await sendMessage(thread.id, 'Debug this TypeError crash in my checkout page', (e) => ev.push(e));
+    const routes = ev.filter((e) => e.type === 'route').map((e) => e.engine);
+    assert.deepEqual(routes, ['gemini-cli', 'claude-code']);
+    assert.match(ev.find((e) => e.type === 'notice')?.text ?? '', /Gemini CLI couldn’t answer: Google no longer.*Asking the next best AI\./);
+    assert.ok(!ev.some((e) => e.type === 'error'));
+    const v = threadView(thread.id);
+    assert.equal(v.engine, 'claude-code');
+    assert.equal(v.items.filter((it) => it.role === 'user').length, 1, 'the message is in the conversation once');
+    assert.equal(v.items.find((it) => it.role === 'assistant')?.engine, 'claude-code');
+    assert.match(v.items.find((it) => it.role === 'user').route?.handoff ?? '', /^Gemini CLI couldn’t answer: Google no longer/, 'the request’s routing note says why it moved');
+  } finally {
+    Object.assign(geminiCli, saved);
+    db.prepare('DELETE FROM integrations WHERE id = ?').run(gid);
+    forgetReliability();
+  }
+});
+
+test('a quick follow-up stays with the AI that did the task; new work in a follow-up is routed afresh', async () => {
+  const { followUpTask } = await import('../server/runner.js');
+  const { forgetReliability } = await import('../server/router.js');
+  const { setRaw, getSettings } = await import('../server/db.js');
+  setRaw('settings', { ...getSettings(), assistant_engine: 'auto' });
+  const cid = Number(db.prepare("INSERT INTO integrations(adapter, name, status, created_at) VALUES('copilot-cli', 'GitHub Copilot', 'ok', ?)").run(new Date().toISOString()).lastInsertRowid);
+  const resolve = copilotCli.resolve;
+  copilotCli.resolve = () => null; // never runs the real Copilot here
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'A steel bottle that keeps drinks cold all day.' });
+  forgetReliability();
+  const settle = (id) => waitFor(() => {
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    return row.status === 'completed' || row.status === 'failed' ? row : null;
+  });
+  try {
+    const first = startClaudeTask({ name: 'Bottle copy', instructions: 'Write a two-sentence product description for a steel water bottle.' });
+    assert.equal(first.runner, 'claude-code', 'writing goes to Claude Code');
+    await settle(first.id);
+    const quick = followUpTask(first.id, 'Make it one sentence.');
+    const q = await settle(quick.task_id);
+    assert.equal(q.runner, 'claude-code', 'a quick follow-up isn’t sent to the quick-answers AI');
+    assert.equal(q.status, 'completed');
+    followUpTask(first.id, 'Now commit my changes and push them to origin.');
+    assert.equal(db.prepare("SELECT engine FROM routing_log WHERE kind = 'task' ORDER BY id DESC LIMIT 1").get().engine, 'copilot-cli', 'git work goes to Copilot');
+    await waitFor(() => db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE status IN ('running', 'queued') AND runner IS NOT NULL AND runner != 'team'").get().n === 0 || null);
+  } finally {
+    copilotCli.resolve = resolve;
+    db.prepare('DELETE FROM integrations WHERE id = ?').run(cid);
+    forgetReliability();
   }
 });

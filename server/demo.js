@@ -145,7 +145,7 @@ export function demoState(now = new Date()) {
     description: null, progress: null, step: null, started_at: null, eta: null,
     eta_at: null, eta_source: null, stalled: false, overdue: false, longer_than_usual: false, typical_ms: null,
     scheduled_for: null, finished_at: null, error: null, has_result: false,
-    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, team: null, follows: null, controls: [], ...extra,
+    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, team: null, follows: null, folder: null, access: null, handoff: null, controls: [], ...extra,
   });
   const stage = (key, label, role, engine, engine_label, status, extra = {}) => ({ key, label, role, engine, engine_label, status, started_at: null, finished_at: null, verdict: undefined, note: undefined, error: undefined, ...extra });
   const tasks = [

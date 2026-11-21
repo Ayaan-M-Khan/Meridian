@@ -112,8 +112,20 @@ export function cleanFolder(f) {
     throw new HttpError(400, 'That folder doesn’t exist.');
   }
   if (!st.isDirectory()) throw new HttpError(400, 'That path is a file, not a folder.');
-  if (p === path.parse(p).root || p === os.homedir()) throw new HttpError(400, 'Choose a project folder, not a whole drive or your home folder.');
-  const data = path.resolve(DATA_DIR);
+  return checkFolder(fs.realpathSync.native(p));
+}
+
+const realPath = (q) => {
+  try {
+    return fs.realpathSync.native(q);
+  } catch {
+    return path.resolve(q);
+  }
+};
+
+function checkFolder(p) {
+  if (p === path.parse(p).root || p === realPath(os.homedir())) throw new HttpError(400, 'Choose a project folder, not a whole drive or your home folder.');
+  const data = realPath(DATA_DIR);
   if (p.startsWith(data) || data.startsWith(p + path.sep)) throw new HttpError(400, 'Choose a folder outside the app’s own data folder.');
   return p;
 }

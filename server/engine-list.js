@@ -18,7 +18,7 @@ const NOT_READY = {
 };
 
 export function listEngines() {
-  const ints = db.prepare('SELECT id, adapter, enabled, status FROM integrations').all();
+  const ints = db.prepare('SELECT id, adapter, enabled, status, last_error FROM integrations').all();
   const out = LOCAL_ADAPTERS.map((a) => {
     const i = ints.find((x) => x.adapter === a.id);
     const ready = Boolean(i?.enabled && i.status === 'ok');
@@ -29,13 +29,15 @@ export function listEngines() {
       vendor: a.vendor,
       kind: 'cli',
       tools: a.engine.mcp !== false,
+      git: Boolean(a.engine.gitAccess),
       integration_id: i?.id ?? null,
       ready,
-      reason: ready ? null : !i ? `Connect ${a.name} first.` : !i.enabled ? `${a.name} is turned off.` : (NOT_READY[i.status] ?? NOT_READY.error)(a.name),
+      reason: ready ? null : !i ? `Connect ${a.name} first.` : !i.enabled ? `${a.name} is turned off.`
+        : i.status === 'error' && i.last_error ? i.last_error : (NOT_READY[i.status] ?? NOT_READY.error)(a.name),
     };
   });
   const api = hasClaudeApi();
-  out.push({ id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', tools: true, integration_id: null, ready: api, reason: api ? null : 'Add a Claude API key in Settings.' });
+  out.push({ id: 'claude-api', label: 'Claude API', via: 'your Claude API key', vendor: 'Anthropic', kind: 'api', tools: true, git: false, integration_id: null, ready: api, reason: api ? null : 'Add a Claude API key in Settings.' });
   return out.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 }
 
@@ -44,7 +46,7 @@ export function listEngines() {
  * (router.js) when there's text to judge by, else the first that is ready. Throws a readable error.
  * A routed engine carries `route`: { category, label, why }.
  */
-export function chooseEngine(id, { text = null, needsTools = false } = {}) {
+export function chooseEngine(id, { text = null, needsTools = false, needsFiles = false, needsGit = false, exclude = [] } = {}) {
   const want = id ?? getSettings().assistant_engine ?? 'auto';
   const list = listEngines();
   if (want !== 'auto') {
@@ -54,8 +56,10 @@ export function chooseEngine(id, { text = null, needsTools = false } = {}) {
     return e;
   }
   if (text) {
-    const r = routeTask(text, { needsTools });
+    const r = routeTask(text, { needsTools, needsFiles, needsGit, exclude });
     if (r) return { ...r.engine, route: { category: r.category, label: r.label, why: r.why } };
+    if (needsGit) throw new HttpError(400, 'Git work needs GitHub Copilot or Claude Code connected and signed in on this computer.');
+    if (needsFiles) throw new HttpError(400, 'Working in a folder needs an AI app on this computer: Claude Code, Codex, Gemini, GitHub Copilot or Cursor.');
   }
   const e = list.find((x) => x.ready);
   if (!e) throw new HttpError(400, 'To use the assistant, connect Claude Code, Codex, Gemini, GitHub Copilot or Cursor with your account, or add a Claude API key in Settings.');

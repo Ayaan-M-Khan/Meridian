@@ -10,7 +10,8 @@
  *   login / install   commands the app can open in a console window for you
  *
  * engine.invocation({ system, prompt, mcp, access }) builds one run. access is what the CLI may do in the folder it
- * runs in: 'none' (only this app's functions), 'read' (read files) or 'edit' (read, create and change files).
+ * runs in: 'none' (only this app's functions), 'read' (read files), 'edit' (read, create and change files) or 'git'
+ * (read files and run git commands only; engines with engine.gitAccess). Force-pushes and hard resets are refused.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +20,15 @@ import { readClaudeCode, readCodex, readCopilot, readGemini, copilotHome, gemini
 import { AdapterError, nowIso } from '../util.js';
 
 const STATUS_TTL_MS = 60_000;
+/** Git commands no AI may run here, even with git access: they throw work away or rewrite shared history. */
+/**
+ * Git subcommands no AI may run here, even with git access: they throw work away or rewrite history. The AI apps'
+ * rules match subcommands, not flags, so these are refused whole (git restore --staged unstages instead of git reset).
+ * Force-pushes are stopped by the push check (local/git-guard.js), whatever flags are used.
+ */
+export const GIT_REFUSED = ['git reset', 'git clean', 'git filter-branch', 'git filter-repo'];
+/** Claude Code's rules match by prefix, so the usual force forms are refused up front as well. */
+const GIT_REFUSED_PREFIXES = ['git push --force', 'git push -f', 'git push --force-with-lease', 'git push --no-verify', 'git branch -D'];
 const statusCache = new Map();
 
 const tryJson = (s) => {
@@ -127,12 +137,17 @@ export const claudeCode = local({
     via: 'your Claude account',
     modelArgs: (m) => ['--model', m],
     modelHint: 'opus, sonnet or haiku, or a full model name',
+    gitAccess: true,
     invocation({ system, prompt, mcp, access = 'none' }) {
-      // Built-in tools: none, read-only ones, or file edits too (accepted without asking). Never shell commands.
-      const tools = { none: '', read: 'Read,Glob,Grep', edit: 'Read,Glob,Grep,Edit,Write' }[access] ?? '';
+      // Built-in tools: none, read-only ones, file edits too (accepted without asking), or git commands. Shell commands
+      // only for git, and only in 'git' access.
+      const tools = { none: '', read: 'Read,Glob,Grep', edit: 'Read,Glob,Grep,Edit,Write', git: 'Read,Glob,Grep,Bash' }[access] ?? '';
       const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--system-prompt', system, '--strict-mcp-config', '--tools', tools];
       if (access === 'edit') args.push('--permission-mode', 'acceptEdits');
-      if (mcp) args.push('--mcp-config', mcp.claudeConfigPath, '--allowedTools', 'mcp__acc');
+      const allowed = [mcp ? 'mcp__acc' : null, access === 'git' ? 'Bash(git:*)' : null].filter(Boolean);
+      if (mcp) args.push('--mcp-config', mcp.claudeConfigPath);
+      if (allowed.length) args.push('--allowedTools', allowed.join(','));
+      if (access === 'git') args.push('--disallowedTools', [...GIT_REFUSED, ...GIT_REFUSED_PREFIXES].map((c) => `Bash(${c}:*)`).join(','));
       return { args, input: prompt };
     },
     parser(emit) {
@@ -314,6 +329,7 @@ export const geminiCli = local({
     const s = geminiSignIn();
     return {
       signed_in: Boolean(s),
+      signin_id: s ? `${s.method}|${s.email ?? ''}` : null,
       account: s ? { email: s.email ?? null, plan: null, method: s.method, org: null } : null,
       detail: s ? null : 'Gemini CLI is installed but not signed in.',
     };
@@ -338,7 +354,7 @@ export const geminiCli = local({
         onLine() {},
         finish(run) {
           const all = `${run.stdout}\n${run.stderr}`;
-          if (GEMINI_MOVED.test(all)) return { error: 'Google no longer lets personal accounts use Gemini CLI. Connect “Gemini (Antigravity)” to use Gemini with this Google account.' };
+          if (GEMINI_MOVED.test(all)) return { unusable: true, error: 'Google no longer lets personal accounts use Gemini CLI. Connect “Gemini (Antigravity)” to use Gemini with this Google account.' };
           const start = run.stdout.indexOf('{');
           const j = start >= 0 ? tryJson(run.stdout.slice(start)) : null;
           if (j?.error) return { error: j.error.message ?? String(j.error) };
@@ -506,9 +522,16 @@ export const copilotCli = local({
     via: 'your GitHub account',
     modelArgs: (m) => [`--model=${m}`],
     modelHint: 'a model your Copilot plan offers',
+    gitAccess: true,
     invocation({ system, prompt, mcp, access = 'none' }) {
-      const args = ['-p', clip(`${system}\n\n---\n\n${prompt}`), '-s', '--no-ask-user', '--deny-tool', 'shell'];
-      args.push(access === 'edit' ? '--allow-tool' : '--deny-tool', 'write');
+      const args = ['-p', clip(`${system}\n\n---\n\n${prompt}`), '-s', '--no-ask-user'];
+      if (access === 'git') {
+        // Only git, nothing else on the command line; destructive git commands are refused outright.
+        // Copilot matches git by its subcommand: "shell(git)" is a bare `git` only, "shell(git:*)" every git command.
+        args.push('--allow-tool', 'shell(git:*)', ...GIT_REFUSED.flatMap((c) => ['--deny-tool', `shell(${c})`]), '--deny-tool', 'write');
+      } else {
+        args.push('--deny-tool', 'shell', access === 'edit' ? '--allow-tool' : '--deny-tool', 'write');
+      }
       if (mcp) {
         const server = { type: 'local', command: mcp.command, args: mcp.args, env: mcp.env, tools: ['*'] };
         args.push('--additional-mcp-config', JSON.stringify({ mcpServers: { acc: server } }), '--allow-tool', 'acc');

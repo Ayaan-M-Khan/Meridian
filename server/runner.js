@@ -10,12 +10,12 @@ import { recordProgress } from './eta.js';
 import { evaluateAlerts } from './alerts.js';
 import { READ_TOOLS, ToolInputError, definition, runTool } from './assistant-tools.js';
 import { assistantIntegration, claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
-import { chooseEngine } from './engine-list.js';
-import { classify, logRoute } from './router.js';
+import { chooseEngine, listEngines } from './engine-list.js';
+import { classify, logRoute, routeTask } from './router.js';
 import { engineHasTools, runCliEngine } from './engines.js';
 import { dashboardSnapshot } from './assistant.js';
 import { randomToken } from './crypto.js';
-import { cancelTeamTask, previousContext, retryTeamTask, startTeamTask } from './team.js';
+import { cancelTeamTask, cleanFolder, previousContext, retryTeamTask, startTeamTask } from './team.js';
 import { HttpError, nowIso } from './util.js';
 
 const MAX_PARALLEL = 2;
@@ -25,6 +25,11 @@ const active = new Map(); // task id -> AbortController
 const queue = [];
 
 const CLI_NOTE = 'The only tools you have are this app’s functions (from the "acc" server). Don’t run commands, read or write files, or browse.';
+
+/** What a task in a folder may do there: change files, or run git and nothing else. */
+const FOLDER_NOTE = (access, folder) => (access === 'git'
+  ? `You’re working in the git repository at ${folder}. You may read its files and run git commands there (status, diff, log, add, commit, pull, push, fetch, branch, switch, merge, stash, tag), and use this app’s functions. Don’t change files yourself and don’t run any other commands. Never force-push, skip hooks (--no-verify), delete remote branches, discard changes or rewrite history: git reset, git clean and force-pushes are blocked (unstage with git restore --staged). If a push is refused, stop and explain why instead of forcing it. Before committing, look at git status and git diff, and write a clear, specific commit message. If a pull, merge or push needs credentials, hits a conflict or fails, stop and explain what happened instead of working around it. End with what you ran and what changed.`
+  : `You’re working in the folder ${folder}. You may read, create and change files in it, and use this app’s functions. Don’t run shell commands. End with a short summary of what you changed, file by file.`);
 
 const SYSTEM = `You are carrying out a background task for the person who uses Meridian, a dashboard that tracks their AI tools, spending and tasks. Nobody is watching live, so work through the task to the end without asking questions; if something is ambiguous, make a sensible choice and say what you assumed.
 
@@ -79,14 +84,26 @@ function setStatus(id, status, fields = {}) {
 const CANCELLED = 'Cancelled from Meridian.';
 
 /** Creates the task and starts it, or queues it when two are already running. */
-export function startClaudeTask({ name, instructions, engine: engineId, previous = null }) {
+export function startClaudeTask({ name, instructions, engine: engineId, previous = null, folder = null }) {
+  // With a folder, git requests may run git there (GitHub Copilot or Claude Code), and other work may change files.
+  const dir = cleanFolder(folder);
+  const git = Boolean(dir) && classify(`${name}\n${instructions}`).category === 'git';
   // On Automatic, the task goes to the best AI for it. Fails early, with a readable message, when nothing is ready.
-  const engine = chooseEngine(engineId, { text: `${name}\n${instructions}`, needsTools: true });
+  const engine = chooseEngine(engineId, { text: `${name}\n${instructions}`, needsTools: true, needsFiles: Boolean(dir), needsGit: git });
+  if (dir && engine.kind !== 'cli') throw new HttpError(400, 'Working in a folder needs an AI app on this computer, not the Claude API.');
+  if (git && !engine.git) throw new HttpError(400, `${engine.label} can’t be limited to git commands. Use Automatic, GitHub Copilot or Claude Code for git work.`);
+  const access = !dir ? 'none' : git ? 'git' : 'edit';
   if (engine.route) logRoute('task', { engine, category: engine.route.category, why: engine.route.why }, name);
   const integ = assistantIntegration();
   if (!integ.enabled) throw new HttpError(409, 'The built-in assistant tool is turned off on the AI Tools page.');
   const now = nowIso();
-  const detail = previous?.result ? JSON.stringify({ previous: { task_id: previous.task_id ?? null, name: String(previous.name ?? '').slice(0, 80), request: previous.request ?? null, result: previous.result } }) : null;
+  const detail = previous?.result || dir || engine.route
+    ? JSON.stringify({
+        ...(previous?.result ? { previous: { task_id: previous.task_id ?? null, name: String(previous.name ?? '').slice(0, 80), request: previous.request ?? null, result: previous.result } } : {}),
+        ...(dir ? { folder: dir, access } : {}),
+        ...(engine.route ? { routed: true } : {}),
+      })
+    : null;
   const { lastInsertRowid } = db
     .prepare(
       `INSERT INTO tasks(integration_id, external_id, name, description, status, progress, runner, category, detail, created_at, updated_at)
@@ -118,6 +135,7 @@ async function execute(id) {
   recordProgress(id, 0);
   const tools = [...READ_TOOLS, progressTool(id)];
   const previous = readPrevious(task);
+  const work = readWork(task);
   const brief = `Task: ${task.name}\n\nInstructions:\n${task.description}${previous ? `\n\n---\n\n${previousContext(previous)}` : ''}`;
 
   if (task.runner && task.runner !== 'claude-api') {
@@ -125,17 +143,27 @@ async function execute(id) {
       // An engine without the app's functions gets a snapshot of the dashboard and can't report progress itself.
       const hasTools = engineHasTools(task.runner);
       const out = await runCliEngine(task.runner, {
-        system: `${SYSTEM}\n\n${hasTools ? CLI_NOTE : 'You can’t call this app’s functions here; a snapshot of the dashboard comes with the task. Don’t run commands or touch files.'}\n\nThe current time is ${nowIso().slice(0, 16)} UTC.`,
+        system: `${SYSTEM}\n\n${work.folder ? FOLDER_NOTE(work.access, work.folder) : hasTools ? CLI_NOTE : 'You can’t call this app’s functions here; a snapshot of the dashboard comes with the task. Don’t run commands or touch files.'}\n\nThe current time is ${nowIso().slice(0, 16)} UTC.`,
         prompt: hasTools ? brief : `Dashboard snapshot (read-only):\n${dashboardSnapshot()}\n\n---\n\n${brief}`,
         tools,
         signal: ctrl.signal,
         timeoutMs: CLI_TIMEOUT_MS,
+        folder: work.folder,
+        access: work.access ?? 'none',
       });
       const finalText = out.text.trim();
       if (!finalText) throw new Error('The assistant finished without writing a result.');
       setStatus(id, 'completed', { progress: 100, step: null, result: finalText.slice(0, 100_000), finished_at: nowIso(), error: null });
     } catch (err) {
-      setStatus(id, 'failed', { step: null, finished_at: nowIso(), error: isAbort(err) ? CANCELLED : err.message });
+      const next = !isAbort(err) && err.unusable ? handOver(task, work, err.message) : null;
+      if (next) {
+        // The AI Automatic chose couldn't take the task at all (nothing ran): the next best one gets it.
+        save(id, { runner: next.engine.id, detail: JSON.stringify(next.detail) });
+        setStatus(id, 'queued', { step: null, progress: null });
+        queue.unshift(id);
+      } else {
+        setStatus(id, 'failed', { step: null, finished_at: nowIso(), error: isAbort(err) ? CANCELLED : err.message });
+      }
     } finally {
       active.delete(id);
       pump();
@@ -218,11 +246,40 @@ export function retryClaudeTask(id) {
   if (t.status === 'running' || t.status === 'queued') throw new ToolInputError(`“${t.name}” is still ${t.status}.`);
   let next;
   try {
-    next = startClaudeTask({ name: t.name, instructions: t.description ?? '', previous: readPrevious(t) });
+    next = startClaudeTask({ name: t.name, instructions: t.description ?? '', previous: readPrevious(t), folder: readWork(t).folder });
   } catch (err) {
     throw new ToolInputError(err.message);
   }
   return { ok: true, task_id: next.id, status: next.status };
+}
+
+/** The folder a task works in, and what it may do there. */
+function readWork(t) {
+  let d = null;
+  try {
+    d = JSON.parse(t.detail ?? 'null');
+  } catch {
+    d = null;
+  }
+  return { ...(d ?? {}), folder: d?.folder ?? null, access: d?.access ?? null };
+}
+
+const save = (id, cols) => db.prepare(`UPDATE tasks SET ${Object.keys(cols).map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...Object.values(cols), id);
+
+/**
+ * When the AI that Automatic picked for a task can't take it at all (not installed, or its account can't use it),
+ * the next best ready AI for the same work gets it, at most twice. A task you sent to a specific AI isn't moved.
+ */
+function handOver(task, work, message) {
+  if (!work.routed) return null;
+  const tried = [...(work.tried ?? []), task.runner];
+  if (tried.length > 2) return null;
+  const r = routeTask(`${task.name}\n${task.description}`, { needsTools: true, needsFiles: Boolean(work.folder), needsGit: work.access === 'git', exclude: tried });
+  if (!r) return null;
+  const was = listEngines().find((e) => e.id === task.runner)?.label ?? task.runner;
+  const note = `${work.handoff ? `${work.handoff} ` : ''}${was} couldn’t take it (${String(message).slice(0, 160)}), so ${r.engine.label} took over.`;
+  const { folder, access, ...rest } = work;
+  return { engine: r.engine, detail: { ...rest, ...(folder ? { folder, access } : {}), tried, handoff: note } };
 }
 
 function readPrevious(t) {
@@ -255,9 +312,14 @@ export function followUpTask(id, text) {
   const clipped = result.length > RESULT_CONTEXT_LIMIT ? `${result.slice(0, RESULT_CONTEXT_LIMIT)}\n\n[…the rest of the result is left out for length]` : result;
   const previous = { task_id: t.id, name: t.name, request: String((team ? detail.goal : t.description) ?? '').slice(0, 4000) || null, result: clipped };
   const name = `Follow-up: ${t.name.replace(/^Follow-up: /, '')}`.slice(0, 80);
+  // On Automatic, a quick follow-up ("make it shorter") stays with the AI that did the task, like a quick reply in the
+  // chat; a new kind of work ("now commit it") is routed afresh.
+  const kind = classify(text).category;
+  const same = !team && t.status === 'completed' && (getSettings().assistant_engine ?? 'auto') === 'auto' && (kind === 'quick' || kind === 'general')
+    && listEngines().some((e) => e.id === t.runner && e.ready) ? t.runner : undefined;
   const next = team
     ? startTeamTask({ goal: text.trim(), folder: detail.folder ?? null, mode: detail.mode ?? 'team', name, previous })
-    : startClaudeTask({ name, instructions: text.trim(), previous });
+    : startClaudeTask({ name, instructions: text.trim(), previous, folder: readWork(t).folder, engine: same });
   return { ok: true, task_id: next.id, status: next.status, kind: team ? 'team' : 'task' };
 }
 

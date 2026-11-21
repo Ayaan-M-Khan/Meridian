@@ -180,15 +180,32 @@ Signing in to claude.ai, chatgpt.com or gemini.google.com directly from this app
 
 With the assistant on **Automatic** (Settings → Assistant), every request goes to the AI best suited to it, decided without asking an AI, so routing costs nothing:
 
-1. **What kind of task it is:** coding, debugging, writing, research, analysis, planning or a quick question, from the words in the request.
-2. **Who is strongest at it:** coding to Claude Code or Codex, planning to Codex, research to Gemini, quick questions to Copilot, writing to Claude (starting points in `server/router.js`).
+1. **What kind of task it is:** building and coding, debugging, git, writing, research, analysis, planning or a quick question, from the words in the request.
+2. **Who is strongest at it** (starting points in `server/router.js`):
+
+   | Kind of work | Goes to first |
+   | --- | --- |
+   | Building and coding (“build me a landing page”, “add a dark mode feature”) | Claude Code |
+   | Debugging (“fix this TypeError”, “why are my tests failing”) | Codex or Gemini, shared between them |
+   | Git (commit, push, pull, branches, pull requests) | GitHub Copilot, else Claude Code |
+   | Planning | Codex |
+   | Research | Gemini |
+   | Writing | Claude |
+   | Quick questions | Copilot |
+
+   Only connected, signed-in AIs count: with Codex not connected, debugging goes to Gemini.
 3. **Credits:**
    - Plans you already pay for come before a pay-per-use API key.
    - An AI near its plan limit is used less, and one at its limit is skipped. Codex reports its limits; the others don't.
    - Among equally good AIs, the one used least today goes first, so no plan sits idle.
 4. **Reliability:** an AI whose recent runs here failed (signed out, blocked, timing out) is tried after the others.
+5. **Hand-over:** if the AI it picked can't take the work at all (not installed, or its account can't use it), the next best AI gets it, and the task (**Handed over**) or the chat says so. Gemini CLI signed in with a personal Google account is one: Google now sends those accounts to Antigravity, so Meridian marks Gemini CLI not ready with that reason until you sign in there with a Workspace or paid account, or press **Check again** on its page. Connect **Gemini (Antigravity)** to use Gemini with a personal account.
 
-The command bar shows where a request will go as you type. A chat stays with the AI it started with, and shows which one Automatic picked and why. Background tasks and the AI team's roles are routed the same way. Pick a specific AI in Settings or the chat to turn routing off.
+The command bar shows where a request will go as you type. Background tasks and the AI team's roles are routed the same way. Pick a specific AI in Settings or the chat to turn routing off.
+
+**In the chat**, each new piece of work goes to the AI best suited to it: ask for a component and Claude Code answers; ask next to debug it and the conversation moves to Codex or Gemini, with a note under your message saying where it went and why. Quick follow-ups (“thanks”, “make it shorter”) stay with the AI already answering, and so does anything that AI is about as good at, so a conversation doesn't hop around. Each reply shows which AI wrote it. If the AI a message went to isn't installed or its account can't use it, the next best AI answers instead and the note says why. If it fails another way (signed out, timed out), the conversation stays with the AI that was answering and your message comes back to send again.
+
+**Git work.** Give a background task a folder (**New assistant task → Folder to work in**, or ask in the chat with the folder's full path). A git request there (commit, push, pull, branches) goes to GitHub Copilot, or Claude Code if Copilot isn't connected, and that AI may then read the files and run git commands in that folder only: no other commands and no file edits. `git reset`, `git clean`, `git filter-branch` and `git filter-repo` are refused outright (to unstage, the AI uses `git restore --staged`). Every push in a git task also goes through a check Meridian adds for that run only: it refuses any push that would overwrite or delete history on the remote, so a force-push is stopped whatever flags it uses (`--force`, `-f`, `--force-with-lease`, `+branch`), and so is deleting a remote branch. Your repository's own hooks still run. A push uses your own git setup and sign-in; if git asks for credentials or hits a merge conflict, the task stops and says so. Other tasks with a folder may read and change files there but run no commands. The AI team doesn't run git: its builder changes files, and you can follow up with an assistant task to commit.
 
 To steer it without turning it off, choose an AI for a kind of task under **Settings → Smart routing**, for example Codex for planning or Gemini for research. Your choice goes first unless it isn't ready or is at its plan limit; then Automatic picks the next best and says why.
 
@@ -247,7 +264,7 @@ The **Assistant** page, the command bar on the overview, and **Ask** on each too
 
 **Follow-ups.** A finished or failed assistant task, AI team task or Ask all has **Continue from here** on its panel: write what to do next (“make it shorter”, “now add tests”) and a new task starts that runs the same way, in the same folder for an AI team, and gets the earlier request and result to build on. The earlier result is passed as material, not as instructions. The new task links back to the one it continues.
 
-When it runs through a command-line app, the app's functions are offered to it as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off or limited: no shell commands, and no file changes outside AI team tasks with a folder. It runs in its own folder inside the app's data folder, so its sessions stay apart from yours, and its usage is counted under that tool from its logs. Runs the app starts also turn off the CLI's auto-update for that run, so a run never stops to update.
+When it runs through a command-line app, the app's functions are offered to it as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off or limited: no shell commands except git in a git task's folder, and no file changes outside tasks given a folder. It runs in its own folder inside the app's data folder, so its sessions stay apart from yours, and its usage is counted under that tool from its logs. Runs the app starts also turn off the CLI's auto-update for that run, so a run never stops to update.
 
 Each AI app's page has **Model for runs from this app** (for example `sonnet` in Claude Code), used for everything the app runs through it; a lighter model uses less of your plan. **Settings → Assistant** can also build the daily summary from fixed rules only, so it never uses an AI.
 
@@ -361,6 +378,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/backup.js`: backups as a JSON file (tools, tasks, conversations, alerts, automations and settings), without secrets, and restoring them.
 - `server/automations.js`: saved prompts that run on a schedule; the scheduler in `server/sync.js` starts the ones that are due every minute.
 - `server/router.js`: smart routing: what kind of task a request is, and which ready AI suits it best, weighed for plan headroom, cost, recent failures and spread.
+- `server/local/git-guard.js`: the push check for git tasks: a hook, set only in that run's environment, that refuses pushes which would overwrite or delete history on the remote, then runs the repository's own hook.
+- `server/blocked.js`: AI apps that are signed in but whose account can't use them (Gemini CLI with a personal Google account): marked not ready, with the reason, until the sign-in changes or you press Check again.
 - `server/stats.js`: the Statistics page's figures.
 - `server/eta.js`: progress history, finish estimates, and stall and overdue detection.
 - `server/claude.js`: the shared Claude API client, the built-in assistant tool, and token recording.
@@ -378,4 +397,5 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - Passwords are stored as salted scrypt hashes; sign-in is rate-limited per address and per account; session cookies are HttpOnly and SameSite=Strict (and Secure over HTTPS). Changing the password, turning off two-step verification, unlinking Google and erasing all data each ask for the password again.
 - Responses carry `Permissions-Policy` (no camera, microphone or location), `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and API responses aren't cached.
 - The interface makes no requests to other sites: fonts and the chart library ship with the app.
+- Git tasks: the AI apps' own permission rules allow git and nothing else, and refuse `git reset`, `git clean` and history rewrites; they match command names, not flags. The push check is a git hook set through the environment of that one run (`GIT_CONFIG_COUNT` → `core.hooksPath`, `server/local/git-guard.js`), so nothing in your repository or git settings changes. These limits stop mistakes, not a determined program: `git push --no-verify` skips hooks, so the task's instructions forbid it and Claude Code refuses it up front, but GitHub Copilot's rules can't tell it apart from a normal push.
 - Task names, errors and results that come from other tools are passed to Claude as data, and its instructions say to treat them that way. Background tasks get only read access plus progress reporting, so text inside a reported task can't make one change your settings.

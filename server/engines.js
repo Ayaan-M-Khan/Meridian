@@ -13,8 +13,16 @@ import { FAKE_CALLS, workspaceDir } from './adapters/local.js';
 import { nodeRuntime, runCli } from './local/cli.js';
 import { runTool } from './assistant-tools.js';
 import { HttpError } from './util.js';
+import { markUnusable } from './blocked.js';
+import { gitGuardEnv } from './local/git-guard.js';
 
-export class EngineError extends Error {}
+/** `unusable`: the app couldn't take the work at all (not installed, or its account can't use it), so nothing ran. */
+export class EngineError extends Error {
+  constructor(message, { unusable = false } = {}) {
+    super(message);
+    this.unusable = unusable;
+  }
+}
 
 let bridgeBase = null;
 /** Set once the HTTP server is listening, e.g. http://127.0.0.1:4317. */
@@ -118,7 +126,7 @@ export async function runCliEngine(engineId, { system, prompt, tools = [], emit 
   const adapter = adapters[engineId];
   if (!adapter?.engine) throw new EngineError('That assistant isn’t available.');
   const cli = adapter.resolve();
-  if (!cli) throw new EngineError(`${adapter.name} isn’t installed on this computer.`);
+  if (!cli) throw new EngineError(`${adapter.name} isn’t installed on this computer.`, { unusable: true });
   const cwd = folder ?? workspaceDir(DATA_DIR);
   fs.mkdirSync(cwd, { recursive: true });
   // Engines without MCP support (engine.mcp === false) get no functions; callers give them a snapshot instead.
@@ -130,13 +138,20 @@ export async function runCliEngine(engineId, { system, prompt, tools = [], emit 
     if (model) inv.args.splice(adapter.engine.modelAt ?? 0, 0, ...adapter.engine.modelArgs(model));
     let run;
     try {
-      run = await runCli(cli, inv.args, { input: inv.input, env: inv.env, cwd: inv.cwd ?? cwd, timeoutMs, signal, onLine: parser.onLine });
+      // With git access, every push in this run goes through the push check (no force-pushes, no remote deletes).
+      const env = folder && access === 'git' ? { ...inv.env, ...gitGuardEnv(DATA_DIR) } : inv.env;
+      run = await runCli(cli, inv.args, { input: inv.input, env, cwd: inv.cwd ?? cwd, timeoutMs, signal, onLine: parser.onLine });
     } catch (err) {
       throw new EngineError(`Couldn’t start ${adapter.name}: ${err.message}`);
     }
     if (run.aborted) throw Object.assign(new Error('Stopped.'), { name: 'AbortError' });
     if (run.timedOut) throw new EngineError(`${adapter.name} took longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped.`);
     const out = parser.finish(run);
+    if (out.unusable) {
+      const st = await adapter.status().catch(() => null);
+      markUnusable(engineId, out.error, st?.signin_id ?? null);
+      throw new EngineError(out.error, { unusable: true });
+    }
     if (out.error) throw new EngineError(out.error);
     // If the app's functions never reached the model, it may write imitation tool calls as text. That's not a reply.
     if (FAKE_CALLS.test(out.text ?? '')) throw new EngineError(`${adapter.name} couldn’t reach this app’s functions for that reply. Try again.`);
