@@ -12,7 +12,8 @@ const TITLE_BAR = { dark: { color: '#141414', symbolColor: '#b5b5b5' }, light: {
 const TITLE_BAR_HEIGHT = 35;
 
 // The app ID stays the same through the rename to Meridian, so installs update in place and keep their taskbar pin.
-app.setAppUserModelId('com.aicommandcenter.desktop');
+// A copy run from source gets its own ID, so its taskbar button (named "Electron") never stands in for Meridian's.
+app.setAppUserModelId(app.isPackaged ? 'com.aicommandcenter.desktop' : 'com.aicommandcenter.desktop.dev');
 
 /**
  * Up to 1.1 the app was called "AI Command Center", and Electron names the data folder after the app. Move the old

@@ -3099,7 +3099,7 @@ const ACTIONS = {
     try {
       const res = await fetch('/api/backup', { headers: { 'x-acc-request': '1' } });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Backup failed (${res.status}).`);
-      const name = res.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] ?? 'ai-command-center-backup.json';
+      const name = res.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] ?? 'meridian-backup.json';
       saveFile(name, await res.blob());
       toast('Backup saved');
     } finally {
@@ -3477,7 +3477,7 @@ async function onChange(e) {
     if (!file) return;
     try {
       const b = JSON.parse(await file.text());
-      if (b?.format !== 'ai-command-center-backup') throw new Error('That file isn’t an Meridian backup.');
+      if (b?.format !== 'ai-command-center-backup') throw new Error('That file isn’t a Meridian backup.');
       S.pendingRestore = b;
       $('#restore-confirm').innerHTML = `<div class="callout warn restore-box">
         <b>Restore the backup from ${esc(String(b.exported_at ?? '').slice(0, 10) || 'an unknown date')}?</b>

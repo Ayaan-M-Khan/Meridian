@@ -58,7 +58,7 @@ function insertRows(table, rows, skip = []) {
  * stay as they are. Tools that need a key come back without one and say so.
  */
 export function restoreBackup(b) {
-  if (!b || typeof b !== 'object' || b.format !== BACKUP_FORMAT) throw new HttpError(400, 'That file isn’t an Meridian backup.');
+  if (!b || typeof b !== 'object' || b.format !== BACKUP_FORMAT) throw new HttpError(400, 'That file isn’t a Meridian backup.');
   if (b.version !== 1) throw new HttpError(400, 'This backup was made by a newer version of Meridian. Update the app first.');
   const integrations = arr(b.integrations, 'tools').filter((i) => i && Number.isInteger(i.id) && adapters[i.adapter]);
   const counts = { tools: integrations.length, tasks: arr(b.tasks, 'tasks').length, conversations: arr(b.assistant_threads, 'conversations').length };
