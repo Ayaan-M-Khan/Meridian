@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { IS_WIN, resolveCli, runCli } from '../local/cli.js';
-import { readClaudeCode, readCodex, readCopilot, readGemini, copilotHome, geminiHome } from '../local/logs.js';
+import { readClaudeCode, readCodex, readCopilot, readGemini, codexHome, copilotHome, geminiHome } from '../local/logs.js';
 import { AdapterError, nowIso } from '../util.js';
 
 const STATUS_TTL_MS = 60_000;
@@ -30,6 +30,19 @@ export const GIT_REFUSED = ['git reset', 'git clean', 'git filter-branch', 'git 
 /** Claude Code's rules match by prefix, so the usual force forms are refused up front as well. */
 const GIT_REFUSED_PREFIXES = ['git push --force', 'git push -f', 'git push --force-with-lease', 'git push --no-verify', 'git branch -D'];
 const statusCache = new Map();
+
+/** Whether Codex's own config.toml chooses a Windows sandbox ([windows] sandbox = …, or windows.sandbox = …). */
+export function codexWindowsSandboxSet(home = codexHome()) {
+  let text = '';
+  try {
+    text = fs.readFileSync(path.join(home, 'config.toml'), 'utf8');
+  } catch {
+    return false;
+  }
+  if (/^\s*windows\.sandbox\s*=/m.test(text)) return true;
+  const section = text.match(/^\s*\[windows\]\s*$([\s\S]*?)(?=^\s*\[|(?![\s\S]))/m);
+  return Boolean(section && /^\s*sandbox\s*=/m.test(section[1]));
+}
 
 const tryJson = (s) => {
   try {
@@ -209,7 +222,7 @@ export const codex = local({
     'Uses the Codex CLI on this computer and the ChatGPT account it is signed in with. The assistant and background tasks can run through it.',
     'Usage and your plan’s usage limits come from Codex’s own session logs. Limits are as of the last Codex session, so they can be out of date until Codex runs again.',
     'Cost is not shown because plan usage isn’t priced per token.',
-    'Codex runs read-only here: it can’t change files on this computer.',
+    'Codex runs read-only here, except in a task you give a folder: there it may change files in that folder (its workspace-write sandbox). It never gets git work, which goes to GitHub Copilot or Claude Code.',
   ],
   cli: {
     bin: 'codex',
@@ -237,8 +250,15 @@ export const codex = local({
     modelHint: 'a model Codex lists for your plan',
     invocation({ system, prompt, mcp, access = 'none' }) {
       const args = ['exec', '--json', '--skip-git-repo-check', '--sandbox', access === 'edit' ? 'workspace-write' : 'read-only', '-c', 'approval_policy="never"'];
+      // On Windows, Codex reads files and writes them only inside its Windows sandbox; without one set up it runs
+      // read-only and refuses every command, so it couldn't even read a file. The unelevated sandbox needs no admin
+      // rights. A sandbox you set in Codex's own config.toml (for example the elevated one) is kept.
+      if (IS_WIN && !codexWindowsSandboxSet()) args.push('-c', 'windows.sandbox="unelevated"');
       if (mcp) {
-        args.push('-c', `mcp_servers.acc.command=${toml(mcp.command)}`, '-c', `mcp_servers.acc.args=${toml(mcp.args)}`, '-c', 'mcp_servers.acc.tool_timeout_sec=180');
+        // With approvals off ("never"), Codex refuses MCP tools unless their server's tools are approved up front.
+        // Only this app's own server is: its functions are the read-only ones and progress reports a task is given.
+        args.push('-c', `mcp_servers.acc.command=${toml(mcp.command)}`, '-c', `mcp_servers.acc.args=${toml(mcp.args)}`, '-c', 'mcp_servers.acc.tool_timeout_sec=180',
+          '-c', 'mcp_servers.acc.default_tools_approval_mode="approve"');
         if (Object.keys(mcp.env).length) args.push('-c', `mcp_servers.acc.env={${Object.entries(mcp.env).map(([k, v]) => `${k}=${toml(v)}`).join(', ')}}`);
       }
       args.push('-');

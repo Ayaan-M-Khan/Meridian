@@ -250,7 +250,7 @@ Give one goal to several AIs that split the work. Switch the command bar to **AI
 
 If the review approves the work, the debug and fix stages are skipped. If an AI can't do its part (signed out, blocked, timed out), the next one suited to that role takes over, and the task shows who did. Change who does what in **Settings → AI team**.
 
-Without a folder, the result is text (a draft, a plan, code to copy), saved on the task. With a folder (**Choose…** opens a folder picker), the builder creates and changes files in it, while the planner, reviewer and debugger can only read them. None of them run shell commands, except Codex inside its own sandbox. Use a folder you have a copy of, such as a git project. Working in a folder needs AI apps on this computer; the Claude API can't read or change files.
+Without a folder, the result is text (a draft, a plan, code to copy), saved on the task. With a folder (**Choose…** opens a folder picker), the builder creates and changes files in it, while the planner, reviewer and debugger can only read them. None of them run commands that change anything; Codex reads files by listing and printing them, inside its own sandbox (on Windows, Codex's unelevated Windows sandbox, which needs no admin rights, unless you chose another in Codex's `config.toml`). Use a folder you have a copy of, such as a git project. Working in a folder needs AI apps on this computer; the Claude API can't read or change files.
 
 Each team task shows on the Tasks page with live progress, an expected finish, and a timeline of the stages, including what each AI wrote. One team task runs at a time; others wait in the queue. The assistant can also start one when you ask it to have the team do something.
 

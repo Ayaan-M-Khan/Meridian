@@ -1008,3 +1008,24 @@ test('Gemini CLI and Cursor work in the task’s folder, not only in the run’s
   assert.equal(chat.cwd, mcp.runDir, 'without a folder, it runs where its functions are');
   assert.ok(chat.args.includes('--approve-mcps'));
 });
+
+test('Codex: its own server’s tools are approved, and on Windows it runs in its sandbox unless you chose one', async () => {
+  const { codex, codexWindowsSandboxSet } = await import('../server/adapters/local.js');
+  const home = path.join(tmp, 'codex-config');
+  fs.mkdirSync(home, { recursive: true });
+  const conf = path.join(home, 'config.toml');
+  assert.equal(codexWindowsSandboxSet(home), false, 'no config.toml');
+  fs.writeFileSync(conf, 'model = "x"\n[projects."C:\\work"]\ntrust_level = "trusted"\n');
+  assert.equal(codexWindowsSandboxSet(home), false);
+  fs.writeFileSync(conf, 'model = "x"\n\n[windows]\nsandbox = "elevated"\n\n[tui]\nx = 1\n');
+  assert.equal(codexWindowsSandboxSet(home), true);
+  fs.writeFileSync(conf, 'windows.sandbox = "elevated"\n');
+  assert.equal(codexWindowsSandboxSet(home), true);
+  fs.writeFileSync(conf, '[windows]\nother = 1\n[sandbox]\nsandbox = "x"\n');
+  assert.equal(codexWindowsSandboxSet(home), false, 'a sandbox key in another section doesn’t count');
+
+  const args = codex.engine.invocation({ system: 'S', prompt: 'P', access: 'edit', mcp: { command: 'node', args: ['b.cjs'], env: {} } }).args.join(' ');
+  assert.match(args, /--sandbox workspace-write/);
+  assert.match(args, /mcp_servers\.acc\.default_tools_approval_mode="approve"/);
+  if (process.platform === 'win32') assert.match(args, /windows\.sandbox="unelevated"/, 'CODEX_HOME here has no config, so the unelevated sandbox is used');
+});
