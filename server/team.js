@@ -35,6 +35,15 @@ export const ROLES = {
 };
 const MAX_HANDOFFS = 2;
 
+/**
+ * Throws when a stage's AI is no longer ready (signed out, or marked unusable by an earlier stage), so it's handed over
+ * without starting it.
+ */
+function stillReady(s) {
+  const e = listEngines().find((x) => x.id === s.engine);
+  if (!e?.ready) throw new Error(e?.reason ?? `${s.engine_label} isn’t available.`);
+}
+
 /** The next AI for a role after some have failed at it, or null. */
 function fallbackFor(role, tried, folder) {
   const ready = listEngines().filter((e) => e.ready && (!folder || e.kind === 'cli') && !tried.includes(e.id));
@@ -312,6 +321,7 @@ async function execute(id) {
     const tried = [];
     for (;;) {
       try {
+        stillReady(s);
         const output = await runStage(s.engine, { system, prompt, access, folder: d.folder, signal: ctrl.signal });
         if (!output) throw new Error(`${s.engine_label} returned nothing.`);
         Object.assign(s, { status: 'done', finished_at: nowIso(), output: output.slice(0, OUTPUT_LIMIT) });
@@ -404,14 +414,29 @@ async function executeCompare(id, d, ctrl) {
       save(id, { progress: 82, step: `Combining · ${merge.engine_label}`, detail: d });
       recordProgress(id, 82);
       const prompt = `Request from the person:\n\n${goalText(d)}\n\n${ok.map((s) => `---\n\n## Answer from ${s.engine_label}\n\n${s.output}`).join('\n\n')}`;
-      try {
-        const out = await runStage(merge.engine, { system: MERGE_SYSTEM, prompt, access: 'none', folder: null, signal: ctrl.signal });
-        if (!out) throw new Error(`${merge.engine_label} returned nothing.`);
-        Object.assign(merge, { status: 'done', finished_at: nowIso(), output: out.slice(0, OUTPUT_LIMIT) });
-      } catch (err) {
-        if (isAbort(err)) throw err;
-        // The separate answers are still worth having.
-        Object.assign(merge, { status: 'failed', finished_at: nowIso(), error: claudeErrorMessage(err) });
+      const tried = [];
+      for (;;) {
+        try {
+          stillReady(merge);
+          const out = await runStage(merge.engine, { system: MERGE_SYSTEM, prompt, access: 'none', folder: null, signal: ctrl.signal });
+          if (!out) throw new Error(`${merge.engine_label} returned nothing.`);
+          Object.assign(merge, { status: 'done', finished_at: nowIso(), output: out.slice(0, OUTPUT_LIMIT) });
+          break;
+        } catch (err) {
+          if (isAbort(err)) throw err;
+          const message = claudeErrorMessage(err);
+          tried.push(merge.engine);
+          // Like a team stage, the next AI suited to it combines the answers.
+          const next = tried.length > MAX_HANDOFFS ? null : fallbackFor('builder', tried, null);
+          if (!next) {
+            // The separate answers are still worth having.
+            Object.assign(merge, { status: 'failed', finished_at: nowIso(), error: message });
+            break;
+          }
+          merge.note = `${merge.note ? `${merge.note} ` : ''}${merge.engine_label} couldn’t do it (${message.slice(0, 160)}), so ${next.label} took over.`;
+          Object.assign(merge, { engine: next.id, engine_label: next.label });
+          save(id, { step: `Combining · ${next.label}`, detail: d });
+        }
       }
     }
     if (!taskRow(id)) return;

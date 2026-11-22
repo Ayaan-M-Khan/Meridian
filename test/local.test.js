@@ -561,7 +561,10 @@ test('automations: saved with checks, paused and resumed, run when due, skipped 
   assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'task', schedule: { every: 'day', at: '9am' } }), /Choose a time/);
   assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'nope', schedule: { every: 'day', at: '09:00' } }), /how it runs/);
   assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'team', folder: 'relative/path', schedule: { every: 'day', at: '09:00' } }), /full path/);
-  assert.equal(createAutomation({ name: 'No folder', prompt: 'y', mode: 'task', folder: tmp, schedule: { every: 'day', at: '09:00' } }).folder, null, 'only an AI team works in a folder');
+  const inFolder = path.join(tmp, 'auto-folder');
+  fs.mkdirSync(inFolder, { recursive: true });
+  assert.equal(createAutomation({ name: 'In a folder', prompt: 'y', mode: 'task', folder: inFolder, schedule: { every: 'day', at: '09:00' } }).folder, fs.realpathSync.native(inFolder), 'an assistant task can work in a folder');
+  assert.equal(createAutomation({ name: 'No folder', prompt: 'y', mode: 'compare', folder: inFolder, schedule: { every: 'day', at: '09:00' } }).folder, null, 'Ask all gives a text result');
 
   const a = createAutomation({ name: 'Usage digest', prompt: 'Summarize my usage.', mode: 'task', schedule: { every: 'day', at: '09:00' } });
   assert.equal(a.schedule_text, 'Every day at 09:00');
@@ -1028,4 +1031,46 @@ test('Codex: its own server’s tools are approved, and on Windows it runs in it
   assert.match(args, /--sandbox workspace-write/);
   assert.match(args, /mcp_servers\.acc\.default_tools_approval_mode="approve"/);
   if (process.platform === 'win32') assert.match(args, /windows\.sandbox="unelevated"/, 'CODEX_HOME here has no config, so the unelevated sandbox is used');
+});
+
+test('GitHub CLI sign-in is read from gh’s hosts.yml, offline, never the token', async () => {
+  const { ghSignedInUser } = await import('../server/adapters/local.js');
+  const dir = path.join(tmp, 'gh-config');
+  fs.mkdirSync(dir, { recursive: true });
+  const hosts = path.join(dir, 'hosts.yml');
+  assert.equal(ghSignedInUser(dir), null, 'no hosts.yml: not signed in');
+  fs.writeFileSync(hosts, 'github.com:\n    git_protocol: https\n    users:\n        octo-cat:\n    user: octo-cat\n');
+  assert.equal(ghSignedInUser(dir), 'octo-cat');
+  fs.writeFileSync(hosts, 'github.com:\r\n    oauth_token: gho_secret\r\n    user: octo-cat\r\n    git_protocol: ssh\r\n');
+  assert.equal(ghSignedInUser(dir), 'octo-cat', 'Windows line endings, token stored in the file');
+  fs.writeFileSync(hosts, 'enterprise.example.com:\n    user: someone\n');
+  assert.equal(ghSignedInUser(dir), null, 'only github.com counts');
+  fs.writeFileSync(hosts, 'github.com:\n    git_protocol: https\nother.example.com:\n    user: someone\n');
+  assert.equal(ghSignedInUser(dir), null, 'a user under another host doesn’t count');
+});
+
+test('Ask all: when the AI picked to combine is no longer ready, the next one combines the answers', async () => {
+  setClaudeClientForTests(fakeApi(['The API’s answer', 'The combined answer']));
+  delete process.env.FAKE_CLAUDE_TEAM;
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Claude Code’s answer' });
+  const finishedTask = (id) => waitFor(() => {
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+    return row.status === 'completed' || row.status === 'failed' ? row : null;
+  });
+  try {
+    const t = startTeamTask({ goal: 'Name three uses for a dashboard', mode: 'compare' });
+    assert.equal(t.lineup.builder, 'claude-code', 'Claude Code is picked to combine');
+    // While the AIs answer, Claude Code signs out (or a run marks it unusable).
+    db.prepare("UPDATE integrations SET status = 'signin' WHERE adapter = 'claude-code'").run();
+    const done = await finishedTask(t.id);
+    assert.equal(done.status, 'completed', done.error ?? '');
+    const merge = JSON.parse(done.detail).stages.find((s) => s.key === 'merge');
+    assert.equal(merge.status, 'done');
+    assert.equal(merge.engine, 'claude-api', 'the Claude API combined instead, without starting Claude Code');
+    assert.match(merge.note, /Claude Code couldn’t do it \(Claude Code isn’t signed in\.\), so Claude API took over\./);
+    assert.match(done.result, /The combined answer/);
+  } finally {
+    db.prepare("UPDATE integrations SET status = 'ok' WHERE adapter = 'claude-code'").run();
+    setClaudeClientForTests(null);
+  }
 });

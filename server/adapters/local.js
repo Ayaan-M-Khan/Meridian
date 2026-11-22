@@ -11,9 +11,11 @@
  *
  * engine.invocation({ system, prompt, mcp, access }) builds one run. access is what the CLI may do in the folder it
  * runs in: 'none' (only this app's functions), 'read' (read files), 'edit' (read, create and change files) or 'git'
- * (read files and run git commands only; engines with engine.gitAccess). Force-pushes and hard resets are refused.
+ * (read files and run git commands only; engines with engine.gitAccess). git reset, git clean and history rewrites are
+ * refused; force-pushes are stopped by the push check (local/git-guard.js).
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { IS_WIN, resolveCli, runCli } from '../local/cli.js';
 import { readClaudeCode, readCodex, readCopilot, readGemini, codexHome, copilotHome, geminiHome } from '../local/logs.js';
@@ -481,6 +483,25 @@ const plainReply = (name, signInHint) => ({
 
 // ── GitHub Copilot CLI (GitHub account) ────────────────────────────────────
 /** Copilot CLI reads a token from the environment, its own stored sign-in, or the GitHub CLI's, in that order. */
+/** The GitHub CLI's config folder: GH_CONFIG_DIR, else its default for this system. */
+const ghConfigDir = () => process.env.GH_CONFIG_DIR
+  || (IS_WIN ? path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'GitHub CLI')
+    : path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'gh'));
+
+/** The account gh is signed in to on github.com, from its hosts.yml, or null. Never reads the token. */
+export function ghSignedInUser(dir = ghConfigDir()) {
+  let text;
+  try {
+    text = fs.readFileSync(path.join(dir, 'hosts.yml'), 'utf8');
+  } catch {
+    return null;
+  }
+  // The github.com block: from its top-level key to the next top-level key.
+  const block = text.match(/^github\.com:\s*\r?\n((?:[ \t]+.*(?:\r?\n|$)|\s*(?:\r?\n|$))*)/m)?.[1];
+  if (!block) return null;
+  return block.match(/^[ \t]{1,4}user:[ \t]*["']?([A-Za-z0-9-]+)/m)?.[1] ?? null;
+}
+
 async function copilotSignIn() {
   for (const k of ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) if (process.env[k]) return { method: 'a GitHub token', user: null };
   // A stored `copilot login` lives in the OS keychain under "copilot-cli". Only the entry's name is checked.
@@ -501,7 +522,12 @@ async function copilotSignIn() {
   } catch {
     /* no config yet */
   }
-  // Last, the GitHub CLI's sign-in, which Copilot CLI also uses. `gh auth status` never prints the token.
+  // The GitHub CLI's sign-in, which Copilot CLI also uses, from gh's own hosts.yml (the token is in the keychain, not
+  // read). This is checked offline: `gh auth status` verifies the token with GitHub, so a network hiccup made Copilot
+  // look signed out for a few minutes at a time.
+  const ghUser = ghSignedInUser();
+  if (ghUser) return { method: 'your GitHub CLI sign-in', user: ghUser };
+  // Last, ask gh itself (a GitHub CLI set up some other way). `gh auth status` never prints the token.
   const gh = resolveCli('gh', [IS_WIN ? '%ProgramFiles%\\GitHub CLI\\gh.exe' : '/opt/homebrew/bin/gh']);
   if (gh) {
     const r = await runCli(gh, ['auth', 'status', '--hostname', 'github.com'], { timeoutMs: 15_000 }).catch(() => null);

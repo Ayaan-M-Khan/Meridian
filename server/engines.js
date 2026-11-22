@@ -149,7 +149,7 @@ export async function runCliEngine(engineId, { system, prompt, tools = [], emit 
     const runId = folder || path.resolve(runCwd) !== path.resolve(workspaceDir(DATA_DIR)) ? noteAppRun(engineId, runCwd) : null;
     try {
       // With git access, every push in this run goes through the push check (no force-pushes, no remote deletes).
-      const env = folder && access === 'git' ? { ...inv.env, ...gitGuardEnv(DATA_DIR) } : inv.env;
+      const env = folder && access === 'git' ? { ...inv.env, ...gitGuardEnv(DATA_DIR, folder) } : inv.env;
       run = await runCli(cli, inv.args, { input: inv.input, env, cwd: inv.cwd ?? cwd, timeoutMs, signal, onLine: parser.onLine });
     } catch (err) {
       throw new EngineError(`Couldn’t start ${adapter.name}: ${err.message}`);

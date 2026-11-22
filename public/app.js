@@ -2168,9 +2168,9 @@ function openAutomation(a = {}) {
         <span class="help">Write it as you would for a one-off task. The AI starts fresh each run. Each run sends this prompt, and any dashboard data the AI asks for, to the AI it goes to, while you’re away.</span></div>
       <div class="field"><label>How it runs</label>
         <div class="choice-row" role="radiogroup">${Object.entries(MODE_LABEL).map(([k, v]) => `<label class="choice"><input type="radio" name="mode" value="${k}" ${mode === k ? 'checked' : ''} data-auto-mode><span><b>${v}</b><span class="faint small block">${k === 'task' ? 'The best AI for it works alone' : k === 'team' ? 'Plan, build, review, fix' : 'Every AI answers, then a merge'}</span></span></label>`).join('')}</div></div>
-      <div class="field" id="au-folder-field" ${mode === 'team' ? '' : 'hidden'}><label for="au-folder">Folder to work in (optional)</label>
+      <div class="field" id="au-folder-field" ${mode === 'compare' ? 'hidden' : ''}><label for="au-folder">Folder to work in (optional)</label>
         <div class="folder-row"><input class="input" id="au-folder" name="folder" autocomplete="off" placeholder="Leave empty for a text result" value="${esc(a.folder ?? '')}"><button class="btn" type="button" data-action="pick-folder" data-target="au-folder">${ICON.folder}Choose…</button></div>
-        <span class="help">With a folder, the builder can change files in it on every run. Use a folder you have a copy of, such as a git project.</span></div>
+        <span class="help">With a folder, the AI can change files in it on every run; for git work (commit, push, pull), it runs git there instead, through GitHub Copilot or Claude Code. Use a folder you have a copy of, such as a git project.</span></div>
       <div class="form-row">
         <div class="field"><label for="au-every">Repeats</label><select class="input" id="au-every" name="every" data-auto-every>
           ${opt('hour', 'Every hour', s.every)}${opt('day', 'Every day', s.every)}${opt('weekday', 'Every weekday (Mon–Fri)', s.every)}${opt('week', 'Once a week', s.every)}</select></div>
@@ -3535,7 +3535,7 @@ async function onChange(e) {
     return;
   }
   if ('autoMode' in el.dataset) {
-    $('#au-folder-field').hidden = el.value !== 'team';
+    $('#au-folder-field').hidden = el.value === 'compare';
     return;
   }
   if ('summaryMode' in el.dataset) {

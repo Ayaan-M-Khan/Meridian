@@ -57,8 +57,8 @@ function clean({ name, prompt, mode, schedule, folder }) {
   if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) throw new HttpError(400, 'Give it a name of 1–80 characters.');
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new HttpError(400, 'Write what it should do, up to 4,000 characters.');
   if (!MODES[mode]) throw new HttpError(400, 'Choose how it runs.');
-  // Only an AI team works in a folder; the other modes give a text result.
-  return { name: name.trim(), prompt: prompt.trim(), mode, schedule: cleanSchedule(schedule), folder: mode === 'team' ? cleanFolder(folder) : null };
+  // An assistant task or an AI team can work in a folder (a git request there runs git); Ask all gives a text result.
+  return { name: name.trim(), prompt: prompt.trim(), mode, schedule: cleanSchedule(schedule), folder: mode === 'compare' ? null : cleanFolder(folder) };
 }
 
 function row(id) {
@@ -111,7 +111,7 @@ export function runAutomation(id, { scheduled = false, now = new Date() } = {}) 
   const next = scheduled ? nextRun(schedule, now)?.toISOString() ?? null : r.next_run_at;
   try {
     const t = r.mode === 'task'
-      ? startClaudeTask({ name: r.name, instructions: r.prompt })
+      ? startClaudeTask({ name: r.name, instructions: r.prompt, folder: r.folder ?? null })
       : startTeamTask({ goal: r.prompt, mode: r.mode, name: r.name, folder: r.mode === 'team' ? r.folder : null });
     db.prepare('UPDATE automations SET last_run_at = ?, last_task_id = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(now.toISOString(), t.id, next, r.id);
     return { ok: true, task_id: t.id, status: t.status };

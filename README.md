@@ -211,7 +211,7 @@ To steer it without turning it off, choose an AI for a kind of task under **Sett
 
 ## Automations
 
-The **Automations** page keeps prompts that run on a schedule: every hour, every day, every weekday or once a week, at a time you choose (this computer's local time). Each one runs as an assistant task, an AI team task (optionally in a project folder) or Ask all.
+The **Automations** page keeps prompts that run on a schedule: every hour, every day, every weekday or once a week, at a time you choose (this computer's local time). Each one runs as an assistant task or an AI team task (either optionally in a project folder) or Ask all. An assistant task with a git repository's folder can, for example, commit and push your notes every evening; it runs as a git task (see **Git work**).
 
 - Every run goes through smart routing, shows up in Tasks with live progress, and alerts you when it finishes, like a task you start yourself.
 - **Run now** tries one straight away; pausing keeps it without running it.

@@ -278,6 +278,8 @@ function handOver(task, work, message) {
   if (!r) return null;
   const was = listEngines().find((e) => e.id === task.runner)?.label ?? task.runner;
   const note = `${work.handoff ? `${work.handoff} ` : ''}${was} couldn’t take it (${String(message).slice(0, 160)}), so ${r.engine.label} took over.`;
+  // Statistics count where work went: the hand-over is a routing decision of its own.
+  logRoute('task', { engine: r.engine, category: r.category, why: note }, task.name);
   const { folder, access, ...rest } = work;
   return { engine: r.engine, detail: { ...rest, ...(folder ? { folder, access } : {}), tried, handoff: note } };
 }

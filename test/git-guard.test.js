@@ -18,7 +18,6 @@ const ok = (cwd, args, env) => {
 };
 
 test('the push check refuses force-pushes and remote deletes in every form, and runs the repository’s own hooks', { skip: !hasGit && 'git isn’t installed' }, () => {
-  const guard = { ...process.env, ...gitGuardEnv(path.join(tmp, 'data')) };
   const remote = path.join(tmp, 'remote.git');
   ok(tmp, ['init', '-q', '--bare', '-b', 'main', remote]);
   const repo = path.join(tmp, 'repo');
@@ -30,6 +29,9 @@ test('the push check refuses force-pushes and remote deletes in every form, and 
   // The repository's own hooks keep running during a git task.
   const marks = path.join(tmp, 'hook-marks.txt').replace(/\\/g, '/');
   for (const h of ['pre-commit', 'pre-push']) fs.writeFileSync(path.join(repo, '.git', 'hooks', h), `#!/bin/sh\necho ${h} >> "${marks}"\n`, { mode: 0o755 });
+  // Set up as a git task's run is: the push check, plus pass-throughs only for the hooks this repository has.
+  const guard = { ...process.env, ...gitGuardEnv(path.join(tmp, 'data'), repo) };
+  assert.deepEqual(fs.readdirSync(guard.GIT_CONFIG_VALUE_0).sort(), ['pre-commit', 'pre-push'], 'no hooks that git runs on every command');
 
   fs.writeFileSync(path.join(repo, 'a.txt'), 'one\n');
   ok(repo, ['add', '-A'], guard);
@@ -61,8 +63,8 @@ test('the push check refuses force-pushes and remote deletes in every form, and 
 });
 
 test('the push check keeps config entries already in the environment', () => {
-  const env = gitGuardEnv(path.join(tmp, 'data2'), { GIT_CONFIG_COUNT: '2' });
+  const env = gitGuardEnv(path.join(tmp, 'data2'), null, { GIT_CONFIG_COUNT: '2' });
   assert.equal(env.GIT_CONFIG_COUNT, '3');
   assert.equal(env.GIT_CONFIG_KEY_2, 'core.hooksPath');
-  assert.ok(fs.existsSync(path.join(env.GIT_CONFIG_VALUE_2, 'pre-push')));
+  assert.deepEqual(fs.readdirSync(env.GIT_CONFIG_VALUE_2), ['pre-push'], 'without a repository, only the push check');
 });
