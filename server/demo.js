@@ -238,7 +238,7 @@ export function demoState(now = new Date()) {
     automations: [
       { id: 1, name: 'Weekly AI usage report', prompt: 'Summarize last week’s AI usage by tool, flag anything near a limit, and suggest where to cut back.', mode: 'task', mode_label: 'Assistant task', schedule: { every: 'week', at: '09:00', day: 1 }, schedule_text: 'Every Monday at 09:00', enabled: true, next_run_at: nextRun({ every: 'week', at: '09:00', day: 1 }, now).toISOString(), last_run_at: ago(60 * 24 * 6.9), last_error: null, last_task: { id: 7, status: 'completed', finished_at: ago(60 * 24 * 6.9) }, created_at: ago(60 * 24 * 30) },
       { id: 2, name: 'Morning AI news', prompt: 'What changed in AI tools and models in the last day that matters for a developer? Keep it to five bullets.', mode: 'compare', mode_label: 'Ask all', schedule: { every: 'weekday', at: '08:30' }, schedule_text: 'Every weekday at 08:30', enabled: true, next_run_at: nextRun({ every: 'weekday', at: '08:30' }, now).toISOString(), last_run_at: ago(60 * 10), last_error: null, last_task: null, created_at: ago(60 * 24 * 12) },
-      { id: 3, name: 'Tidy the project README', prompt: 'Review the README for accuracy and fix anything out of date.', mode: 'team', mode_label: 'AI team', schedule: { every: 'week', at: '17:00', day: 5 }, schedule_text: 'Every Friday at 17:00', enabled: false, next_run_at: null, last_run_at: null, last_error: null, last_task: null, created_at: ago(60 * 24 * 3) },
+      { id: 3, name: 'Tidy the project README', prompt: 'Review the README for accuracy and fix anything out of date.', mode: 'team', mode_label: 'AI team', folder: 'C:\\Users\\alex\\projects\\website', schedule: { every: 'week', at: '17:00', day: 5 }, schedule_text: 'Every Friday at 17:00', enabled: false, next_run_at: null, last_run_at: null, last_error: null, last_task: null, created_at: ago(60 * 24 * 3) },
     ],
     engines: [
       { id: 'claude-code', label: 'Claude Code', via: 'your Claude account', vendor: 'Anthropic', kind: 'cli', integration_id: 7, ready: true, reason: null },
@@ -255,7 +255,7 @@ export function demoState(now = new Date()) {
         planner: { id: 'codex', label: 'Codex', vendor: 'OpenAI', chosen: false },
         builder: { id: 'claude-code', label: 'Claude Code', vendor: 'Anthropic', chosen: false },
         reviewer: { id: 'codex', label: 'Codex', vendor: 'OpenAI', chosen: false },
-        debugger: { id: 'copilot-cli', label: 'GitHub Copilot', vendor: 'GitHub', chosen: false },
+        debugger: { id: 'codex', label: 'Codex', vendor: 'OpenAI', chosen: false },
       },
       roles: { planner: { title: 'Planner', does: 'Plans the work' }, builder: { title: 'Builder', does: 'Does the work and applies fixes' }, reviewer: { title: 'Reviewer', does: 'Checks the work' }, debugger: { title: 'Debugger', does: 'Finds the cause of problems' } },
     },

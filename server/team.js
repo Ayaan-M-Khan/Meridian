@@ -31,7 +31,7 @@ export const ROLES = {
   planner: { title: 'Planner', does: 'Plans the work', prefer: ['codex', 'claude-code', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli', 'claude-api'] },
   builder: { title: 'Builder', does: 'Does the work and applies fixes', prefer: ['claude-code', 'claude-api', 'cursor-cli', 'copilot-cli', 'codex', 'gemini-cli', 'antigravity-cli'] },
   reviewer: { title: 'Reviewer', does: 'Checks the work', prefer: ['codex', 'claude-code', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'claude-api', 'cursor-cli'] },
-  debugger: { title: 'Debugger', does: 'Finds the cause of problems', prefer: ['gemini-cli', 'antigravity-cli', 'claude-code', 'codex', 'copilot-cli', 'cursor-cli', 'claude-api'] },
+  debugger: { title: 'Debugger', does: 'Finds the cause of problems', prefer: ['gemini-cli', 'antigravity-cli', 'codex', 'claude-code', 'copilot-cli', 'cursor-cli', 'claude-api'] },
 };
 const MAX_HANDOFFS = 2;
 
