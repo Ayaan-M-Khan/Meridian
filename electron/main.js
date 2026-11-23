@@ -1,9 +1,10 @@
 import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, nativeTheme, shell } from 'electron';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { moveAppFolder } from './migrate.js';
+import { handOffTarget, isNormalLaunch, parseInstallLocation, samePath, shortcutsToRepair } from './identity.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICON = path.join(root, 'public', 'icon-512.png');
@@ -13,7 +14,75 @@ const TITLE_BAR_HEIGHT = 35;
 
 // The app ID stays the same through the rename to Meridian, so installs update in place and keep their taskbar pin.
 // A copy run from source gets its own ID, so its taskbar button (named "Electron") never stands in for Meridian's.
-app.setAppUserModelId(app.isPackaged ? 'com.aicommandcenter.desktop' : 'com.aicommandcenter.desktop.dev');
+const APP_ID = 'com.aicommandcenter.desktop';
+app.setAppUserModelId(app.isPackaged ? APP_ID : `${APP_ID}.dev`);
+
+// electron-builder's ID for this app: its install key (InstallLocation) and its "Installed apps" entry.
+const INSTALL_KEY = String.raw`HKCU\Software\142f0647-14b0-5c03-a7de-b9cdb5cd6a52`;
+const UNINSTALL_KEY = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\142f0647-14b0-5c03-a7de-b9cdb5cd6a52`;
+
+const realPath = (p) => {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return p;
+  }
+};
+
+/** Where the installer put Meridian on this computer, or null (running from source, or installed some other way). */
+const INSTALL_DIR = (() => {
+  if (process.platform !== 'win32' || !app.isPackaged) return null;
+  try {
+    const dir = parseInstallLocation(execFileSync('reg', ['query', INSTALL_KEY, '/v', 'InstallLocation'], { encoding: 'utf8', windowsHide: true, timeout: 5000 }));
+    return dir ? realPath(dir) : null;
+  } catch {
+    return null;
+  }
+})();
+const isInstalledCopy = () => Boolean(INSTALL_DIR) && samePath(path.dirname(realPath(process.execPath)), INSTALL_DIR);
+
+/**
+ * Opened through a shortcut that points at another copy of Meridian (see identity.js): open the installed one
+ * instead, with the same arguments, and close this one. Never twice in a row.
+ */
+function handOffToInstalledCopy() {
+  if (process.env.MERIDIAN_HANDED_OFF) return false;
+  const target = handOffTarget({ execPath: realPath(process.execPath), installDir: INSTALL_DIR, packaged: app.isPackaged, exists: fs.existsSync });
+  if (!target) return false;
+  try {
+    spawn(target, process.argv.slice(1), { detached: true, stdio: 'ignore', env: { ...process.env, MERIDIAN_HANDED_OFF: '1' } }).unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The installed copy points Meridian's Start menu, desktop and taskbar shortcuts back at itself (see identity.js). */
+function repairShortcuts() {
+  if (!isInstalledCopy() || !isNormalLaunch()) return;
+  const files = [
+    path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Meridian.lnk'),
+    path.join(app.getPath('desktop'), 'Meridian.lnk'),
+    path.join(app.getPath('appData'), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar', 'Meridian.lnk'),
+  ];
+  const shortcuts = [];
+  for (const file of files) {
+    try {
+      if (fs.existsSync(file)) shortcuts.push({ file, link: shell.readShortcutLink(file) });
+    } catch {
+      /* leave anything we can't read alone */
+    }
+  }
+  for (const { file, link } of shortcutsToRepair(shortcuts, process.execPath)) {
+    try {
+      shell.writeShortcutLink(file, 'update', {
+        target: process.execPath, cwd: path.dirname(process.execPath), icon: process.execPath, iconIndex: 0, appUserModelId: link.appUserModelId || APP_ID,
+      });
+    } catch {
+      /* a shortcut we can't write stays as it is */
+    }
+  }
+}
 
 /**
  * Up to 1.1 the app was called "AI Command Center", and Electron names the data folder after the app. Move the old
@@ -33,15 +102,13 @@ moveDataFromOldName();
 
 /**
  * Keeps Meridian's entry in Windows' "Installed apps" list showing the right name and version. The installer writes
- * it, but an update can occasionally leave the old version there. Only the entry that points at this very install is
- * touched, and only its name and version values.
+ * it, but an update can occasionally leave the old version there. Only the installed copy touches it, and only its
+ * name and version values.
  */
-const UNINSTALL_KEY = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\142f0647-14b0-5c03-a7de-b9cdb5cd6a52`; // electron-builder's ID for this app
 function syncInstalledAppsEntry() {
-  if (process.platform !== 'win32' || !app.isPackaged) return;
+  if (!isInstalledCopy()) return;
   execFile('reg', ['query', UNINSTALL_KEY], { windowsHide: true }, (err, out) => {
     if (err) return; // installed some other way: leave it alone
-    if (!out.toLowerCase().includes(path.dirname(process.execPath).toLowerCase())) return; // another copy's entry
     const want = { DisplayName: `Meridian ${app.getVersion()}`, DisplayVersion: app.getVersion() };
     for (const [name, value] of Object.entries(want)) {
       const has = new RegExp(String.raw`\s${name}\s+REG_SZ\s+(.*)`).exec(out)?.[1]?.trim();
@@ -68,7 +135,7 @@ function removeDeadOldShortcuts() {
   }
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (handOffToInstalledCopy() || !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let win = null;
@@ -267,6 +334,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     removeDeadOldShortcuts();
     syncInstalledAppsEntry();
+    repairShortcuts();
     return boot();
   }).catch((err) => {
     dialog.showErrorBox('Meridian could not start', String(err?.stack ?? err));
