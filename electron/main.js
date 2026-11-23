@@ -42,6 +42,14 @@ const INSTALL_DIR = (() => {
 const isInstalledCopy = () => Boolean(INSTALL_DIR) && samePath(path.dirname(realPath(process.execPath)), INSTALL_DIR);
 
 /**
+ * On Windows only the installed copy shows Windows notifications, or even asks whether it can: the first time a copy
+ * calls Notification.isSupported(), Electron registers it for notifications and writes a Start menu shortcut named
+ * after the program (Meridian.exe → "Meridian"), pointing at that copy. A test or development copy would take over
+ * Meridian's own Start menu shortcut, so the installed-copy check comes first.
+ */
+const canNotify = () => (process.platform !== 'win32' || isInstalledCopy()) && Notification.isSupported();
+
+/**
  * Opened through a shortcut that points at another copy of Meridian (see identity.js): open the installed one
  * instead, with the same arguments, and close this one. Never twice in a row.
  */
@@ -187,7 +195,7 @@ if (handOffToInstalledCopy() || !app.requestSingleInstanceLock()) {
   function hideToTray(firstTime) {
     ensureTray();
     win.hide();
-    if (firstTime && Notification.isSupported()) {
+    if (firstTime && canNotify()) {
       new Notification({ title: 'Meridian is still running', body: 'Tasks, syncs and alerts keep going. Open it again from the icon in the system tray.', icon: ICON, silent: true }).show();
     }
   }
@@ -272,7 +280,7 @@ if (handOffToInstalledCopy() || !app.requestSingleInstanceLock()) {
     };
     /** New alerts become Windows notifications while the window isn't in front. Clicking one opens it. */
     globalThis.accDesktopNotify = (n) => {
-      if (!Notification.isSupported() || desktopSettings().notifications === false) return;
+      if (!canNotify() || desktopSettings().notifications === false) return;
       if (win && win.isVisible() && win.isFocused()) return;
       const note = new Notification({ title: n.title, body: n.body ?? '', icon: ICON, silent: n.severity === 'info' });
       note.on('click', () => showWindow(n.kind === 'my_task_done' ? '#tasks' : '#notifications'));
