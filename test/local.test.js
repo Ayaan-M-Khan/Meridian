@@ -1074,3 +1074,15 @@ test('Ask all: when the AI picked to combine is no longer ready, the next one co
     setClaudeClientForTests(null);
   }
 });
+
+test('Antigravity runs are told to use their file tools, and a refusal reads clearly', async () => {
+  const { antigravityCli } = await import('../server/adapters/local.js');
+  for (const access of ['none', 'read', 'edit']) {
+    const args = antigravityCli.engine.invocation({ system: 'S', prompt: 'P', access }).args;
+    assert.match(args[1], /shell commands are not available: read files with your file-viewing tools/);
+    assert.equal(args[args.indexOf('--mode') + 1], access === 'edit' ? 'accept-edits' : 'plan');
+  }
+  const out = antigravityCli.engine.parser().finish({ code: 0, stderr: 'jetski: no output produced', stdout: JSON.stringify({ status: 'SUCCESS', response: '', denied_actions: [{ action: 'command', display_name: 'Bash' }] }) });
+  assert.match(out.error, /Antigravity stopped without a reply after it was refused command access/);
+  assert.equal(antigravityCli.engine.parser().finish({ code: 0, stderr: '', stdout: JSON.stringify({ status: 'SUCCESS', response: 'OK' }) }).text, 'OK');
+});

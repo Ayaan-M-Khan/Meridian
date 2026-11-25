@@ -395,6 +395,9 @@ export const geminiCli = local({
  * Google's Antigravity CLI (`agy`), which personal Google accounts use for Gemini since June 2026. Its sign-in lives in
  * the OS keychain and it has no status command, so a run of the `/model` command (no model request) checks it.
  */
+/** Added to every Antigravity run from this app (see its invocation). */
+const AGY_NO_COMMANDS = 'In this run, shell commands are not available: read files with your file-viewing tools and work from what they show. Do not try to run commands.';
+
 async function antigravitySignIn(cli) {
   if (IS_WIN) {
     const r = await runCli(sys('cmdkey'), ['/list'], { timeoutMs: 10_000 }).catch(() => null);
@@ -445,7 +448,10 @@ export const antigravityCli = local({
     // Its MCP permissions can only be set in your global Antigravity settings, which the app doesn't change.
     mcp: false,
     invocation({ system, prompt, access = 'none' }) {
-      const args = ['-p', clip(`${system}\n\n---\n\n${prompt}`), '--output-format', 'json', '--mode', access === 'edit' ? 'accept-edits' : 'plan'];
+      // Run headless, Antigravity refuses shell commands it can't ask about, and after a refusal it tends to stop
+      // without a reply. Its own file tools still work, so it's told to use those (checked: a reviewer then reads and
+      // answers, a builder reads and edits).
+      const args = ['-p', clip(`${system}\n\n${AGY_NO_COMMANDS}\n\n---\n\n${prompt}`), '--output-format', 'json', '--mode', access === 'edit' ? 'accept-edits' : 'plan'];
       return { args, input: null };
     },
     parser: () => ({
@@ -456,6 +462,9 @@ export const antigravityCli = local({
         const all = `${run.stdout}\n${run.stderr}`;
         if (/authentication required/i.test(all)) return { error: 'Gemini (Antigravity) isn’t signed in. Open it in the sidebar and choose Sign in.' };
         if (j?.status === 'SUCCESS' && typeof j.response === 'string' && j.response.trim()) return { text: j.response, emitAll: true, usage: j.usage ?? null };
+        if (Array.isArray(j?.denied_actions) && j.denied_actions.length) {
+          return { error: `Antigravity stopped without a reply after it was refused ${j.denied_actions.map((a) => a.action).join(', ')} access, which runs from this app don’t have.` };
+        }
         return { error: (typeof j?.error === 'string' ? j.error : j?.error?.message) ?? errorLine(run.stderr) ?? `Antigravity exited without a reply (status ${j?.status ?? run.code}).` };
       },
     }),
