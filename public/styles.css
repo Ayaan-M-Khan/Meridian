@@ -1336,3 +1336,10 @@ html.wco .wb-tabs { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(
 .bar.info > i { background: var(--accent); }
 .hero-top { margin-bottom: 4px; }
 .tool .tool-activity { margin-top: auto; }
+
+/* An AI app found on this computer, signed in but not connected: a quieter row with its own Connect button. */
+.nav-tool.nav-found { width: calc(100% - 12px); margin-left: 12px; padding: 6px 10px; gap: 9px; border-radius: 6px; border: 0; background: none; font: inherit; text-align: left; color: var(--text-3); cursor: pointer; display: flex; align-items: center; }
+.nav-tool.nav-found .logo { opacity: 0.7; }
+.nav-tool.nav-found:hover { color: var(--text); }
+.nav-found-tag { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 6px; padding: 1px 6px; flex: none; }
+.nav-tool-sub { margin-left: 6px; font-size: 10.5px; color: var(--text-3); font-weight: 500; }

@@ -526,18 +526,25 @@ function navTools() {
   const el = $('#nav-tools');
   if (!el) return;
   const tools = (S.data?.tools ?? []).filter((t) => t.kind !== 'builtin');
+  // AI apps already installed and signed in on this computer but not connected here: one click connects them.
+  if (S.local === null && !S.demo && S.data) loadLocal().then(() => navTools());
+  const found = (S.demo ? [] : S.local ?? []).filter((l) => l.installed && l.signed_in && !l.connected_id);
+  const foundRows = found.map((l) => `<button class="nav-tool nav-found" type="button" data-action="connect-local" data-id="${esc(l.id)}" title="${esc(`${l.name} is installed and signed in on this computer. Connect it to use it here.`)}">
+      ${engineById(l.id, l.name)}<span class="nav-tool-name">${esc(l.name)}</span><span class="nav-found-tag">Connect</span></button>`).join('');
   if (!tools.length) {
-    el.innerHTML = '<button class="nav-empty" data-action="add-tool">Connect your first AI tool</button>';
+    el.innerHTML = `${foundRows}<button class="nav-empty" data-action="add-tool">Connect your first AI tool</button>`;
     return;
   }
   el.innerHTML = tools.map((t) => {
     const st = toolStatus(t);
     const busy = t.sessions_running || t.current_activity;
     const cur = S.page === 'tool' && S.toolId === t.id ? 'aria-current="page"' : '';
-    return `<a href="#tool-${t.id}" class="nav-tool ${S.flashTool === t.id ? 'flash' : ''}" ${cur} title="${esc(`${t.name} · ${st.label}`)}">
-      ${logo(t, 'xs')}<span class="nav-tool-name">${esc(t.name)}</span>
+    // Entries tracked by hand from early versions sit next to their sign-in replacements under the same name.
+    const manual = t.replaced_by ? ' · tracked by hand' : '';
+    return `<a href="#tool-${t.id}" class="nav-tool ${S.flashTool === t.id ? 'flash' : ''}" ${cur} title="${esc(`${t.name}${manual} · ${st.label}`)}">
+      ${logo(t, 'xs')}<span class="nav-tool-name">${esc(t.name)}${manual ? '<span class="nav-tool-sub">manual</span>' : ''}</span>
       <span class="nav-dot d-${st.dot} ${busy ? 'pulse' : ''}" aria-label="${esc(st.label)}"></span></a>`;
-  }).join('');
+  }).join('') + foundRows;
 }
 
 function currentTitle() {

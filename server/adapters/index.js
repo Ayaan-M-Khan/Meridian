@@ -75,7 +75,7 @@ const replaced = (id, name, vendor, by, why) => ({ ...tracked(id, name, vendor, 
 const legacy = [
   replaced('claude-plan', 'Claude (Pro / Max plan)', 'Anthropic', 'claude-code', 'Your Claude plan can now be connected by signing in through Claude Code, which also reads its usage automatically.'),
   replaced('chatgpt-plan', 'ChatGPT (Plus / Pro / Team)', 'OpenAI', 'codex', 'Your ChatGPT plan can now be connected by signing in through Codex, which also reads its usage and plan limits.'),
-  replaced('gemini', 'Gemini', 'Google', 'gemini-cli', 'Your Google account can now be connected by signing in through Gemini CLI, which also reads its usage.'),
+  replaced('gemini', 'Gemini', 'Google', 'antigravity-cli', 'Your Google account can now be connected by signing in: through Gemini (Antigravity) for personal accounts, or Gemini CLI for Workspace and paid accounts.'),
   replaced('cursor', 'Cursor', 'Anysphere', 'cursor-cli', 'Your Cursor account can now be connected by signing in through the Cursor CLI.'),
   replaced('github-copilot', 'GitHub Copilot', 'GitHub', 'copilot-cli', 'Your GitHub account can now be connected by signing in through GitHub Copilot CLI.'),
 ];
