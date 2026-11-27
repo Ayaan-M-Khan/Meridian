@@ -35,7 +35,7 @@ One dashboard for your AI tools: what's running, what's next, what you've spent,
 | --- | --- |
 | ![Meridian's overview: running work, usage tiles and the daily summary](docs/screenshots/dashboard.png) | ![The map: the command center in the middle, AI tools grouped by company, and the routes requests take](docs/screenshots/map.png) |
 | **Tasks** | **Statistics** |
-| ![Tasks with live progress and estimated finish times](docs/screenshots/tasks.png) | ![Statistics: share of usage, 30 days of tokens, and how each AI performs](docs/screenshots/stats.png) |
+| ![Tasks with live progress and estimated finish times](docs/screenshots/tasks.png) | ![Statistics: this month's totals, tokens per day, each tool's share, and how each AI performs](docs/screenshots/stats.png) |
 
 <p align="center"><img src="docs/screenshots/map-light.png" width="720" alt="The map in the light theme"><br><sub>The light theme. All screenshots use the built-in demo data, not real accounts.</sub></p>
 
@@ -81,14 +81,14 @@ The installer is written to `dist/`. Use `npm run app` to open the desktop app w
 
 - **The command center** sits in the middle ("You are here"). Your AI tools are places around it, grouped into regions by company: Anthropic, OpenAI, Google, GitHub and so on.
 - **Distance means usage.** The closer a place is to the center, the more you used it this month. A tool with no usage reported sits out at the edge, so nothing is guessed.
-- **Routes** run from the center to each place, wider the more requests smart routing sent there in the last 30 days, and colored by the tool's status. Dotted routes haven't been used.
-- **Layers** you can switch on and off:
-  - **Live work:** moving dashes and a "live" badge on a route while something runs there.
+- **Routes** run from the center to each place, in its company's color, wider the more requests smart routing sent there in the last 30 days. Dotted routes haven't been used.
+- **Layers** you can switch on and off (each switch shows the mark it draws):
+  - **Live work:** moving dashes along a route while something runs there, and "N running" under the place's name.
   - **Team hand-offs:** dashed arcs between AIs that passed work to each other in AI team tasks.
   - **Plan limits:** a ring around a place showing how much of its plan limit is used.
   - **Companies:** the regions.
 - **Moving around:**
-  - Drag to move, and scroll or pinch to zoom.
+  - The map fills the window. Drag to move, and scroll or pinch to zoom. Names stay readable when it's zoomed out to show everything.
   - **+**, **−** and the compass (which shows the whole map again) sit at the bottom right. A minimap shows where you are; click it to jump.
   - **Search the map** finds a place and flies there.
 - **Place cards:** click a place to open its card: status, tokens today and this month, requests routed there, how often its runs finished well, plan limits, and buttons to open it or chat with it.
@@ -221,14 +221,15 @@ The **Automations** page keeps prompts that run on a schedule: every hour, every
 
 ## Statistics
 
-The **Statistics** page shows:
+The **Statistics** page fits on about one screen:
 
-- Each tool's share of your tokens this month, and 30 days of usage with a 7-day average.
+- A strip of this month's totals: tokens, requests, AI runs, AI team tasks and the busiest day.
+- Tokens per day for 30 days with a 7-day average, and each tool's share of this month's tokens.
 - How each AI did on the work it ran here: success rate, typical time, how often its work passed the first review, and approvals it gave.
-- What kinds of requests you send and where Automatic sent them.
-- How much input each tool reused from its cache, and recent routing decisions with their reasons.
+- What kinds of requests you send, where Automatic sent them, and how much input each tool reused from its cache.
+- The latest routing decisions with their reasons (the rest are one click away).
 
-Every figure comes from reported usage, runs here and routing decisions; nothing is estimated.
+Every figure comes from reported usage, runs here and routing decisions; nothing is estimated. A tool keeps the same chart color on Statistics and Usage & Costs, the colors are checked to stay distinguishable for color-blind readers, and every chart has its figures beside it or in a table. With more than six tools, the smallest are grouped as one gray "other tools" part instead of repeating a color.
 
 ## Several AIs at once
 

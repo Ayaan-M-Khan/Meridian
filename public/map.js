@@ -9,8 +9,8 @@
 export const MAP_LAYERS = { routes: 'Routes', live: 'Live work', team: 'Team hand-offs', limits: 'Plan limits', regions: 'Companies' };
 const MIN_K = 0.3;
 const MAX_K = 3.2;
-const HUB_R = 38;
-const LAND = 44; // how far a company's land reaches around each of its places
+const HUB_R = 32;
+const LAND = 40; // how far a company's land reaches around each of its places
 
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -157,55 +157,47 @@ function arcPath(a, b) {
   const [cx, cy] = len > 30 ? [mx * 1.45, my * 1.45] : [mx - (b.y - a.y) * 0.35, my + (b.x - a.x) * 0.35];
   return `M${a.x} ${a.y} Q${r1(cx)} ${r1(cy)} ${b.x} ${b.y}`;
 }
-/** Wobbly closed rings around the center, like contour lines around a summit. Decorative only. */
-function contour(R) {
-  const pts = [];
-  for (let i = 0; i <= 72; i++) {
-    const a = (i / 72) * Math.PI * 2;
-    const r = R + 9 * Math.sin(3 * a + R / 40) + 6 * Math.sin(5 * a + R / 23) + 4 * Math.cos(7 * a + R / 17);
-    pts.push(`${r1(Math.cos(a) * r)} ${r1(Math.sin(a) * r)}`);
-  }
-  return `M${pts.join(' L')}Z`;
-}
 const nested = (icon, size) => icon.replace('<svg ', `<svg x="${-size / 2}" y="${-size / 2}" width="${size}" height="${size}" `);
+
+/** A company's land: a soft disc around each of its places, joined by wide bridges, drawn as one shape. */
+function landShapes(g, grow = 0) {
+  return `${g.land.map((c) => `<circle cx="${c.x}" cy="${c.y}" r="${r1(c.r + grow)}"/>`).join('')}${g.bridges.map((b) => `<line x1="${b.x1}" y1="${b.y1}" x2="${b.x2}" y2="${b.y2}" stroke-width="${r1(2 * (LAND + grow))}"/>`).join('')}`;
+}
 
 function worldSvg(m, layers, sel, h) {
   const { esc } = h;
   const parts = [];
-  parts.push('<rect class="map-sea" x="-4000" y="-4000" width="8000" height="8000" fill="url(#map-grid)"/>');
-  parts.push(`<g class="map-contours" aria-hidden="true">${[95, 165, 235, 305, 375, 445, 530, 620].map((R) => `<path d="${contour(R)}"/>`).join('')}</g>`);
-  parts.push(`<g class="map-rings" aria-hidden="true">${[170, 270, 390].map((R, i) => `<circle r="${R}"/><text x="${R + 6}" y="-6">${['busiest', '', 'quiet'][i]}</text>`).join('')}</g>`);
+  // Sea: a quiet dot grid, with a soft glow around the command center and faint distance rings.
+  parts.push('<rect class="map-sea" x="-4000" y="-4000" width="8000" height="8000" fill="url(#map-dots)"/>');
+  parts.push('<circle class="map-aura" r="260" fill="url(#map-glow)" aria-hidden="true"/>');
+  parts.push(`<g class="map-rings" aria-hidden="true">${[170, 270, 390].map((R, i) => `<circle r="${R}"/>${['Busiest', '', 'Quiet'][i] ? `<text x="${R + 6}" y="-5">${['Busiest', '', 'Quiet'][i]}</text>` : ''}`).join('')}</g>`);
   if (layers.regions) {
+    // The edge is the same shape drawn 1.5 larger underneath, so the land keeps one clean outline where discs overlap.
     parts.push(`<g class="map-regions">${m.regions.map((g) => `<g style="--h: var(--hue-${g.hue})">
-      <g class="map-land-edge">${g.land.map((c) => `<circle cx="${c.x}" cy="${c.y}" r="${r1(c.r + 1.5)}"/>`).join('')}${g.bridges.map((b) => `<line x1="${b.x1}" y1="${b.y1}" x2="${b.x2}" y2="${b.y2}" stroke-width="${2 * LAND + 3}"/>`).join('')}</g>
-      <g class="map-land">${g.land.map((c) => `<circle cx="${c.x}" cy="${c.y}" r="${c.r}"/>`).join('')}${g.bridges.map((b) => `<line x1="${b.x1}" y1="${b.y1}" x2="${b.x2}" y2="${b.y2}" stroke-width="${2 * LAND}"/>`).join('')}</g>
-      <text class="map-region-label" x="${g.lx}" y="${g.ly}" text-anchor="middle">${esc(g.vendor.toUpperCase())}</text></g>`).join('')}</g>`);
+      <g class="map-land-edge">${landShapes(g, 1.5)}</g><g class="map-land">${landShapes(g)}</g>
+      <g transform="translate(${g.lx} ${g.ly})"><text class="map-region-label map-label" text-anchor="middle">${esc(g.vendor.toUpperCase())}</text></g></g>`).join('')}</g>`);
   }
   if (layers.routes) {
+    // Each road takes its company's color; wider means more requests went there. A road nothing took is dotted.
     parts.push(`<g class="map-roads">${m.nodes.map((n) => {
-      const w = r1(1.4 + 7 * n.routedW);
-      const cls = n.status.dot === 'ok' ? 'ok' : n.status.dot === 'err' ? 'err' : n.status.dot === 'warn' ? 'warn' : 'idle';
-      return `<path class="map-road-casing" d="${roadPath(n)}" stroke-width="${r1(w + 4)}"/><path class="map-road ${cls} ${n.routed ? '' : 'unused'}" d="${roadPath(n)}" stroke-width="${w}"/>`;
+      const w = r1(1.5 + 5 * n.routedW);
+      return `<path class="map-road-casing" d="${roadPath(n)}" stroke-width="${r1(w + 3)}"/><path class="map-road ${n.routed ? '' : 'unused'}" d="${roadPath(n)}" stroke-width="${w}" style="--h: var(--hue-${n.hue})"/>`;
     }).join('')}</g>`);
   }
   if (layers.team && m.team.length) {
     const max = Math.max(...m.team.map((t) => t.count));
-    parts.push(`<g class="map-team">${m.team.map((t) => `<path class="map-handoff" d="${arcPath(t.from, t.to)}" stroke-width="${r1(1.4 + 3.5 * (t.count / max))}"><title>${esc(`${t.from.name} and ${t.to.name} handed work to each other ${t.count} time${t.count === 1 ? '' : 's'} in AI team tasks`)}</title></path>`).join('')}</g>`);
+    parts.push(`<g class="map-team">${m.team.map((t) => `<path class="map-handoff" d="${arcPath(t.from, t.to)}" stroke-width="${r1(1.25 + 2.5 * (t.count / max))}"><title>${esc(`${t.from.name} and ${t.to.name} handed work to each other ${t.count} time${t.count === 1 ? '' : 's'} in AI team tasks`)}</title></path>`).join('')}</g>`);
   }
   if (layers.live) {
-    parts.push(`<g class="map-traffic-layer">${m.nodes.filter((n) => n.running).map((n) => {
-      const mx = r1(n.x / 2 - n.y * 0.07);
-      const my = r1(n.y / 2 + n.x * 0.07);
-      return `<path class="map-traffic" d="${roadPath(n)}"/><g class="map-badge" transform="translate(${mx} ${my})"><rect x="-26" y="-10" width="52" height="20" rx="10"/><text dy="0.35em" text-anchor="middle">${n.running} live</text></g>`;
-    }).join('')}</g>`);
+    parts.push(`<g class="map-traffic-layer">${m.nodes.filter((n) => n.running).map((n) => `<path class="map-traffic" d="${roadPath(n)}"/>`).join('')}</g>`);
   }
 
   // The center: you and your command center.
   parts.push(`<g class="map-node map-hub ${sel === 'hub' ? 'sel' : ''}" data-key="hub" tabindex="0" role="button" aria-label="${esc(`Your command center: ${m.totals.tools} AI tools${m.totals.running ? `, ${m.totals.running} running now` : ''}`)}">
-    <circle class="map-node-halo" r="${HUB_R + 9}"/><circle class="map-hub-glow" r="${HUB_R + 22}"/><circle class="map-hub-body" r="${HUB_R}"/>
-    <g class="map-hub-icon">${nested(h.ICON.brand ?? h.ICON.spark, 30)}</g>
-    <text class="map-node-name" y="${HUB_R + 19}" text-anchor="middle">Command center</text>
-    <text class="map-node-sub" y="${HUB_R + 33}" text-anchor="middle">You are here</text></g>`);
+    <circle class="map-node-halo" r="${HUB_R + 11}"/><circle class="map-hub-wave" r="${HUB_R}"/><circle class="map-hub-ring" r="${HUB_R + 6}"/><circle class="map-hub-body" r="${HUB_R}"/>
+    <g class="map-hub-icon">${nested(h.ICON.brand ?? h.ICON.spark, 26)}</g>
+    <g transform="translate(0 ${HUB_R})"><g class="map-label"><text class="map-node-name" y="24" text-anchor="middle">Command center</text>
+    <text class="map-node-sub" y="38" text-anchor="middle">You are here</text></g></g></g>`);
 
   for (const n of m.nodes) {
     const label = `${n.name}, ${n.vendor}. ${n.status.label}.${n.tokens != null ? ` ${h.fmtNum(n.tokens)} tokens this month.` : ' No usage reported this month.'}${n.running ? ` ${n.running} running now.` : ''}${n.limitPct != null ? ` ${Math.round(n.limitPct)}% of its plan limit used.` : ''}`;
@@ -218,8 +210,8 @@ function worldSvg(m, layers, sel, h) {
       ${layers.limits && n.limitPct != null ? `<circle class="map-limit-track" r="${r1(n.r + 5)}"/><circle class="map-limit ${limCls}" r="${r1(n.r + 5)}" stroke-dasharray="${r1((C * Math.min(100, n.limitPct)) / 100)} ${r1(C)}" transform="rotate(-90)"/>` : ''}
       <circle class="map-node-body" r="${n.r}"/>
       <text class="map-node-mono" dy="0.36em" text-anchor="middle">${esc(h.mono(n.tool))}</text>
-      <text class="map-node-name" y="${r1(n.r + 20)}" text-anchor="middle">${esc(n.name)}</text>
-      <text class="map-node-sub" y="${r1(n.r + 34)}" text-anchor="middle">${esc(sub)}</text>
+      <g transform="translate(0 ${n.r})"><g class="map-label"><text class="map-node-name" y="21" text-anchor="middle">${esc(n.name)}</text>
+      <text class="map-node-sub" y="35" text-anchor="middle">${esc(sub)}${n.running && layers.live ? `<tspan class="map-live"> · ${n.running} running</tspan>` : ''}</text></g></g>
       ${n.attention ? `<g class="map-pin" transform="translate(${r1(n.r * 0.72)} ${r1(-n.r * 0.95)})"><path d="M0 4 C-7 -3 -7 -14 0 -14 C7 -14 7 -3 0 4Z"/><text y="-5.5" text-anchor="middle">!</text></g>` : ''}
     </g>`);
   }
@@ -286,12 +278,15 @@ export function mountMap(el, { data, stats, state, h }) {
 
   el.innerHTML = `
     <svg class="map-svg" id="map-svg" role="group" aria-label="Map of your AI tools. Drag to move, scroll to zoom." xmlns="http://www.w3.org/2000/svg">
-      <defs><pattern id="map-grid" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M80 0H0V80" class="map-grid-line"/></pattern></defs>
+      <defs>
+        <pattern id="map-dots" width="26" height="26" patternUnits="userSpaceOnUse"><circle cx="13" cy="13" r="1.1" class="map-dot"/></pattern>
+        <radialGradient id="map-glow"><stop offset="0" class="map-glow-in"/><stop offset="1" class="map-glow-out"/></radialGradient>
+      </defs>
       <g id="map-world"></g>
     </svg>
     <div class="map-top">
-      <div class="map-search" role="search"><span aria-hidden="true">${ICON.map}</span><input id="map-q" type="search" placeholder="Search the map" autocomplete="off" aria-label="Search the map for a tool" aria-controls="map-results"><div class="map-results" id="map-results" role="listbox" hidden></div></div>
-      <div class="map-layers" role="group" aria-label="Map layers">${Object.entries(MAP_LAYERS).map(([k, v]) => `<button type="button" class="map-chip" data-map="layer" data-layer="${k}" aria-pressed="${Boolean(state.layers[k])}">${esc(v)}</button>`).join('')}</div>
+      <div class="map-search" role="search"><span aria-hidden="true">${ICON.search ?? ICON.map}</span><input id="map-q" type="search" placeholder="Search the map" autocomplete="off" aria-label="Search the map for a tool" aria-controls="map-results"><div class="map-results" id="map-results" role="listbox" hidden></div></div>
+      <div class="map-layers" role="group" aria-label="Map layers">${Object.entries(MAP_LAYERS).map(([k, v]) => `<button type="button" class="map-chip" data-map="layer" data-layer="${k}" aria-pressed="${Boolean(state.layers[k])}"><span class="lk lk-${k}" aria-hidden="true"></span>${esc(v)}</button>`).join('')}</div>
     </div>
     <div class="map-controls" role="group" aria-label="Zoom">
       <button type="button" class="map-ctl" data-map="zoom-in" aria-label="Zoom in" title="Zoom in (+)">${ICON.plus}</button>
@@ -302,12 +297,14 @@ export function mountMap(el, { data, stats, state, h }) {
     <div class="map-mini" aria-hidden="true"><svg id="map-mini"></svg></div>
     <details class="map-legend" ${state.legend === false ? '' : 'open'}><summary>Legend</summary>
       <ul>
-        <li><span class="lg lg-road"></span>Route: wider means more requests went there in the last 30 days</li>
+        <li><span class="lg lg-road"></span>Route, in its company’s color: wider means more requests went there (30 days)</li>
+        <li><span class="lg lg-unused"></span>Dotted route: nothing sent there yet</li>
         <li><span class="lg lg-traffic"></span>Moving dashes: work running there now</li>
-        <li><span class="lg lg-handoff"></span>Team hand-offs between AIs</li>
+        <li><span class="lg lg-handoff"></span>Arc: AIs handing work to each other in AI team tasks</li>
         <li><span class="lg lg-limit"></span>Ring: share of the plan limit used</li>
-        <li><span class="lg lg-near"></span>Closer to the center: more use this month</li>
+        <li><span class="lg lg-near"></span>Nearer the center: more use this month</li>
         <li><span class="lg lg-pin"></span>Pin: needs your attention</li>
+        <li class="lg-hint">Drag to move, scroll or pinch to zoom, 0 shows everything</li>
       </ul></details>
     <aside class="map-card" id="map-card" aria-live="polite" hidden></aside>
     ${model.nodes.length ? '' : `<div class="map-empty"><b>Your map is empty</b><span>Connect an AI tool and it appears here as a place.</span><button class="btn small primary" data-action="add-tool">${ICON.plus}Connect a tool</button></div>`}`;
@@ -322,8 +319,8 @@ export function mountMap(el, { data, stats, state, h }) {
     const xs = [-HUB_R - 60, HUB_R + 60];
     const ys = [-HUB_R - 60, HUB_R + 60];
     for (const n of model.nodes) {
-      xs.push(n.x - n.r - 70, n.x + n.r + 70);
-      ys.push(n.y - n.r - 30, n.y + n.r + 50);
+      xs.push(n.x - n.r - 80, n.x + n.r + 80);
+      ys.push(n.y - n.r - 30, n.y + n.r + 62);
     }
     if (state.layers.regions) for (const g of model.regions) {
       for (const c of g.land) {
@@ -365,8 +362,8 @@ export function mountMap(el, { data, stats, state, h }) {
     const pad = 60;
     miniB = { x: b.x0 - pad, y: b.y0 - pad, w: b.x1 - b.x0 + 2 * pad, h: b.y1 - b.y0 + 2 * pad };
     mini.setAttribute('viewBox', `${r1(miniB.x)} ${r1(miniB.y)} ${r1(miniB.w)} ${r1(miniB.h)}`);
-    mini.innerHTML = `${model.regions.map((g) => `<g class="mm-region" style="--h: var(--hue-${g.hue})">${g.land.map((c) => `<circle cx="${c.x}" cy="${c.y}" r="${c.r}"/>`).join('')}${g.bridges.map((b) => `<line x1="${b.x1}" y1="${b.y1}" x2="${b.x2}" y2="${b.y2}" stroke-width="${2 * LAND}"/>`).join('')}</g>`).join('')}
-      ${model.nodes.map((n) => `<path class="mm-road" d="${roadPath(n)}"/>`).join('')}
+    mini.innerHTML = `${model.regions.map((g) => `<g class="mm-region" style="--h: var(--hue-${g.hue})">${landShapes(g)}</g>`).join('')}
+      ${model.nodes.map((n) => `<path class="mm-road" d="${roadPath(n)}" style="--h: var(--hue-${n.hue})"/>`).join('')}
       <circle class="mm-hub" r="${HUB_R}"/>${model.nodes.map((n) => `<circle class="mm-node st-${n.status.dot}" cx="${n.x}" cy="${n.y}" r="${Math.max(14, n.r)}"/>`).join('')}
       <rect class="mm-view" id="mm-view"/>`;
   }

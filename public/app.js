@@ -1376,7 +1376,7 @@ const VIEWS = {
         <section class="card"><div class="card-head"><h3>Daily tokens</h3><span class="aside">Last 30 days</span></div>
           ${hasSeries ? '<div class="chart"><canvas id="ch-tokens" aria-label="Daily tokens by tool"></canvas></div><div class="legend" id="lg-tokens"></div>' : emptyBlock('No usage data yet', 'Token counts appear for tools that report them.')}</section>
         <section class="card"><div class="card-head"><h3>Daily spend</h3><span class="aside">Last 30 days</span></div>
-          ${hasCost ? '<div class="chart"><canvas id="ch-cost" aria-label="Daily spend by tool"></canvas></div>' : emptyBlock('No cost data yet', 'Spend appears for API tools and tools you log costs for. Apps signed in with your account are included in your plan.')}</section>
+          ${hasCost ? '<div class="chart"><canvas id="ch-cost" aria-label="Daily spend by tool"></canvas></div><div class="legend" id="lg-cost"></div>' : emptyBlock('No cost data yet', 'Spend appears for API tools and tools you log costs for. Apps signed in with your account are included in your plan.')}</section>
       </div>
       <section class="card"><div class="card-head"><h3>By tool</h3><span class="aside">This month</span></div>
         ${rows ? `<div class="table-wrap"><table><thead><tr><th>Tool</th><th class="r">Spend</th><th class="r">Tokens</th><th class="r">Input</th><th class="r">Output</th><th class="r">Requests</th><th>Budget</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table></div>` : emptyBlock('No tools yet', 'Add a tool to see its usage.')}
@@ -1395,55 +1395,78 @@ const VIEWS = {
     if (!st) return `${head}<div class="card">${emptyBlock('Loading statistics…', '')}</div>`;
     const t = st.totals;
     const pct = (n) => (n == null ? null : `${Math.round(n)}%`);
+    const sev = (p) => (p < 60 ? 'err' : p < 90 ? 'warn' : '');
+    const hbar = (name, value, max, fig, title = '') => `<div class="hbar"${title ? ` title="${esc(title)}"` : ''}>${name}<div class="bar thin"><i style="width:${(100 * value) / max}%"></i></div><b class="num">${esc(fig)}</b></div>`;
+    const named = (icon, label) => `<span class="cell-tool">${icon}<span class="min0 ellipsis">${esc(label)}</span></span>`;
+
+    // Share of tokens: a thin segmented bar above a list that names every part. Up to six tools keep the color they
+    // have on Usage & Costs; any beyond that are folded into one gray part, so no color repeats.
+    const top = st.share.slice(0, st.share.length > 6 ? 5 : 6);
+    const slots = toolColors(top.map((s) => s.id));
+    const parts = top.map((s) => ({ ...s, color: `var(--c${slots.get(s.id) + 1})` }));
+    const rest = st.share.slice(top.length);
+    if (rest.length) parts.push({ name: plural(rest.length, 'other tool'), tokens: rest.reduce((a, s) => a + s.tokens, 0), share: rest.reduce((a, s) => a + (s.share ?? 0), 0), color: 'var(--text-3)' });
+    const share = parts.length ? `<div class="segbar" role="img" aria-label="${esc(parts.map((p) => `${p.name} ${pct(p.share)}`).join(', '))}">${parts.map((p) => `<i style="flex-grow:${p.share ?? 0};background:${p.color}" title="${esc(`${p.name}: ${fmtNum(p.tokens)} tokens, ${pct(p.share)}`)}"></i>`).join('')}</div>
+      <div class="share-list">${parts.map((p) => `<div class="share-row"><i style="background:${p.color}"></i><span class="grow min0 ellipsis">${esc(p.name)}</span><span class="num faint">${esc(fmtNum(p.tokens))}</span><b class="num">${esc(pct(p.share))}</b></div>`).join('')}</div>`
+      : emptyBlock('No token usage yet', 'Shares appear once tools report tokens.');
+
+    const hasDaily = st.daily.some((x) => x.tokens != null);
+    const daily = hasDaily ? `<div class="chart chart-sm"><canvas id="ch-daily" aria-label="Tokens per day, last 30 days"></canvas></div>
+      <table class="sr-only"><caption>Tokens per day</caption><thead><tr><th>Day</th><th>Tokens</th></tr></thead><tbody>${st.daily.map((x) => `<tr><td>${esc(shortDay(x.day))}</td><td>${x.tokens == null ? 'Not reported' : esc(fmtNum(x.tokens))}</td></tr>`).join('')}</tbody></table>`
+      : emptyBlock('No usage yet', 'Daily totals appear once tools report tokens.');
+
     const perfRows = st.performance.map((p) => `<tr>
-      <td><span class="cell-tool">${engineById(p.id, p.label)}<b>${esc(p.label)}</b></span></td>
+      <td>${named(engineById(p.id, p.label), p.label)}</td>
       <td class="r">${p.runs}</td>
-      <td class="r"><span class="${p.success_pct < 60 ? 'err-text' : p.success_pct < 90 ? 'warn-text' : ''}">${esc(pct(p.success_pct))}</span></td>
+      <td><div class="meter-cell" title="${esc(`${p.ok} of ${p.runs} finished successfully`)}"><span class="bar thin ${sev(p.success_pct)}"><i style="width:${p.success_pct}%"></i></span><span class="num">${esc(pct(p.success_pct))}</span></div></td>
       <td class="r">${or(p.median_ms == null ? null : dur(p.median_ms), '—')}</td>
-      <td class="r">${or(p.passed_review_pct == null ? null : `${pct(p.passed_review_pct)} of ${p.reviewed}`, '—')}</td>
+      <td class="r"${p.reviewed ? ` title="${esc(`${pct(p.passed_review_pct)} of its work passed the first review`)}"` : ''}>${or(p.reviewed ? `${p.passed} of ${p.reviewed}` : null, '—')}</td>
       <td class="r">${or(p.reviews ? `${p.approved} of ${p.reviews}` : null, '—')}</td></tr>`).join('');
+
     const maxCat = Math.max(1, ...st.asks.by_category.map((c) => c.count));
     const maxEng = Math.max(1, ...st.asks.by_engine.map((c) => c.count));
+    const asks = st.asks.by_category.length
+      ? `<section class="card"><div class="card-head"><h3>What you ask for</h3><span class="aside">${plural(st.asks.total, 'request')}</span></div>
+          <div class="hbars">${st.asks.by_category.map((c) => hbar(`<span class="ellipsis">${esc(c.label)}</span>`, c.count, maxCat, c.count)).join('')}</div></section>
+        <section class="card"><div class="card-head"><h3>Where Automatic sent it</h3><span class="aside">Last 30 days</span></div>
+          <div class="hbars">${st.asks.by_engine.map((c) => hbar(named(engineById(c.id, c.label), c.label), c.count, maxEng, c.count)).join('')}</div></section>`
+      : `<section class="card span-2"><div class="card-head"><h3>What you ask for</h3></div>${emptyBlock('Nothing routed yet', 'With the assistant on Automatic, every request is sorted by kind and sent to the best AI for it.')}</section>`;
+    const cache = `<section class="card"><div class="card-head"><h3>Cache reuse</h3><span class="aside">This month</span></div>
+      ${st.cache.length ? `<div class="hbars">${st.cache.map((c) => hbar(named(logo({ vendor: c.vendor, name: c.name, adapter: c.adapter }, 'xs'), c.name), c.cache_pct, 100, pct(c.cache_pct), `${fmtNum(c.cache_read)} tokens read from cache`)).join('')}</div>
+        <p class="fine">Input read back from the provider’s cache instead of sent fresh. Higher is cheaper.</p>`
+        : emptyBlock('No cache figures yet', 'Shown for tools that report cache reads, such as Claude Code.')}</section>`;
+
+    // Routing decisions: the reason repeats the kind of request first ("Debugging: …"), which the tag already shows.
+    const routeRow = (r) => {
+      const why = r.why && r.category && r.why.startsWith(`${r.category}: `) ? r.why.slice(r.category.length + 2) : r.why;
+      return `<div class="route-row">${engineById(r.engine, r.engine_label)}
+        <div class="min0"><div class="route-title ellipsis">${esc(r.preview || r.category)}</div>${why ? `<div class="route-why ellipsis" title="${esc(why)}">${esc(why)}</div>` : ''}</div>
+        <span class="tag">${esc(r.category)}</span><span class="route-time">${esc(rel(r.at))}</span></div>`;
+    };
+    const routes = st.recent_routes;
+    const recent = routes.length
+      ? `<div class="route-list">${routes.slice(0, 5).map(routeRow).join('')}</div>${routes.length > 5 ? `<details class="route-more"><summary>Show ${routes.length - 5} more</summary><div class="route-list">${routes.slice(5).map(routeRow).join('')}</div></details>` : ''}`
+      : emptyBlock('No decisions yet', 'They appear here when Automatic picks an AI for a chat, task or team.');
+
     return `${head}
       <div class="tiles tiles-5">
-        ${tile('Tokens this month', fmtNum(t.tokens_mtd), 'Input, output and cache, all tools')}
+        ${tile('Tokens this month', fmtNum(t.tokens_mtd), 'All tools, cache included')}
         ${tile('Requests this month', t.requests_mtd?.toLocaleString() ?? null, 'Where tools report them')}
         ${tile('AI runs this month', t.runs_mtd, t.success_pct == null ? 'Tasks your AIs ran here' : `${pct(t.success_pct)} finished successfully`)}
         ${tile('AI team tasks', t.team_runs, t.team_median_ms == null ? 'Last 30 days' : `Usually take ${dur(t.team_median_ms)}`)}
         ${tile('Busiest day', t.busiest_day ? fmtNum(t.busiest_day.tokens) : null, t.busiest_day ? `${shortDay(t.busiest_day.day)}, in tokens` : 'No usage yet', { na: 'No usage yet' })}
       </div>
-      <div class="grid-2">
-        <section class="card"><div class="card-head"><h3>Share of usage</h3><span class="aside">This month, by tokens</span></div>
-          ${st.share.length ? `<div class="share"><div class="share-chart"><canvas id="ch-share" aria-label="Share of tokens by tool"></canvas></div>
-            <div class="share-list">${st.share.map((s, i) => `<div class="share-row"><i style="background:var(--c${(i % 6) + 1})"></i><span class="grow min0">${esc(s.name)}</span><span class="num faint">${esc(fmtNum(s.tokens))}</span><b class="num">${esc(pct(s.share))}</b></div>`).join('')}</div></div>`
-            : emptyBlock('No token usage yet', 'Shares appear once tools report tokens.')}
-        </section>
-        <section class="card"><div class="card-head"><h3>Usage over 30 days</h3><span class="aside">Tokens per day, all tools</span></div>
-          ${st.daily.some((x) => x.tokens != null) ? '<div class="chart"><canvas id="ch-daily" aria-label="Tokens per day"></canvas></div>' : emptyBlock('No usage yet', 'Daily totals appear once tools report tokens.')}
-        </section>
+      <div class="stats-top">
+        <section class="card"><div class="card-head"><h3>Tokens per day</h3>${hasDaily ? '<div class="legend-inline" aria-hidden="true"><span><i></i>Tokens</span><span><i class="line"></i>7-day average</span></div>' : ''}</div>${daily}</section>
+        <section class="card"><div class="card-head"><h3>Share of tokens</h3><span class="aside">This month</span></div>${share}</section>
       </div>
-      <section class="card"><div class="card-head"><h3>How your AIs perform</h3><span class="aside">Work they did here, last 30 days</span></div>
-        ${perfRows ? `<div class="table-wrap"><table><thead><tr><th>AI</th><th class="r">Runs</th><th class="r">Succeeded</th><th class="r">Typical time</th><th class="r">Its work approved</th><th class="r">Approvals it gave</th></tr></thead><tbody>${perfRows}</tbody></table></div>
-          <p class="fine">Runs count assistant tasks, AI team stages and Ask all answers. “Its work approved” is how often the first review approved what it built; “approvals it gave” is how often it approved as the reviewer. Smart routing uses recent failures here to send work elsewhere.</p>`
+      <section class="card"><div class="card-head"><h3>How your AIs perform</h3><span class="aside">Last 30 days</span></div>
+        ${perfRows ? `<div class="table-wrap"><table class="table-compact"><thead><tr><th>AI</th><th class="r">Runs</th><th>Succeeded</th><th class="r">Typical time</th><th class="r" title="How often the first review approved what this AI built">Work approved</th><th class="r" title="How often this AI approved the work it reviewed">Approvals given</th></tr></thead><tbody>${perfRows}</tbody></table></div>
+          <p class="fine">Assistant tasks, AI team stages and Ask all answers. Smart routing steers work away from an AI that keeps failing here.</p>`
           : emptyBlock('No runs yet', 'Start an assistant task, an AI team task or Ask all to see how each AI does.')}
       </section>
-      <div class="grid-2">
-        <section class="card"><div class="card-head"><h3>What you ask for</h3><span class="aside">${plural(st.asks.total, 'request')} routed</span></div>
-          ${st.asks.by_category.length ? `<div class="hbars">${st.asks.by_category.map((c) => `<div class="hbar"><span>${esc(c.label)}</span><div class="bar thin"><i style="width:${(100 * c.count) / maxCat}%"></i></div><b class="num">${c.count}</b></div>`).join('')}</div>
-            <div class="lineup-label">Where Automatic sent it</div>
-            <div class="hbars">${st.asks.by_engine.map((c) => `<div class="hbar"><span class="cell-tool">${engineById(c.id, c.label)}${esc(c.label)}</span><div class="bar thin"><i style="width:${(100 * c.count) / maxEng}%"></i></div><b class="num">${c.count}</b></div>`).join('')}</div>`
-            : emptyBlock('Nothing routed yet', 'With the assistant on Automatic, every request is sorted by kind and sent to the best AI for it.')}
-        </section>
-        <section class="card"><div class="card-head"><h3>Cache reuse</h3><span class="aside">This month</span></div>
-          ${st.cache.length ? `<div class="hbars">${st.cache.map((c) => `<div class="hbar"><span class="cell-tool">${logo({ vendor: c.vendor, name: c.name, adapter: c.adapter }, 'xs')}${esc(c.name)}</span><div class="bar thin ok"><i style="width:${c.cache_pct}%"></i></div><b class="num">${esc(pct(c.cache_pct))}</b></div>`).join('')}</div>
-            <p class="fine">The share of input read back from the provider’s cache instead of sent fresh. Higher is better: cached input is cheaper and counts less toward limits.</p>`
-            : emptyBlock('No cache figures yet', 'Shown for tools that report cache reads, such as Claude Code.')}
-        </section>
-      </div>
-      <section class="card"><div class="card-head"><h3>Recent routing decisions</h3></div>
-        ${st.recent_routes.length ? `<div class="rows">${st.recent_routes.map((r) => `<div class="row">${engineById(r.engine, r.engine_label)}<div class="row-main"><div class="row-title">${esc(r.preview || r.category)}</div><div class="row-sub">${esc(r.why ?? '')}</div></div><div class="row-time">${esc(rel(r.at))}</div></div>`).join('')}</div>`
-          : emptyBlock('No decisions yet', 'They appear here when Automatic picks an AI for a chat, task or team.')}
-      </section>`;
+      <div class="grid-3">${asks}${cache}</div>
+      <section class="card"><div class="card-head"><h3>Recent routing decisions</h3><span class="aside">Newest first</span></div>${recent}</section>`;
   },
 
   tasks() {
@@ -1492,7 +1515,7 @@ const VIEWS = {
   map() {
     const d = S.data;
     const tools = d.tools.filter((t) => t.kind !== 'builtin');
-    return `<div class="page-head"><div><h2>Map</h2><p>Your command center and the AI tools around it, grouped by company, with the routes your requests take. Drag to move, scroll to zoom, or search for a place.</p></div>
+    return `<div class="page-head"><div><h2>Map</h2><p>Your command center and the AI tools around it, grouped by company, with the routes your requests take.</p></div>
         <div class="form-actions"><button class="btn" data-action="add-tool">${ICON.plus}Connect a tool</button></div></div>
       <div class="map" id="map" tabindex="0" aria-label="AI map. Arrow keys move it, plus and minus zoom, 0 shows everything, Tab moves between places."></div>
       <details class="map-list card" ${tools.length ? '' : 'hidden'}><summary>${ICON.tasks}<span>Every place as a list</span></summary><div id="map-list"></div></details>`;
@@ -2266,7 +2289,46 @@ function manageSection(t) {
 function palette() {
   const cs = getComputedStyle(document.documentElement);
   const v = (n) => cs.getPropertyValue(n).trim();
-  return { series: ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'].map(v), text: v('--text-3'), grid: v('--border-sub') };
+  return { series: ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'].map(v), text: v('--text-3'), line: v('--text-2'), other: v('--text-3'), surface: v('--surface'), grid: v('--border') };
+}
+
+/**
+ * Chart colors follow the tool, never its rank: a tool keeps the color of its place on Usage & Costs, so it looks the
+ * same on every chart. Returns id → color slot (0–5). There are six colors; ids past that get none and are shown as
+ * one gray "other" part instead of a repeated color.
+ */
+function toolColors(ids) {
+  const order = (S.data?.usage?.series ?? []).map((s) => s.id);
+  const out = new Map();
+  const used = new Set();
+  for (const id of ids) {
+    const i = order.indexOf(id);
+    if (i >= 0 && i < 6 && !used.has(i)) {
+      out.set(id, i);
+      used.add(i);
+    }
+  }
+  for (const id of ids) {
+    if (out.has(id)) continue;
+    const free = [0, 1, 2, 3, 4, 5].find((i) => !used.has(i));
+    if (free == null) break;
+    out.set(id, free);
+    used.add(free);
+  }
+  return out;
+}
+
+/** Up to six tools as their own series; with more, the five biggest stay and the rest become one gray series. */
+function foldSeries(sets, field) {
+  if (sets.length <= 6) return sets.map((s, i) => ({ id: s.id, name: s.name, data: s[field], slot: i }));
+  const total = (s) => s[field].reduce((a, v) => a + (v ?? 0), 0);
+  const keep = new Set([...sets].sort((a, b) => total(b) - total(a)).slice(0, 5).map((s) => s.id));
+  const slots = toolColors([...keep]);
+  const rest = sets.filter((s) => !keep.has(s.id));
+  return [
+    ...sets.filter((s) => keep.has(s.id)).map((s) => ({ id: s.id, name: s.name, data: s[field], slot: slots.get(s.id) })),
+    { id: null, name: plural(rest.length, 'other tool'), data: sets[0][field].map((_, d) => sumOrNull(rest.map((s) => s[field][d]))), slot: null },
+  ];
 }
 
 function autosize(el) {
@@ -2340,15 +2402,8 @@ const AFTER = {
       if (!S.stats || S.stats.demo !== S.demo) return;
     }
     if (!window.Chart) return;
-    const { series: colors, text, grid } = palette();
+    const { series: colors, text, line, grid } = palette();
     const st = S.stats;
-    if ($('#ch-share') && st.share.length) {
-      S.charts.push(new window.Chart($('#ch-share'), {
-        type: 'doughnut',
-        data: { labels: st.share.map((s) => s.name), datasets: [{ data: st.share.map((s) => s.tokens), backgroundColor: st.share.map((_, i) => colors[i % colors.length]), borderWidth: 0, hoverOffset: 4 }] },
-        options: { responsive: true, maintainAspectRatio: false, animation: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${fmtNum(c.raw)}` } } } },
-      }));
-    }
     if ($('#ch-daily')) {
       const vals = st.daily.map((x) => x.tokens);
       const avg = vals.map((_, i) => {
@@ -2359,11 +2414,11 @@ const AFTER = {
       S.charts.push(new window.Chart($('#ch-daily'), {
         type: 'bar',
         data: { labels: st.daily.map((x) => shortDay(x.day)), datasets: [
-          { type: 'line', label: '7-day average', data: avg, borderColor: colors[2], borderWidth: 2, pointRadius: 0, tension: 0.35, spanGaps: true },
-          { label: 'Tokens', data: vals, backgroundColor: colors[0], borderRadius: 3, maxBarThickness: 14 },
+          { type: 'line', label: '7-day average', data: avg, borderColor: line, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: line, tension: 0.35, spanGaps: true, order: 0 },
+          { label: 'Tokens', data: vals, backgroundColor: colors[0], borderRadius: 4, borderSkipped: 'start', maxBarThickness: 12, categoryPercentage: 0.82, barPercentage: 0.9, order: 1 },
         ] },
         options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtNum(c.raw)}` } } },
-          scales: { x: { ...base.scales.x, stacked: false }, y: { ...base.scales.y, stacked: false, ticks: { color: text, callback: (v) => fmtNum(v) } } } },
+          scales: { x: { ...base.scales.x, stacked: false, ticks: { ...base.scales.x.ticks, maxTicksLimit: 6 } }, y: { ...base.scales.y, stacked: false, ticks: { color: text, maxTicksLimit: 4, callback: (v) => fmtNum(v) } } } },
       }));
     }
   },
@@ -2388,27 +2443,40 @@ const AFTER = {
   },
   usage() {
     if (!window.Chart || !S.data.usage.series.length) return;
-    const { series, text, grid } = palette();
+    const { series, other, surface, text, grid } = palette();
     const labels = S.data.usage.days.map(shortDay);
     const base = chartBase(text, grid);
     const sets = S.data.usage.series;
+    const color = (f) => (f.slot == null ? other : series[f.slot]);
+    // Stacked parts are kept apart by a 2px gap in the card's own color, not by outlines.
+    const bars = (list) => list.map((f) => ({ label: f.name, data: f.data, backgroundColor: color(f), borderColor: surface, borderWidth: { top: 2, right: 0, bottom: 0, left: 0 }, borderRadius: 2, maxBarThickness: 18 }));
+    const legend = (list) => list.map((f) => `<span><i style="background:${color(f)}"></i>${esc(f.name)}</span>`).join('');
+    const tokens = foldSeries(sets, 'tokens');
     if ($('#ch-tokens')) {
       S.charts.push(new window.Chart($('#ch-tokens'), {
         type: 'bar',
-        data: { labels, datasets: sets.map((s, i) => ({ label: s.name, data: s.tokens, backgroundColor: series[i % series.length], borderRadius: 2, maxBarThickness: 18 })) },
+        data: { labels, datasets: bars(tokens) },
         options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtNum(c.raw)}` } } },
           scales: { ...base.scales, y: { ...base.scales.y, ticks: { color: text, callback: (v) => fmtNum(v) } } } },
       }));
-      $('#lg-tokens').innerHTML = sets.map((s, i) => `<span><i style="background:${series[i % series.length]}"></i>${esc(s.name)}</span>`).join('');
+      $('#lg-tokens').innerHTML = legend(tokens);
     }
     if ($('#ch-cost')) {
-      const costSets = sets.map((s, i) => ({ s, i })).filter(({ s }) => s.cost.some((v) => v != null));
+      // The same tools and colors as the tokens chart: a tool keeps its color even when others report no cost.
+      const slotOf = new Map(tokens.filter((f) => f.id != null).map((f) => [f.id, f.slot]));
+      const priced = sets.filter((s) => s.cost.some((v) => v != null));
+      const rest = priced.filter((s) => !slotOf.has(s.id));
+      const cost = [
+        ...priced.filter((s) => slotOf.has(s.id)).map((s) => ({ name: s.name, data: s.cost, slot: slotOf.get(s.id) })),
+        ...(rest.length ? [{ name: plural(rest.length, 'other tool'), data: rest[0].cost.map((_, d) => sumOrNull(rest.map((s) => s.cost[d]))), slot: null }] : []),
+      ];
       S.charts.push(new window.Chart($('#ch-cost'), {
         type: 'bar',
-        data: { labels, datasets: costSets.map(({ s, i }) => ({ label: s.name, data: s.cost, backgroundColor: series[i % series.length], borderRadius: 2, maxBarThickness: 18 })) },
+        data: { labels, datasets: bars(cost) },
         options: { ...base, plugins: { ...base.plugins, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw == null ? 'not reported' : fmtUsd(c.raw)}` } } },
           scales: { ...base.scales, y: { ...base.scales.y, ticks: { color: text, callback: (v) => `$${v}` } } } },
       }));
+      $('#lg-cost').innerHTML = legend(cost);
     }
   },
 };
