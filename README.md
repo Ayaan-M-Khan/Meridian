@@ -400,3 +400,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - The interface makes no requests to other sites: fonts and the chart library ship with the app.
 - Git tasks: the AI apps' own permission rules allow git and nothing else, and refuse `git reset`, `git clean` and history rewrites; they match command names, not flags. The push check is a git hook set through the environment of that one run (`GIT_CONFIG_COUNT` → `core.hooksPath`, `server/local/git-guard.js`), so nothing in your repository or git settings changes. These limits stop mistakes, not a determined program: `git push --no-verify` skips hooks, so the task's instructions forbid it and Claude Code refuses it up front, but GitHub Copilot's rules can't tell it apart from a normal push.
 - Task names, errors and results that come from other tools are passed to Claude as data, and its instructions say to treat them that way. Background tasks get only read access plus progress reporting, so text inside a reported task can't make one change your settings.
+
+## License
+
+Meridian is released under the [MIT License](LICENSE). It bundles open-source packages under their own permissive licenses (MIT, Apache-2.0, BSD, ISC, and the SIL Open Font License for the Inter font); each package's license text ships with it in the app.
