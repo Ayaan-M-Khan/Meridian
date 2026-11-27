@@ -1231,7 +1231,7 @@ const VIEWS = {
       const last = t.last_activity_at ? `Active ${rel(t.last_activity_at)}` : t.last_usage_day ? `Last usage ${shortDay(t.last_usage_day)}` : 'No activity yet';
       return `<a class="card tool" href="#tool-${t.id}">
         <div class="tool-head">${logo(t)}
-          <div class="min0"><div class="tool-name">${esc(t.name)}</div><div class="tool-kind">${esc(KIND_LABEL[t.kind] ?? t.adapter_name)} · ${esc(t.vendor)}</div></div>
+          <div class="min0" title="${esc(`${t.name} · ${KIND_LABEL[t.kind] ?? t.adapter_name} · ${t.vendor}`)}"><div class="tool-name">${esc(t.name)}</div><div class="tool-kind">${esc(KIND_LABEL[t.kind] ?? t.adapter_name)} · ${esc(t.vendor)}</div></div>
           ${pill(st.cls, st.label)}</div>
         <dl class="kv">
           <div><dt>Tokens this month</dt><dd class="${t.tokens_mtd == null ? 'na' : ''}">${or(fmtNum(t.tokens_mtd))}</dd></div>
@@ -3136,7 +3136,19 @@ const ACTIONS = {
   },
   async 'confirm-restore'(el) {
     el.disabled = true;
-    const r = await api('/api/restore', { method: 'POST', body: S.pendingRestore });
+    const password = $('#restore-password')?.value ?? '';
+    if (!password) {
+      el.disabled = false;
+      $('#restore-password')?.focus();
+      return toast('Enter your password to restore.', true);
+    }
+    let r;
+    try {
+      r = await api('/api/restore', { method: 'POST', body: { password, backup: S.pendingRestore } });
+    } catch (err) {
+      el.disabled = false;
+      throw err;
+    }
     S.pendingRestore = null;
     S.local = null;
     S.chat = { loaded: false, threads: [], thread: null, streaming: false, pending: null, draft: '' };
@@ -3511,6 +3523,7 @@ async function onChange(e) {
         <b>Restore the backup from ${esc(String(b.exported_at ?? '').slice(0, 10) || 'an unknown date')}?</b>
         It has ${plural(b.integrations?.length ?? 0, 'tool')}, ${plural(b.tasks?.length ?? 0, 'task')} and ${plural(b.assistant_threads?.length ?? 0, 'conversation')}.
         They replace everything in the app now. Your account and Claude API key stay as they are; other tools’ keys need adding again.
+        <div class="field"><label for="restore-password">Your password</label><input class="input" id="restore-password" type="password" autocomplete="current-password"></div>
         <div class="form-actions"><button class="btn danger" data-action="confirm-restore">Replace with the backup</button><button class="btn ghost" data-action="cancel-restore">Cancel</button></div></div>`;
     } catch (err) {
       toast(err instanceof SyntaxError ? 'That file isn’t valid JSON.' : err.message, true);

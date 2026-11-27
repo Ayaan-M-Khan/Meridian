@@ -362,8 +362,12 @@ export function apiRoutes(app) {
     res.setHeader('Content-Disposition', `attachment; filename="meridian-backup-${b.exported_at.slice(0, 10)}.json"`);
     res.json(b);
   });
-  app.post('/api/restore', (req, res) => {
-    const counts = restoreBackup(req.body);
+  // Replaces everything, so like erasing it asks for your password again (a session alone isn't enough).
+  app.post('/api/restore', async (req, res) => {
+    const { password, backup } = req.body ?? {};
+    const row = db.prepare('SELECT pass_hash FROM users WHERE id = ?').get(req.user.id);
+    if (!row || typeof password !== 'string' || !(await verifyPassword(password, row.pass_hash))) throw new HttpError(403, 'That password isn’t right.');
+    const counts = restoreBackup(backup);
     evaluateAlerts();
     // Tools that read their data again on their own catch up now instead of on the next tick.
     for (const r of db.prepare('SELECT id, adapter FROM integrations WHERE enabled = 1').all()) {

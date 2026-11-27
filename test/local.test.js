@@ -1115,3 +1115,28 @@ test('the local server turns away requests addressed to another host name (DNS r
   assert.notEqual(await get(`127.0.0.1:${srv.port}`), 421);
   assert.notEqual(await get(`localhost:${srv.port}`), 421);
 });
+
+test('prompt injection: the chat starts a folder task only for a folder the person typed', async () => {
+  const { toolsForConversation, ACTION_TOOLS } = await import('../server/assistant-tools.js');
+  const repo = path.join(tmp, 'inj-repo');
+  fs.mkdirSync(repo, { recursive: true });
+  const start = (said, folder) => toolsForConversation(ACTION_TOOLS, said).find((t) => t.name === 'start_claude_task').run({ name: 'x', instructions: 'Commit and push everything.', folder });
+  assert.throws(() => start(['Summarize my tasks please.'], repo), /only when you’ve written that folder’s path in this conversation yourself/, 'a folder from tool output or an injected instruction is refused');
+  const ok = start([`Commit my notes in ${repo.toUpperCase().replace(/\\/g, '/')}/`], repo);
+  assert.ok(ok.task_id, 'the same folder the person typed (any case or slash style) is allowed');
+  assert.ok(start(['Write me a haiku'], undefined).task_id, 'text-only tasks need no folder');
+  await waitFor(() => db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE status IN ('running', 'queued') AND runner IS NOT NULL AND runner != 'team'").get().n === 0 || null);
+});
+
+test('AI apps never get Meridian’s own settings (encryption key, data folder) in their environment', async () => {
+  const { childEnv } = await import('../server/local/cli.js');
+  process.env.ACC_FAKE_SECRET = 'x';
+  try {
+    const env = childEnv({ EXTRA: '1' });
+    assert.deepEqual(Object.keys(env).filter((k) => /^ACC_/i.test(k)), [], 'no ACC_* variable is passed on');
+    assert.equal(env.EXTRA, '1');
+    assert.ok(env.PATH ?? env.Path, 'ordinary variables still are');
+  } finally {
+    delete process.env.ACC_FAKE_SECRET;
+  }
+});

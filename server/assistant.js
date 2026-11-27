@@ -7,7 +7,7 @@
  *   {type:'notice', text}  {type:'error', message}  {type:'done', thread}
  */
 import { db, getSettings } from './db.js';
-import { ACTION_TOOLS, READ_TOOLS, definition, labelFor, runTool } from './assistant-tools.js';
+import { ACTION_TOOLS, READ_TOOLS, definition, labelFor, runTool, toolsForConversation } from './assistant-tools.js';
 import { claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
 import { chooseEngine, listEngines } from './engine-list.js';
 import { classify, logRoute, routeTask } from './router.js';
@@ -222,7 +222,9 @@ export async function sendMessage(id, text, emit, { engine: engineId, tried = []
   messages.push({ role: 'user', content: text, ...(route ? { route } : {}) });
   const title = row.title === 'New conversation' ? text.replace(/\s+/g, ' ').trim().slice(0, 70) : row.title;
 
-  const tools = [...READ_TOOLS, ...ACTION_TOOLS];
+  // Only what the person typed counts as their words (tool results come back as user turns too, as arrays).
+  const personTexts = messages.filter((m) => m.role === 'user' && typeof m.content === 'string').map((m) => m.content);
+  const tools = toolsForConversation([...READ_TOOLS, ...ACTION_TOOLS], personTexts);
   const system = `${SYSTEM}\n\nThe current time is ${nowIso().slice(0, 16)} UTC.`;
 
   const ctrl = new AbortController();

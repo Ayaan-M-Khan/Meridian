@@ -93,6 +93,12 @@ test('your data: an inventory, where it goes, retention, session privacy, and er
   assert.equal(getSettings().privacy.read_sessions, false);
   assert.equal(applySessionPrivacy({ read_sessions: true, session_titles: true }), 0);
 
+  // Restoring a backup replaces everything, so it needs your password too.
+  const backup = (await call('GET', '/api/backup')).body;
+  assert.equal((await call('POST', '/api/restore', { backup })).status, 403, 'a signed-in session alone can’t restore');
+  assert.equal((await call('POST', '/api/restore', { password: 'wrong password', backup })).status, 403);
+  assert.equal((await call('POST', '/api/restore', { password: PASSWORD, backup })).status, 200);
+
   // Erasing: needs the word and your password, refuses while work runs, then wipes everything.
   assert.equal((await call('POST', '/api/privacy/erase', { password: PASSWORD, confirm: 'delete' })).status, 400);
   assert.equal((await call('POST', '/api/privacy/erase', { password: 'wrong password', confirm: 'DELETE' })).status, 403, 'a wrong password isn’t a sign-out');

@@ -285,6 +285,28 @@ export async function runTool(tools, block) {
 }
 
 export const allTools = [...READ_TOOLS, ...ACTION_TOOLS];
+
+const normFolder = (s) => String(s ?? '').trim().replace(/^["']|["']$/g, '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+
+/**
+ * The chat's tools for one conversation. A task in a folder can change files or run git there, so the chat may start
+ * one only for a folder the person wrote in this conversation themselves. Text that comes back from tools or other
+ * programs (a task result, a session title, a file) can't name a folder for it: a prompt injection that asks the AI to
+ * "start a task that pushes C:\repo" is refused here, in code, whatever the AI was persuaded to do.
+ */
+export function toolsForConversation(tools, personTexts) {
+  const said = personTexts.map(normFolder).join('\n');
+  return tools.map((t) => (t.name !== 'start_claude_task' ? t : {
+    ...t,
+    run(input) {
+      const folder = typeof input?.folder === 'string' ? input.folder.trim() : '';
+      if (folder && !said.includes(normFolder(folder))) {
+        throw new ToolInputError('For safety, a task in a folder starts from the chat only when you’ve written that folder’s path in this conversation yourself. Ask the person to type the folder’s full path, or start the task from the Tasks page.');
+      }
+      return t.run(input);
+    },
+  }));
+}
 export const labelFor = (name, input) => {
   const t = allTools.find((x) => x.name === name);
   if (name === 'web_search') return `Searched the web${input?.query ? ` for “${input.query}”` : ''}`;

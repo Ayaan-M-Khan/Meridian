@@ -104,7 +104,10 @@ export function childEnv(extra = {}) {
   const env = { ...process.env };
   const nested = Boolean(env.CLAUDECODE || env.CLAUDE_CODE_SESSION_ID);
   for (const k of Object.keys(env)) {
-    if (['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'MCP_CONNECTION_NONBLOCKING'].includes(k)) delete env[k];
+    // Meridian's own settings (ACC_*: its encryption key, data folder, database) are never passed on: an AI app could
+    // read them, and a prompt injection could make it print them.
+    if (/^ACC_/i.test(k) || k === 'MERIDIAN_HANDED_OFF') delete env[k];
+    else if (['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'MCP_CONNECTION_NONBLOCKING'].includes(k)) delete env[k];
     else if (nested && (/^CLAUDE_CODE_|^CLAUDE_AGENT_SDK_|^CLAUDE_PREVIEW_|^MCP_SERVER_/.test(k) || ['CLAUDECODE', 'CLAUDE_PID', 'ANTHROPIC_BASE_URL'].includes(k))) delete env[k];
   }
   // A run the app starts shouldn't stop to update the CLI; your own use of it still updates as usual.
