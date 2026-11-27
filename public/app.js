@@ -1665,6 +1665,17 @@ const VIEWS = {
     const st = d.settings;
     const dis = d.demo ? 'disabled' : '';
     const theme = readStore('acc-theme') ?? 'system';
+    // Where each AI app stands on this computer, so the box says which ones one click connects.
+    if (S.local === null && !d.demo) loadLocal().then(() => S.page === 'settings' && renderPage());
+    const onPc = (e) => (e.integration_id || e.ready ? null : S.local?.find((l) => l.id === e.id) ?? null);
+    const engineNote = (e) => {
+      if (e.ready) return `Ready · ${e.via}`;
+      const l = onPc(e);
+      if (!l) return e.reason;
+      if (l.installed && l.signed_in) return 'Signed in on this computer. One click connects it.';
+      if (l.installed) return 'Installed, not signed in. Connect, then sign in.';
+      return 'Not installed. Connect to see how to install it.';
+    };
     return `<div class="page-head"><div><h2>Settings</h2><p>The assistant, alerts, appearance and your account.</p></div></div>
       ${d.demo ? '<div class="callout warn">Settings are read-only while demo data is showing.</div>' : ''}
       <div class="grid-2">
@@ -1674,8 +1685,8 @@ const VIEWS = {
             <label class="engine-opt ${st.assistant_engine === 'auto' ? 'on' : ''}"><input type="radio" name="engine" value="auto" data-action-change="set-engine" ${st.assistant_engine === 'auto' ? 'checked' : ''} ${dis}>
               <span class="logo sm hue-brand">${ICON.spark}</span><span class="min0"><b>Automatic</b><span class="faint small block">Each request goes to the AI best suited to it, using your plans first. Details in Smart routing below.</span></span></label>
             ${d.engines.map((e) => `<label class="engine-opt ${st.assistant_engine === e.id ? 'on' : ''} ${e.ready ? '' : 'off'}"><input type="radio" name="engine" value="${e.id}" data-action-change="set-engine" ${st.assistant_engine === e.id ? 'checked' : ''} ${e.ready ? '' : 'disabled'} ${dis}>
-              ${engineLogo(e, 'sm')}<span class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(e.ready ? `Ready · ${e.via}` : e.reason)}</span></span>
-              ${!e.ready && e.kind === 'cli' && !d.demo ? (e.integration_id ? `<a class="btn small" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small" type="button" data-action="connect-local" data-id="${e.id}">Connect</button>`) : ''}</label>`).join('')}
+              ${engineLogo(e, 'sm')}<span class="min0"><b>${esc(e.label)}</b><span class="faint small block">${esc(engineNote(e))}</span></span>
+              ${!e.ready && e.kind === 'cli' && !d.demo ? (e.integration_id ? `<a class="btn small" href="#tool-${e.integration_id}">Set up</a>` : `<button class="btn small ${onPc(e)?.installed && onPc(e)?.signed_in ? 'primary' : ''}" type="button" data-action="connect-local" data-id="${e.id}">Connect</button>`) : ''}</label>`).join('')}
           </div>
           <label class="switch summary-switch"><span><span class="switch-label">Write the daily summary with AI</span><span class="faint small">One short request to the AI above every ${esc(st.summary_interval_hours)} hours. Off: the summary is built from your data by fixed rules, with no AI use.</span></span><input type="checkbox" data-summary-mode ${st.summary_mode !== 'rules' ? 'checked' : ''} ${dis}></label>
         </section>
