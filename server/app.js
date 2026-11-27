@@ -11,9 +11,21 @@ import { HttpError } from './util.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-function createApp() {
+/** Host names a server bound to this computer only answers to (any port). */
+const LOOPBACK_HOSTS = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+const isLoopback = (host) => /^(127\.0\.0\.1|localhost|::1)$/i.test(String(host));
+
+function createApp({ loopbackOnly = true } = {}) {
   const app = express();
   app.disable('x-powered-by');
+  // Bound to this computer only, requests must be addressed to it by name too. A web page that points its own
+  // domain at 127.0.0.1 (DNS rebinding) sends its domain in Host, and is turned away before anything else runs.
+  if (loopbackOnly) {
+    app.use((req, res, next) => {
+      if (LOOPBACK_HOSTS.test(req.get('host') ?? '')) return next();
+      res.status(421).type('text/plain').send('This server only answers requests addressed to this computer.');
+    });
+  }
   if (process.env.ACC_TRUST_PROXY === '1') app.set('trust proxy', 1);
 
   app.use((req, res, next) => {
@@ -82,7 +94,7 @@ let schedulerStarted = false;
 /** Starts the HTTP server. Resolves with the bound port and, on first run, the one-time setup code. */
 export function startServer({ host = '127.0.0.1', port = 4317 } = {}) {
   return new Promise((resolve, reject) => {
-    const server = createApp().listen(port, host);
+    const server = createApp({ loopbackOnly: isLoopback(host) }).listen(port, host);
     server.once('error', reject);
     server.once('listening', () => {
       setBridgeBase(`http://127.0.0.1:${server.address().port}`);

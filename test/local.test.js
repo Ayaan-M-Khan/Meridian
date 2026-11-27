@@ -1099,3 +1099,19 @@ test('a task on Automatic says why its AI was picked', async () => {
   assert.equal(buildState().tasks.find((x) => x.id === fixed.id).route_why, null, 'a task sent to a chosen AI has no routing reason');
   await waitFor(() => ['completed', 'failed'].includes(db.prepare('SELECT status FROM tasks WHERE id = ?').get(fixed.id).status) || null);
 });
+
+test('the local server turns away requests addressed to another host name (DNS rebinding)', async () => {
+  const http = await import('node:http');
+  const get = (host) => new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: srv.port, path: '/api/auth/status', headers: { host } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(await get(`evil.example:${srv.port}`), 421);
+  assert.equal(await get('attacker.test'), 421);
+  assert.notEqual(await get(`127.0.0.1:${srv.port}`), 421);
+  assert.notEqual(await get(`localhost:${srv.port}`), 421);
+});

@@ -394,7 +394,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - Changes require the session cookie plus an `x-acc-request` header, which blocks cross-site requests.
 - The ingest endpoint takes only its own bearer token, compared by hash. The MCP bridge endpoint takes only the random token of a run in progress, and stops working when the run ends.
 - Content Security Policy allows scripts only from the app itself. All reported text is escaped before display.
-- The server listens on localhost by default. Before exposing it beyond your machine, put it behind HTTPS.
+- The server listens on localhost by default. Before exposing it beyond your machine, put it behind HTTPS. Listening on this computer only, it also answers only requests addressed to `127.0.0.1` or `localhost`, so a web page that points its own domain at your computer (DNS rebinding) is turned away.
 - Passwords are stored as salted scrypt hashes; sign-in is rate-limited per address and per account; session cookies are HttpOnly and SameSite=Strict (and Secure over HTTPS). Changing the password, turning off two-step verification, unlinking Google and erasing all data each ask for the password again.
 - Responses carry `Permissions-Policy` (no camera, microphone or location), `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and API responses aren't cached.
 - The interface makes no requests to other sites: fonts and the chart library ship with the app.
