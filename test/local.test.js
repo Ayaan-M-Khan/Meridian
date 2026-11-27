@@ -1086,3 +1086,16 @@ test('Antigravity runs are told to use their file tools, and a refusal reads cle
   assert.match(out.error, /Antigravity stopped without a reply after it was refused command access/);
   assert.equal(antigravityCli.engine.parser().finish({ code: 0, stderr: '', stdout: JSON.stringify({ status: 'SUCCESS', response: 'OK' }) }).text, 'OK');
 });
+
+test('a task on Automatic says why its AI was picked', async () => {
+  const { setRaw, getSettings } = await import('../server/db.js');
+  setRaw('settings', { ...getSettings(), assistant_engine: 'auto' });
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Done.' });
+  const t = startClaudeTask({ name: 'Landing page copy', instructions: 'Write the headline for our landing page.' });
+  const view = buildState().tasks.find((x) => x.id === t.id);
+  assert.match(view.route_why ?? '', /^Writing: Claude Code is one of the strongest for writing/);
+  await waitFor(() => ['completed', 'failed'].includes(db.prepare('SELECT status FROM tasks WHERE id = ?').get(t.id).status) || null);
+  const fixed = startClaudeTask({ name: 'x', instructions: 'Write a haiku.', engine: 'claude-code' });
+  assert.equal(buildState().tasks.find((x) => x.id === fixed.id).route_why, null, 'a task sent to a chosen AI has no routing reason');
+  await waitFor(() => ['completed', 'failed'].includes(db.prepare('SELECT status FROM tasks WHERE id = ?').get(fixed.id).status) || null);
+});

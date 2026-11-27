@@ -101,7 +101,7 @@ export function startClaudeTask({ name, instructions, engine: engineId, previous
     ? JSON.stringify({
         ...(previous?.result ? { previous: { task_id: previous.task_id ?? null, name: String(previous.name ?? '').slice(0, 80), request: previous.request ?? null, result: previous.result } } : {}),
         ...(dir ? { folder: dir, access } : {}),
-        ...(engine.route ? { routed: true } : {}),
+        ...(engine.route ? { routed: true, why: engine.route.why } : {}),
       })
     : null;
   const { lastInsertRowid } = db
@@ -281,7 +281,7 @@ function handOver(task, work, message) {
   // Statistics count where work went: the hand-over is a routing decision of its own.
   logRoute('task', { engine: r.engine, category: r.category, why: note }, task.name);
   const { folder, access, ...rest } = work;
-  return { engine: r.engine, detail: { ...rest, ...(folder ? { folder, access } : {}), tried, handoff: note } };
+  return { engine: r.engine, detail: { ...rest, ...(folder ? { folder, access } : {}), tried, handoff: note, why: r.why } };
 }
 
 function readPrevious(t) {

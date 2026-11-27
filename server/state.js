@@ -69,6 +69,7 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
     folder: team?.folder ?? detail?.folder ?? null,
     access: detail?.access ?? null,
     handoff: detail?.handoff ?? null,
+    route_why: detail?.why ?? null,
     controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry', 'follow_up'],
   };
 }

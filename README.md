@@ -153,7 +153,7 @@ The interface loads nothing from other sites. Its typeface (Inter, SIL Open Font
 
 ## Sign in with your account (no API key)
 
-These connect through the provider's own command-line app on your computer and the account it's signed in with, so you don't need an API key:
+These connect through the provider's own command-line app on your computer and the account it's signed in with, so you don't need an API key. Once one is installed and signed in, it shows under **Connected** in the sidebar with a **Connect** button; one click connects it. Entries tracked by hand from early versions are labelled **manual** there.
 
 | Connection | Account | Command-line app | What the app reads from its logs |
 | --- | --- | --- | --- |
@@ -202,7 +202,7 @@ With the assistant on **Automatic** (Settings → Assistant), every request goes
 4. **Reliability:** an AI whose recent runs here failed (signed out, blocked, timing out) is tried after the others.
 5. **Hand-over:** if the AI it picked can't take the work at all (not installed, or its account can't use it), the next best AI gets it, and the task (**Handed over**) or the chat says so. Gemini CLI signed in with a personal Google account is one: Google now sends those accounts to Antigravity, so Meridian marks Gemini CLI not ready with that reason until you sign in there with a Workspace or paid account, or press **Check again** on its page. Connect **Gemini (Antigravity)** to use Gemini with a personal account.
 
-The command bar shows where a request will go as you type. Background tasks and the AI team's roles are routed the same way. Pick a specific AI in Settings or the chat to turn routing off.
+The command bar shows where a request will go as you type. Background tasks and the AI team's roles are routed the same way. A task's panel says, under **Why this AI**, which kind of work it was taken for and why that AI was picked. Pick a specific AI in Settings or the chat to turn routing off.
 
 **In the chat**, each new piece of work goes to the AI best suited to it: ask for a component and Claude Code answers; ask next to debug it and the conversation moves to Codex or Gemini, with a note under your message saying where it went and why. Quick follow-ups (“thanks”, “make it shorter”) stay with the AI already answering, and so does anything that AI is about as good at, so a conversation doesn't hop around. Each reply shows which AI wrote it. If the AI a message went to isn't installed or its account can't use it, the next best AI answers instead and the note says why. If it fails another way (signed out, timed out), the conversation stays with the AI that was answering and your message comes back to send again.
 

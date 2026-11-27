@@ -2483,6 +2483,7 @@ async function openTask(id, { refresh = false } = {}) {
     <dl class="detail-grid">
       ${row('Tool', esc(t.tool_name))}
       ${row('Folder', t.folder && !t.team && `<code>${esc(t.folder)}</code><div class="faint small">${t.access === 'git' ? 'May read files and run git commands only' : 'May read and change files, no commands'}</div>`)}
+      ${row('Why this AI', t.route_why && esc(t.route_why))}
       ${row('Handed over', t.handoff && esc(t.handoff))}
       ${row('Started', at(t.started_at))}
       ${row('Expected finish', t.status === 'running' && t.eta_at && `${at(t.eta_at)}<div class="faint small">${esc(ETA_BASIS[t.eta_source] ?? '')}</div>`)}
