@@ -145,7 +145,7 @@ export function demoState(now = new Date()) {
     description: null, progress: null, step: null, started_at: null, eta: null,
     eta_at: null, eta_source: null, stalled: false, overdue: false, longer_than_usual: false, typical_ms: null,
     scheduled_for: null, finished_at: null, error: null, has_result: false,
-    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, team: null, follows: null, folder: null, access: null, handoff: null, route_why: null, controls: [], ...extra,
+    updated_at: ago(5), kind: 'task', runner: null, runner_label: null, team: null, follows: null, folder: null, access: null, handoff: null, route_why: null, changes: null, controls: [], ...extra,
   });
   const stage = (key, label, role, engine, engine_label, status, extra = {}) => ({ key, label, role, engine, engine_label, status, started_at: null, finished_at: null, verdict: undefined, note: undefined, error: undefined, ...extra });
   const tasks = [
@@ -159,6 +159,39 @@ export function demoState(now = new Date()) {
         stage('debug', 'Debug', 'debugger', 'gemini-cli', 'Gemini CLI', 'pending'),
         stage('fix', 'Fix', 'builder', 'claude-code', 'Claude Code', 'pending'),
         stage('check', 'Final check', 'reviewer', 'codex', 'Codex', 'pending'),
+      ] },
+    }),
+    T(13, 7, 'Add a dark mode toggle to the website', 'completed', {
+      kind: 'team', runner: 'team', runner_label: 'AI team', controls: ['retry', 'follow_up', 'delete'], progress: 100, started_at: ago(96), finished_at: ago(81), updated_at: ago(81), has_result: true,
+      description: 'Add a dark mode toggle to the header that remembers the choice and follows the system setting by default.',
+      folder: 'C:\\Users\\alex\\projects\\website', changes: { files: 3, added: 30, removed: 1 },
+      // The demo can't read a folder, so the task panel shows these instead of loading the task's changes.
+      demo_changes: {
+        folder: 'C:\\Users\\alex\\projects\\website', files: 3, added: 30, removed: 1, more: 0, partial: false, from: ago(96), to: ago(81),
+        list: [
+          { path: 'README.md', change: 'changed', added: 2, removed: 1, binary: false, note: null, diff: [
+            '@@ -8,5 +8,6 @@', ' ## Features', ' ', '-- Responsive layout', '+- Responsive layout that works on phones',
+            '+- Dark mode that follows your system setting until you pick one', ' - Contact form with spam protection', ' '].join('\n') },
+          { path: 'src/components/ThemeToggle.js', change: 'added', added: 18, removed: 0, binary: false, note: null, diff: [
+            '@@ -0,0 +1,18 @@', "+const KEY = 'theme';", '+', '+export function initTheme() {', '+  const saved = localStorage.getItem(KEY);',
+            '+  if (saved) document.documentElement.dataset.theme = saved;', '+}', '+', '+export function ThemeToggle() {',
+            "+  const button = document.createElement('button');", "+  button.className = 'theme-toggle';",
+            "+  button.setAttribute('aria-label', 'Switch between light and dark');", "+  button.addEventListener('click', () => {",
+            "+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';", '+    document.documentElement.dataset.theme = next;',
+            '+    localStorage.setItem(KEY, next);', '+  });', '+  return button;', '+}'].join('\n') },
+          { path: 'src/styles/theme.css', change: 'changed', added: 10, removed: 0, binary: false, note: null, diff: [
+            '@@ -1,6 +1,16 @@', ' :root {', '   --bg: #ffffff;', '   --text: #1a1a1a;', '+  color-scheme: light;', '+}', '+',
+            '+@media (prefers-color-scheme: dark) {', '+  :root:not([data-theme="light"]) { --bg: #121212; --text: #ececec; color-scheme: dark; }', '+}', '+',
+            '+:root[data-theme="dark"] {', '+  --bg: #121212;', '+  --text: #ececec;', ' }', ' ', ' body {'].join('\n') },
+        ],
+      },
+      team: { folder: 'C:\\Users\\alex\\projects\\website', stages: [
+        stage('plan', 'Plan', 'planner', 'codex', 'Codex', 'done', { started_at: ago(96), finished_at: ago(94) }),
+        stage('build', 'Build', 'builder', 'claude-code', 'Claude Code', 'done', { started_at: ago(94), finished_at: ago(85) }),
+        stage('review', 'Review', 'reviewer', 'codex', 'Codex', 'done', { started_at: ago(85), finished_at: ago(81), verdict: 'approve' }),
+        stage('debug', 'Debug', 'debugger', 'gemini-cli', 'Gemini CLI', 'skipped', { note: 'The review approved the work.' }),
+        stage('fix', 'Fix', 'builder', 'claude-code', 'Claude Code', 'skipped', { note: 'The review approved the work.' }),
+        stage('check', 'Final check', 'reviewer', 'codex', 'Codex', 'skipped', { note: 'The review approved the work.' }),
       ] },
     }),
     T(10, 7, 'Refactor billing module', 'running', { kind: 'session', description: 'in billing-service · claude-opus-5-5 · 3,412,880 tokens', started_at: ago(42), updated_at: ago(1) }),
@@ -233,11 +266,15 @@ export function demoState(now = new Date()) {
     },
     settings: { ...DEFAULT_SETTINGS, monthly_ceiling_usd: 300, summary_key_set: false, summary_key_hint: null },
     desktop_app: Boolean(globalThis.accDesktop),
+    shortcut: null,
+    automations_paused: false,
+    recent_folders: ['C:\\Users\\alex\\projects\\website', 'C:\\Users\\alex\\projects\\billing-service'],
     update: { ...updateView(), notes: null, can_install: false },
     task_kinds: { code: 'Coding', debug: 'Debugging', writing: 'Writing', research: 'Research', analysis: 'Analysis', planning: 'Planning', quick: 'Quick question', general: 'General' },
     automations: [
       { id: 1, name: 'Weekly AI usage report', prompt: 'Summarize last week’s AI usage by tool, flag anything near a limit, and suggest where to cut back.', mode: 'task', mode_label: 'Assistant task', schedule: { every: 'week', at: '09:00', day: 1 }, schedule_text: 'Every Monday at 09:00', enabled: true, next_run_at: nextRun({ every: 'week', at: '09:00', day: 1 }, now).toISOString(), last_run_at: ago(60 * 24 * 6.9), last_error: null, last_task: { id: 7, status: 'completed', finished_at: ago(60 * 24 * 6.9) }, created_at: ago(60 * 24 * 30) },
       { id: 2, name: 'Morning AI news', prompt: 'What changed in AI tools and models in the last day that matters for a developer? Keep it to five bullets.', mode: 'compare', mode_label: 'Ask all', schedule: { every: 'weekday', at: '08:30' }, schedule_text: 'Every weekday at 08:30', enabled: true, next_run_at: nextRun({ every: 'weekday', at: '08:30' }, now).toISOString(), last_run_at: ago(60 * 10), last_error: null, last_task: null, created_at: ago(60 * 24 * 12) },
+      { id: 4, name: 'Release checklist', prompt: 'Go through the release checklist for the website: changelog, version number, broken links and the build. List anything that isn’t ready.', mode: 'task', mode_label: 'Assistant task', folder: 'C:\\Users\\alex\\projects\\website', schedule: { every: 'manual' }, schedule_text: 'When you run it', manual: true, done: false, enabled: true, next_run_at: null, last_run_at: ago(60 * 24 * 2), last_error: null, last_task: null, created_at: ago(60 * 24 * 20) },
       { id: 3, name: 'Tidy the project README', prompt: 'Review the README for accuracy and fix anything out of date.', mode: 'team', mode_label: 'AI team', folder: 'C:\\Users\\alex\\projects\\website', schedule: { every: 'week', at: '17:00', day: 5 }, schedule_text: 'Every Friday at 17:00', enabled: false, next_run_at: null, last_run_at: null, last_error: null, last_task: null, created_at: ago(60 * 24 * 3) },
     ],
     engines: [

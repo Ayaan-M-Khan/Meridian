@@ -310,11 +310,35 @@ test('an AI team task splits the work: plan, build, review, debug, fix, final ch
 test('in a folder, only the builder may change files, and an approved review ends the run', async () => {
   const dir = teamDir('team-folder');
   const project = path.join(tmp, 'project');
-  fs.mkdirSync(project, { recursive: true });
+  fs.mkdirSync(path.join(project, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'index.html'), '<main>\n  <h1>Dogs</h1>\n</main>\n');
+  fs.writeFileSync(path.join(project, 'old.txt'), 'remove me\n');
+  fs.writeFileSync(path.join(project, 'same.txt'), 'untouched\n');
   process.env.FAKE_CLAUDE_TEAM = JSON.stringify({ Planner: ['1. Edit index.html'], Builder: ['Changed index.html'], Reviewer: ['VERDICT: APPROVE'] });
-  const t = startTeamTask({ goal: 'Add a footer', folder: project });
-  const done = await finished(t.id);
+  // The builder adds a footer, a new file and one in node_modules (not read), and deletes a file.
+  process.env.FAKE_CLAUDE_WRITES = JSON.stringify({ Builder: {
+    'index.html': '<main>\n  <h1>Dogs</h1>\n</main>\n<footer>Call us</footer>\n', 'notes.md': '# Notes\n', 'node_modules/pkg/x.js': 'x', 'old.txt': null,
+  } });
+  let t;
+  let done;
+  try {
+    t = startTeamTask({ goal: 'Add a footer', folder: project });
+    done = await finished(t.id);
+  } finally {
+    delete process.env.FAKE_CLAUDE_WRITES;
+  }
   assert.equal(done.status, 'completed', done.error ?? '');
+  // What changed: read from the folder before and after, with a diff of each text file.
+  const { taskChanges } = await import('../server/changes.js');
+  const c = taskChanges(t.id);
+  assert.deepEqual(c.list.map((f) => `${f.change} ${f.path}`), ['changed index.html', 'added notes.md', 'deleted old.txt']);
+  assert.equal(c.files, 3);
+  assert.deepEqual([c.added, c.removed], [2, 1]);
+  const html = c.list[0];
+  assert.deepEqual([html.added, html.removed], [1, 0]);
+  assert.equal(html.diff, '@@ -1,3 +1,4 @@\n <main>\n   <h1>Dogs</h1>\n </main>\n+<footer>Call us</footer>');
+  assert.equal(c.folder, fs.realpathSync.native(project));
+  assert.deepEqual(buildState().tasks.find((x) => x.id === t.id).changes, { files: 3, added: 2, removed: 1 });
   const calls = fs.readFileSync(path.join(dir, 'calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(calls.map((c) => c.role), ['Planner', 'Builder', 'Reviewer']);
   for (const c of calls) assert.equal(path.resolve(c.cwd), fs.realpathSync.native(project), 'every member works in the folder (its full path)');
@@ -603,6 +627,93 @@ test('automations: saved with checks, paused and resumed, run when due, skipped 
   for (const x of listAutomations()) deleteAutomation(x.id);
   assert.equal(listAutomations().length, 0);
   assert.ok(Array.isArray(buildState().automations));
+});
+
+test('saved prompts run when you start them, one-time automations run once, and Pause all stops every scheduled run', async () => {
+  const { createAutomation, updateAutomation, deleteAutomation, listAutomations, runAutomation, runDueAutomations, resumeAutomations } = await import('../server/automations.js');
+  const { getSettings, setRaw } = await import('../server/db.js');
+  const { makeBackup } = await import('../server/backup.js');
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'Done.' });
+  const settle = (id) => waitFor(() => ['completed', 'failed'].includes(db.prepare('SELECT status FROM tasks WHERE id = ?').get(id)?.status));
+
+  // Only when you run it: never due, first in the list, runs with Run now.
+  const m = createAutomation({ name: 'Release checklist', prompt: 'Check the release.', mode: 'task', schedule: { every: 'manual', at: '09:00' } });
+  assert.deepEqual(m.schedule, { every: 'manual' });
+  assert.equal(m.schedule_text, 'When you run it');
+  assert.equal(m.manual, true);
+  assert.equal(m.next_run_at, null);
+  await settle(runAutomation(m.id).task_id);
+
+  // Once: a time that has passed, or a date that doesn't exist, is refused.
+  const pad = (n) => String(n).padStart(2, '0');
+  const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const past = new Date(Date.now() - 3_600_000);
+  assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'task', schedule: { every: 'once', date: ymd(past), at: hm(past) } }), /hasn’t passed/);
+  assert.throws(() => createAutomation({ name: 'x', prompt: 'y', mode: 'task', schedule: { every: 'once', date: '2026-02-30', at: '09:00' } }), /date/);
+  const soon = new Date(Date.now() + 2 * 3_600_000);
+  const o = createAutomation({ name: 'Tonight', prompt: 'Run the long job.', mode: 'task', schedule: { every: 'once', date: ymd(soon), at: hm(soon) } });
+  assert.match(o.schedule_text, /^Once, \w{3}, \w{3} \d{1,2}( \d{4})? at \d\d:\d\d$/);
+  assert.equal(Date.parse(o.next_run_at), new Date(`${ymd(soon)}T${hm(soon)}:00`).getTime());
+  assert.equal(listAutomations()[0].id, m.id, 'saved prompts are listed first');
+
+  // Backups keep both kinds.
+  const kinds = makeBackup().automations.map((x) => JSON.parse(x.schedule).every);
+  assert.ok(kinds.includes('manual') && kinds.includes('once'));
+
+  // Paused: nothing runs, even when due. Running it yourself still works.
+  setRaw('settings', { ...getSettings(), automations_paused: true });
+  const due = new Date(Date.parse(o.next_run_at) + 60_000);
+  runDueAutomations(due);
+  assert.equal(listAutomations().find((x) => x.id === o.id).last_run_at, null, 'nothing runs while paused');
+  setRaw('settings', { ...getSettings(), automations_paused: false });
+  runDueAutomations(due);
+  const ran = listAutomations().find((x) => x.id === o.id);
+  assert.ok(ran.last_task, ran.last_error ?? 'it ran');
+  assert.equal(ran.enabled, false, 'a one-time automation turns off after its run');
+  assert.equal(ran.next_run_at, null);
+  await settle(ran.last_task.id);
+
+  // A new time schedules it again; if that time passes while paused, resuming turns it off instead of running it.
+  const later = new Date(Date.now() + 5 * 3_600_000);
+  assert.equal(updateAutomation(o.id, { schedule: { every: 'once', date: ymd(later), at: hm(later) } }).enabled, true);
+  const tasks = db.prepare('SELECT COUNT(*) AS n FROM tasks').get().n;
+  resumeAutomations(new Date(later.getTime() + 60_000));
+  const missed = listAutomations().find((x) => x.id === o.id);
+  assert.equal(missed.enabled, false);
+  assert.match(missed.last_error, /passed while automations were paused/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tasks').get().n, tasks, 'nothing ran');
+
+  for (const x of listAutomations()) deleteAutomation(x.id);
+});
+
+test('a finished task can be deleted with its result and changes; running work and sessions can’t', async () => {
+  const { deleteTask, retryClaudeTask } = await import('../server/runner.js');
+  const { renameThread } = await import('../server/assistant.js');
+  process.env.FAKE_CLAUDE_PLAN = JSON.stringify({ calls: [], text: 'A result.' });
+  const t = startClaudeTask({ name: 'Short report', instructions: 'Write it.' });
+  await waitFor(() => db.prepare('SELECT status FROM tasks WHERE id = ?').get(t.id).status === 'completed');
+  db.prepare("INSERT INTO task_changes(task_id, path, change, added, removed) VALUES(?, 'a.txt', 'added', 1, 0)").run(t.id);
+  const again = retryClaudeTask(t.id, { engine: 'claude-code' });
+  assert.equal(again.runner, 'claude-code', 'run again with the AI you pick');
+  await waitFor(() => db.prepare('SELECT status FROM tasks WHERE id = ?').get(again.task_id).status === 'completed');
+  assert.deepEqual(deleteTask(t.id), { ok: true });
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE id = ?').get(t.id).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM task_changes WHERE task_id = ?').get(t.id).n, 0, 'its changes go with it');
+  const integ = db.prepare("SELECT id FROM integrations WHERE adapter = 'claude-assistant'").get().id;
+  const add = (status, kind = null) => Number(db.prepare("INSERT INTO tasks(integration_id, external_id, name, status, kind, created_at, updated_at) VALUES(?, ?, 'x', ?, ?, '2026-01-01', '2026-01-01')")
+    .run(integ, `x-${Math.random()}`, status, kind).lastInsertRowid);
+  assert.throws(() => deleteTask(add('running')), /Cancel it first/);
+  assert.throws(() => deleteTask(add('completed', 'session')), /logs/);
+  assert.throws(() => deleteTask(999_999), /no longer exists/);
+
+  // Conversations can be renamed; the name you give stays.
+  const th = createThread();
+  assert.equal(renameThread(th.id, '  Budget   questions ').title, 'Budget questions');
+  assert.equal(threadView(th.id).title, 'Budget questions');
+  assert.throws(() => renameThread(th.id, ' '), /1–80/);
+  assert.throws(() => renameThread(th.id, 'x'.repeat(81)), /1–80/);
+  assert.throws(() => renameThread(987_654, 'Gone'), /no longer exists/);
 });
 
 test('updates: versions compare by number, a newer release is offered once, and installs only from this project', async () => {

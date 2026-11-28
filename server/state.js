@@ -2,7 +2,7 @@ import { db, getSettings, getRaw } from './db.js';
 import { adapters } from './adapters/index.js';
 import { estimate, pastDurations, progressHistory } from './eta.js';
 import { listEngines } from './engine-list.js';
-import { ROLES, lineupView, teamView } from './team.js';
+import { ROLES, lineupView, recentFolders, teamView } from './team.js';
 import { CATEGORIES } from './router.js';
 import { listAutomations } from './automations.js';
 import { updateView } from './updates.js';
@@ -70,8 +70,16 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
     access: detail?.access ?? null,
     handoff: detail?.handoff ?? null,
     route_why: detail?.why ?? null,
-    controls: !builtin ? [] : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry', 'follow_up'],
+    changes: changeSummary(t.changes),
+    controls: !builtin ? (session || t.status === 'running' || t.status === 'queued' ? [] : ['delete'])
+      : t.status === 'running' || t.status === 'queued' ? ['cancel'] : ['retry', 'follow_up', 'delete'],
   };
+}
+
+/** How much a task changed in its folder (changes.js), for task lists; the files themselves load with the task. */
+function changeSummary(s) {
+  const c = parseMeta(s);
+  return c ? { files: c.files ?? 0, added: c.added ?? 0, removed: c.removed ?? 0 } : null;
 }
 
 /** Everything the UI renders, in one payload. The demo payload (demo.js) has the same shape. */
@@ -218,10 +226,13 @@ export function buildState(now = new Date()) {
     summary: getRaw('summary_cache') ?? null,
     settings: publicSettings(),
     desktop_app: Boolean(globalThis.accDesktop),
+    shortcut: globalThis.accShortcutState ?? null,
     ...engineState(settings),
     team: { lineup: lineupView({ settings }), roles: Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, { title: r.title, does: r.does }])) },
     task_kinds: CATEGORIES,
     automations: listAutomations(),
+    automations_paused: Boolean(settings.automations_paused),
+    recent_folders: recentFolders(),
     update: updateView(),
   };
 }

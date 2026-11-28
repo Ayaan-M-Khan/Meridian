@@ -152,6 +152,20 @@ CREATE TABLE IF NOT EXISTS automations (
   created_at TEXT NOT NULL
 );
 
+-- Files a task changed in the folder it worked in (changes.js): one row per file, with a line diff for text files.
+-- tasks.changes holds the summary (how many files, lines added and removed, whether the folder was read in full).
+CREATE TABLE IF NOT EXISTS task_changes (
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  change TEXT NOT NULL,
+  added INTEGER,
+  removed INTEGER,
+  binary INTEGER NOT NULL DEFAULT 0,
+  diff TEXT,
+  note TEXT,
+  PRIMARY KEY (task_id, path)
+);
+
 CREATE INDEX IF NOT EXISTS idx_usage_day ON usage_daily(day);
 CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at);
 CREATE INDEX IF NOT EXISTS idx_progress_task ON task_progress(task_id, at);
@@ -168,7 +182,7 @@ function addColumns(table, cols) {
 }
 //   tasks.detail   JSON for AI team tasks: the folder, who did each stage, and each stage's output
 //   tasks.category / assistant_threads.route   what smart routing decided (router.js)
-addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT'], ['detail', 'TEXT'], ['category', 'TEXT']]);
+addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['runner', 'TEXT'], ['detail', 'TEXT'], ['category', 'TEXT'], ['changes', 'TEXT']]);
 addColumns('integrations', [['meta', 'TEXT']]);
 addColumns('assistant_threads', [['engine', 'TEXT'], ['route', 'TEXT']]);
 addColumns('automations', [['folder', 'TEXT']]);
@@ -210,8 +224,11 @@ export const DEFAULT_SETTINGS = {
   engine_models: {},
   // Smart routing: your preferred AI per kind of task ('planning': 'codex'). Missing or 'auto': routing decides.
   route_prefs: {},
-  // Desktop app only: keep running in the tray when the window closes, start at sign-in, show Windows notifications.
-  desktop: { keep_running: false, open_at_login: false, notifications: true, check_updates: true },
+  // Desktop app only: keep running in the tray when the window closes, start at sign-in, show Windows notifications,
+  // and the keys that bring it forward from any program ('off', or one of SHORTCUTS in routes.js).
+  desktop: { keep_running: false, open_at_login: false, notifications: true, check_updates: true, shortcut: 'off' },
+  // Automations: true stops every scheduled run until it's turned off again (automations.js).
+  automations_paused: false,
   // Your data (privacy.js): delete finished work older than this many days (0 keeps it), whether sessions from AI apps
   // on this computer are listed, and whether they're named after their first message.
   privacy: { retention_days: 0, read_sessions: true, session_titles: true },

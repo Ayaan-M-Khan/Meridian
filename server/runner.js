@@ -16,6 +16,7 @@ import { engineHasTools, runCliEngine } from './engines.js';
 import { dashboardSnapshot } from './assistant.js';
 import { randomToken } from './crypto.js';
 import { cancelTeamTask, cleanFolder, previousContext, retryTeamTask, startTeamTask } from './team.js';
+import { forgetChanges, recordChanges, trackChanges } from './changes.js';
 import { HttpError, nowIso } from './util.js';
 
 const MAX_PARALLEL = 2;
@@ -140,6 +141,8 @@ async function execute(id) {
 
   if (task.runner && task.runner !== 'claude-api') {
     try {
+      // In a folder, read it first, so the task's panel can list every file the run changes (changes.js).
+      if (work.folder) await trackChanges(id, work.folder);
       // An engine without the app's functions gets a snapshot of the dashboard and can't report progress itself.
       const hasTools = engineHasTools(task.runner);
       const out = await runCliEngine(task.runner, {
@@ -153,15 +156,19 @@ async function execute(id) {
       });
       const finalText = out.text.trim();
       if (!finalText) throw new Error('The assistant finished without writing a result.');
+      await recordChanges(id);
       setStatus(id, 'completed', { progress: 100, step: null, result: finalText.slice(0, 100_000), finished_at: nowIso(), error: null });
     } catch (err) {
       const next = !isAbort(err) && err.unusable ? handOver(task, work, err.message) : null;
       if (next) {
         // The AI Automatic chose couldn't take the task at all (nothing ran): the next best one gets it.
+        forgetChanges(id);
         save(id, { runner: next.engine.id, detail: JSON.stringify(next.detail) });
         setStatus(id, 'queued', { step: null, progress: null });
         queue.unshift(id);
       } else {
+        // A failed or cancelled run can still have changed files: they're listed too.
+        await recordChanges(id);
         setStatus(id, 'failed', { step: null, finished_at: nowIso(), error: isAbort(err) ? CANCELLED : err.message });
       }
     } finally {
@@ -240,17 +247,31 @@ export function cancelClaudeTask(id) {
   throw new ToolInputError(`“${t.name}” is not running.`);
 }
 
-export function retryClaudeTask(id) {
+/** Runs a finished task again: the same way, or (an assistant task only) with the AI you pick this time. */
+export function retryClaudeTask(id, { engine } = {}) {
   const t = ownTask(id);
   if (t.runner === 'team') return viaTeam(retryTeamTask, id);
   if (t.status === 'running' || t.status === 'queued') throw new ToolInputError(`“${t.name}” is still ${t.status}.`);
   let next;
   try {
-    next = startClaudeTask({ name: t.name, instructions: t.description ?? '', previous: readPrevious(t), folder: readWork(t).folder });
+    next = startClaudeTask({ name: t.name, instructions: t.description ?? '', previous: readPrevious(t), folder: readWork(t).folder, engine: engine ?? undefined });
   } catch (err) {
     throw new ToolInputError(err.message);
   }
-  return { ok: true, task_id: next.id, status: next.status };
+  return { ok: true, task_id: next.id, status: next.status, runner: next.runner };
+}
+
+/**
+ * Deletes a finished task with its result, progress history and list of changed files. Sessions from AI apps aren't
+ * deleted here (they're read from the apps' own logs and would come back), and running work is cancelled first.
+ */
+export function deleteTask(id) {
+  const t = db.prepare('SELECT id, name, status, kind FROM tasks WHERE id = ?').get(Number(id));
+  if (!t) throw new HttpError(404, 'That task no longer exists.');
+  if (t.kind === 'session') throw new HttpError(400, 'Sessions are read from the AI app’s own logs, so they’d come back. To stop listing them, turn them off in Privacy & data.');
+  if (t.status === 'running' || t.status === 'queued' || active.has(t.id) || queue.includes(t.id)) throw new HttpError(409, `“${t.name}” is still ${t.status === 'queued' ? 'waiting to run' : 'running'}. Cancel it first.`);
+  db.prepare('DELETE FROM tasks WHERE id = ?').run(t.id);
+  return { ok: true };
 }
 
 /** The folder a task works in, and what it may do there. */

@@ -25,6 +25,7 @@ import { classify, logRoute, rankEngines } from './router.js';
 import { runCliEngine } from './engines.js';
 import { assistantIntegration, claudeClient, claudeErrorMessage, isAbort, recordUsage, MODEL } from './claude.js';
 import { randomToken } from './crypto.js';
+import { forgetChanges, recordChanges, trackChanges } from './changes.js';
 import { HttpError, nowIso } from './util.js';
 
 export const ROLES = {
@@ -131,6 +132,36 @@ const realPath = (q) => {
     return path.resolve(q);
   }
 };
+
+let recent = { key: null, at: 0, list: [] };
+/**
+ * The folders you last gave tasks and automations, newest first, that still exist: offered under each folder box so
+ * you don't have to find the same project again. Worked out again when a task is added, or after a minute.
+ */
+export function recentFolders(limit = 6) {
+  const a = db.prepare('SELECT COUNT(*) AS n, MAX(id) AS m FROM automations').get();
+  const key = `${db.prepare('SELECT MAX(id) AS n FROM tasks').get()?.n ?? 0}|${a?.n ?? 0}:${a?.m ?? 0}`;
+  if (recent.key === key && Date.now() - recent.at < 60_000) return recent.list;
+  const tasks = db.prepare(`SELECT json_extract(detail, '$.folder') AS folder FROM tasks
+    WHERE integration_id IN (SELECT id FROM integrations WHERE adapter = 'claude-assistant') AND json_valid(detail)
+      AND json_type(detail, '$.folder') = 'text' ORDER BY id DESC LIMIT 200`).all();
+  const autos = db.prepare('SELECT folder FROM automations WHERE folder IS NOT NULL ORDER BY id DESC').all();
+  const seen = new Set();
+  const list = [];
+  for (const { folder } of [...tasks, ...autos]) {
+    if (typeof folder !== 'string' || !folder || seen.has(folder.toLowerCase())) continue;
+    seen.add(folder.toLowerCase());
+    try {
+      if (!fs.statSync(folder).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    list.push(folder);
+    if (list.length >= limit) break;
+  }
+  recent = { key, at: Date.now(), list };
+  return list;
+}
 
 function checkFolder(p) {
   if (p === path.parse(p).root || p === realPath(os.homedir())) throw new HttpError(400, 'Choose a project folder, not a whole drive or your home folder.');
@@ -350,6 +381,8 @@ async function execute(id) {
   const skip = (key, why) => Object.assign(stage(key), { status: 'skipped', note: why });
 
   try {
+    // In a folder, read it first, so the task's panel can list every file the team changes (changes.js).
+    if (d.folder) await trackChanges(id, d.folder);
     await run('plan', context(d, []));
     await run('build', context(d, [['Plan', stage('plan')]]));
     const review = await run('review', context(d, [['Plan', stage('plan')], [d.folder ? 'Changes made' : 'Work', stage('build')]]));
@@ -366,12 +399,14 @@ async function execute(id) {
       const check = await run('check', context(d, [['Plan', stage('plan')], [d.folder ? 'Changes made' : 'Revised work', d.folder ? stage('build') : stage('fix')], ...(d.folder ? [['Fixes made', stage('fix')]] : [])]));
       stage('check').verdict = verdictOf(check);
     }
-    if (!taskRow(id)) return; // removed while running
+    if (!taskRow(id)) return forgetChanges(id); // removed while running
+    await recordChanges(id);
     setStatus(id, 'completed', { progress: 100, step: null, result: teamResult(d).slice(0, 100_000), finished_at: nowIso(), error: null, detail: d });
   } catch (err) {
     for (const s of d.stages) if (s.status === 'pending') Object.assign(s, { status: 'skipped', note: 'Not reached.' });
     const failed = d.stages.find((s) => s.status === 'failed');
     const error = isAbort(err) ? CANCELLED : `${failed ? `${failed.label} (${failed.engine_label}) failed: ` : ''}${claudeErrorMessage(err)}`;
+    await recordChanges(id); // a stage that failed or was cancelled may have changed files already
     if (taskRow(id)) setStatus(id, 'failed', { step: null, finished_at: nowIso(), error, detail: d });
   } finally {
     active.delete(id);

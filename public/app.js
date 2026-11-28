@@ -484,12 +484,13 @@ function updateExplorer() {
   run.innerHTML = running.length
     ? running.map((t) => `<button class="wb-item" data-action="open-task" data-id="${t.id}" title="${esc(`${t.name} · ${t.tool_name}`)}"><span class="nav-dot d-ok pulse"></span><span class="wb-item-name">${esc(t.name)}</span><span class="wb-item-meta">${t.progress != null && t.kind !== 'session' ? `${Math.round(t.progress)}%` : t.kind === 'session' ? 'live' : ''}</span></button>`).join('')
     : '<div class="wb-empty">Nothing running</div>';
-  const autos = (d.automations ?? []).filter((a) => a.enabled && a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at));
+  const autos = d.automations_paused ? [] : (d.automations ?? []).filter((a) => a.enabled && a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at));
   const items = [
     ...d.upcoming.slice(0, 3).map((t) => `<button class="wb-item" data-action="open-task" data-id="${t.id}" title="${esc(t.name)}">${ICON.clock}<span class="wb-item-name">${esc(t.name)}</span><span class="wb-item-meta">${esc(t.status)}</span></button>`),
     ...autos.slice(0, 4).map((a) => `<a class="wb-item" href="#automations" title="${esc(`${a.name} · ${a.schedule_text}`)}">${ICON.repeat}<span class="wb-item-name">${esc(a.name)}</span><span class="wb-item-meta">${esc(rel(a.next_run_at))}</span></a>`),
   ];
-  next.innerHTML = items.length ? items.join('') : '<div class="wb-empty">Nothing scheduled</div>';
+  const paused = d.automations_paused && (d.automations ?? []).some((a) => a.enabled && a.next_run_at);
+  next.innerHTML = items.length || paused ? `${items.join('')}${paused ? `<a class="wb-item" href="#automations" title="Nothing runs on a schedule until you resume them">${ICON.pause}<span class="wb-item-name">Automations paused</span></a>` : ''}` : '<div class="wb-empty">Nothing scheduled</div>';
   const setN = (id, n) => {
     const e = $(id);
     if (e) e.textContent = n ? String(n) : '';
@@ -516,7 +517,8 @@ function updateStatus() {
     `<a class="wb-si" href="#settings" title="Which AI answers">${ICON.spark}<span>${esc(engine)}</span></a>`,
     `<a class="wb-si ${s.needs_attention ? 'warn' : ''}" href="#tools" title="Connected tools"><span class="nav-dot ${s.needs_attention ? 'd-warn' : 'd-ok'}"></span><span>${plural(s.connected, 'tool')}${s.needs_attention ? ` · ${s.needs_attention} need attention` : ''}</span></a>`,
     `<a class="wb-si" href="#tasks" title="Running now">${ICON.play}<span>${s.running} running</span></a>`,
-    next ? `<a class="wb-si hide-md" href="#automations" title="${esc(next.name)}">${ICON.repeat}<span>${esc(next.name)} ${esc(rel(next.next_run_at))}</span></a>` : '',
+    next && d.automations_paused ? `<a class="wb-si hide-md" href="#automations" title="Nothing runs on a schedule until you resume them">${ICON.pause}<span>Automations paused</span></a>`
+      : next ? `<a class="wb-si hide-md" href="#automations" title="${esc(next.name)}">${ICON.repeat}<span>${esc(next.name)} ${esc(rel(next.next_run_at))}</span></a>` : '',
   ].join('');
   const v = $('#wb-version');
   if (v) v.textContent = d.update?.current ? `v${d.update.current}` : '';
@@ -769,7 +771,7 @@ function taskRow(t, { compact = false } = {}) {
     ${session ? `<div class="status-ico ${t.status === 'running' ? 's-running' : 's-queued'}">${ICON.terminal}</div>` : statusIcon(t.status)}
     <div class="row-main">
       <div class="row-title">${esc(t.name)} ${badge}</div>
-      <div class="row-sub">${esc(t.tool_name)} · ${esc(taskWhen(t))}${t.step && t.status === 'running' ? ` · ${esc(t.step)}` : ''}</div>
+      <div class="row-sub">${esc(t.tool_name)} · ${esc(taskWhen(t))}${t.step && t.status === 'running' ? ` · ${esc(t.step)}` : ''}${t.changes?.files ? ` · ${plural(t.changes.files, 'file')} changed` : ''}</div>
       ${prog ? `<div class="row-progress"><div>${bar(t.progress, t.stalled ? 'err' : 'info', true)}</div><span class="num">${Math.round(t.progress)}%</span></div>` : ''}
       ${compact && session ? '' : etaLine(t)}
       ${t.status === 'failed' && t.error && !compact ? `<div class="row-sub err-text">${esc(t.error)}</div>` : ''}
@@ -1486,12 +1488,18 @@ const VIEWS = {
     const d = S.data;
     const list = d.automations ?? [];
     const canEdit = !d.demo;
-    const on = list.filter((a) => a.enabled).length;
+    const timed = list.filter((a) => !a.manual);
+    const on = timed.filter((a) => a.enabled).length;
+    const saved = list.length - timed.length;
+    const paused = Boolean(d.automations_paused);
+    const firstNext = timed.filter((a) => a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at))[0]?.next_run_at;
     const ideas = AUTO_TEMPLATES.map((t, i) => ({ t, i })).filter(({ t }) => !list.some((a) => a.name === t.name));
-    return `<div class="page-head"><div><h2>Automations</h2><p>Prompts that run on a schedule. Each run goes to the AI best suited to it, shows up in Tasks with live progress, and alerts you when it finishes.</p></div>
-      ${canEdit ? `<button class="btn primary" data-action="new-automation">${ICON.plus}New automation</button>` : ''}</div>
+    return `<div class="page-head"><div><h2>Automations</h2><p>Prompts that run on a schedule, once at a time you pick, or whenever you start them. Each run goes to the AI best suited to it, shows up in Tasks with live progress, and alerts you when it finishes.</p></div>
+      <div class="form-actions">${canEdit && timed.length ? `<button class="btn" data-action="pause-automations" aria-pressed="${paused}">${paused ? `${ICON.play}Resume all` : `${ICON.pause}Pause all`}</button>` : ''}
+      ${canEdit ? `<button class="btn primary" data-action="new-automation">${ICON.plus}New automation</button>` : ''}</div></div>
       ${!d.demo && !d.engine ? '<div class="callout warn">Connect an AI app or add a Claude API key first. Automations need one to run.</div>' : ''}
-      ${list.length ? `<p class="auto-summary">${plural(list.length, 'automation')} · ${on} on${on ? ` · next run ${esc(rel(list.filter((a) => a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at))[0]?.next_run_at) ?? 'not scheduled')}` : ''}</p>
+      ${paused ? `<div class="callout warn auto-paused">${ICON.pause}<span class="grow"><b>Automations are paused.</b> Nothing runs on a schedule until you resume them; runs that come due meanwhile are skipped. Saved prompts and Run now still work.</span>${canEdit ? '<button class="btn small" data-action="pause-automations">Resume all</button>' : ''}</div>` : ''}
+      ${list.length ? `<p class="auto-summary">${[timed.length ? `${plural(timed.length, 'scheduled automation')} · ${paused ? 'all paused' : `${on} on`}${on && !paused ? ` · next run ${esc(rel(firstNext) ?? 'not scheduled')}` : ''}` : '', saved ? plural(saved, 'saved prompt') : ''].filter(Boolean).join(' · ')}</p>
         <div class="autos">${list.map(autoCard).join('')}</div>` : ''}
       ${ideas.length ? `<section class="card">
         <div class="card-head"><h3>${list.length ? 'More ideas' : 'Start from an idea'}</h3><span class="aside">Edit any of them before saving</span></div>
@@ -1641,6 +1649,7 @@ const VIEWS = {
           <div class="pv-kvs">
             ${kv('Connected tools', c.tools, 'Names and budgets; keys are encrypted')}
             ${kv('Your tasks and results', c.tasks)}
+            ${kv('Files tasks changed', c.changed_files ?? 0, 'Which files, and the lines added and removed')}
             ${kv('Sessions from AI apps', c.sessions, st.read_sessions === false ? 'Off' : 'When, where, model, tokens')}
             ${kv('Assistant conversations', c.conversations)}
             ${kv('Alerts', c.alerts)}
@@ -1780,6 +1789,12 @@ const VIEWS = {
             ['notifications', 'Windows notifications', 'Show new alerts, such as a finished AI team task, as Windows notifications while the app isn’t in front.'],
             ['check_updates', 'Check for updates', 'Looks for a new version every few hours and lets you know. Nothing installs until you choose to.'],
           ].map(([k, label, help]) => `<label class="switch"><span><span class="switch-label">${esc(label)}</span><span class="faint small">${esc(help)}</span></span><input type="checkbox" data-desktop="${k}" ${st.desktop?.[k] ? 'checked' : ''} ${dis}></label>`).join('')}
+          ${(() => {
+            const cur = st.desktop?.shortcut ?? 'off';
+            const busy = cur !== 'off' && d.shortcut && !d.shortcut.registered;
+            return `<div class="switch"><span><span class="switch-label">Shortcut from anywhere</span><span class="faint small">${busy ? `<span class="warn-text">Another program is using ${esc(cur)}. Choose other keys, or close that program: Meridian tries again every minute.</span>` : 'Brings Meridian forward with the chat ready to type in, from any program. Off unless you choose keys.'}</span></span>
+              <select class="input pv-select" data-desktop-shortcut aria-label="Shortcut from anywhere" ${dis}>${['off', 'Ctrl+Alt+M', 'Ctrl+Alt+Space', 'Ctrl+Shift+Space'].map((k) => `<option value="${k}" ${cur === k ? 'selected' : ''}>${k === 'off' ? 'Off' : esc(k)}</option>`).join('')}</select></div>`;
+          })()}
         </section>` : ''}
 
         ${updateCard(d)}
@@ -1897,8 +1912,23 @@ function paletteItems() {
     cmd('Open the chat panel', () => toggleDock(true), { icon: ICON.chat, keys: 'Ctrl L' });
     cmd('New assistant task', () => openNewTask(), { icon: ICON.spark });
     cmd('New AI team task', () => openTeamTask(), { icon: ICON.team });
+    // Saved prompts and other automations run from here; conversations open from here.
+    for (const a of d.automations ?? []) cmd(`Run: ${a.name}`, () => ACTIONS['run-automation']({ dataset: { id: a.id } }), { icon: ICON.repeat, hint: a.manual ? 'Saved prompt' : 'Automation' });
+    // Conversations: the chat's list once it has loaded, else a copy fetched for the palette (the chat loads its own).
+    if (!S.chat.loaded && !S.palThreads) {
+      S.palThreads = [];
+      api('/api/assistant/threads').then((list) => {
+        S.palThreads = list;
+        if (S.pal) {
+          S.pal.items = paletteItems();
+          renderPalette();
+        }
+      }).catch(() => {});
+    }
+    for (const th of (S.chat.loaded ? S.chat.threads : S.palThreads).slice(0, 30)) items.push({ kind: 'chat', label: th.title, hint: 'Conversation', icon: ICON.chat, run: () => openConversation(th.id) });
   }
   if (real) cmd('New automation', () => openAutomation({}), { icon: ICON.repeat });
+  if (real && (d.automations ?? []).some((a) => !a.manual)) cmd(d.automations_paused ? 'Resume automations' : 'Pause all automations', () => ACTIONS['pause-automations']({}), { icon: d.automations_paused ? ICON.play : ICON.pause });
   if (real) cmd('Connect a tool', () => openAddTool(), { icon: ICON.plus });
   cmd('Refresh', () => load({ force: true }), { icon: ICON.refresh });
   cmd('Theme: dark', () => setTheme('dark'), { icon: ICON.sun });
@@ -1979,6 +2009,7 @@ function renderPalette() {
 function closePalette({ restore = true } = {}) {
   const back = S.pal?.back;
   S.pal = null;
+  S.palThreads = null; // fetched again next time, in case conversations changed
   const root = $('#palette-root');
   if (root) root.innerHTML = '';
   if (restore && back?.isConnected) back.focus?.({ preventScroll: true });
@@ -2005,7 +2036,9 @@ function chatBody(d, { docked = false } = {}) {
       <select class="input" id="thread-pick" data-action-change="pick-thread" aria-label="Conversation" ${c.streaming ? 'disabled' : ''}>
         ${c.thread ? '' : '<option value="" selected>New conversation</option>'}${options}</select>
       <button class="btn ${docked ? 'icon-btn' : ''}" data-action="new-chat" title="New chat" aria-label="New chat" ${c.streaming ? 'disabled' : ''}>${ICON.plus}${docked ? '' : '<span class="hide-sm">New chat</span>'}</button>
-      ${c.thread ? `<button class="btn icon-btn ghost" data-action="delete-chat" aria-label="Delete this conversation" title="Delete this conversation" ${c.streaming ? 'disabled' : ''}>${ICON.trash}</button>` : ''}
+      ${c.thread ? `<button class="btn icon-btn ghost" data-action="rename-chat" aria-label="Rename this conversation" title="Rename" ${c.streaming ? 'disabled' : ''}>${ICON.pencil}</button>
+        <button class="btn icon-btn ghost" data-action="save-chat" aria-label="Save this conversation as a Markdown file" title="Save as a file" ${c.streaming || !c.thread.items?.length ? 'disabled' : ''}>${ICON.download}</button>
+        <button class="btn icon-btn ghost" data-action="delete-chat" aria-label="Delete this conversation" title="Delete this conversation" ${c.streaming ? 'disabled' : ''}>${ICON.trash}</button>` : ''}
     </div>
     <section class="card chat">
       <div class="msgs" id="msgs" aria-live="polite"></div>
@@ -2016,6 +2049,49 @@ function chatBody(d, { docked = false } = {}) {
       </form>
     </section>
     <p class="chat-foot">${d.engine_choice === 'auto' && d.engines.filter((x) => x.ready).length > 1 ? 'Automatic: each request goes to the AI best suited to that kind of work, and quick follow-ups stay with the AI answering.' : `Answers come from ${esc(e.label)} with ${esc(e.via)}${e.kind === 'api' ? ', and each message uses tokens' : ''}.`} ${e.tools === false ? 'It reads a snapshot of your dashboard but can’t change anything here.' : `It changes budgets, syncs tools or starts tasks only when you ask${e.kind === 'api' && d.settings.assistant_web_search ? '. Web search is on' : ''}.`} Replies are AI-generated and can be wrong. <a href="#privacy">What’s shared</a></p>`;
+}
+
+/** A conversation as a Markdown file: who said what, each reply labelled with the AI that wrote it. */
+function chatMarkdown(th) {
+  const name = (id) => S.data?.engines.find((e) => e.id === id)?.label ?? 'The assistant';
+  const out = [`# ${th.title}`, '', `Saved from Meridian on ${new Date().toLocaleString()}. Replies are AI-generated and can be wrong.`, ''];
+  for (const it of th.items ?? []) {
+    if (it.role === 'user') out.push(`**You:** ${it.text}`, '');
+    else if (it.role === 'assistant') {
+      if (it.text) out.push(`**${name(it.engine ?? th.route?.engine ?? th.engine)}:**`, '', it.text, '');
+    } else if (it.role === 'action') out.push(`> ${it.ok === false ? 'Didn’t work' : 'Done'}: ${it.label}${it.error ? ` (${it.error})` : ''}`, '');
+    else if (it.text) out.push(`> ${it.text}`, '');
+  }
+  return `${out.join('\n').trim()}\n`;
+}
+
+/** Opens a conversation from the palette: on the Assistant page, or in the side panel if it's open. */
+async function openConversation(id) {
+  if (S.page !== 'assistant' && !dockShown()) location.hash = '#assistant';
+  await openThread(id);
+}
+
+/** Brought forward from another program (the shortcut from anywhere, electron/main.js): the chat, ready to type in. */
+window.accQuickAsk = () => {
+  if (!S.user || !S.data) return;
+  if (S.pal) closePalette({ restore: false });
+  closeModal();
+  if (S.data.demo || !S.data.engine) return openPalette();
+  if (S.page === 'assistant') return $('#chat-input')?.focus();
+  if (S.dock) {
+    S.dockFocusUntil = Date.now() + 4000;
+    renderDock();
+    return $('#dock #chat-input')?.focus();
+  }
+  toggleDock(true);
+};
+
+/** The folders you used last, under a folder box: one click fills it in. */
+function recentChips(target) {
+  const list = (S.data?.recent_folders ?? []).slice(0, 5);
+  if (!list.length) return '';
+  const base = (f) => f.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || f;
+  return `<div class="recent-folders" role="group" aria-label="Recent folders"><span class="faint small">Recent</span>${list.map((f) => `<button type="button" class="chip" data-action="use-folder" data-target="${target}" data-folder="${esc(f)}" title="${esc(f)}">${ICON.folder}<span class="ellipsis">${esc(base(f))}</span></button>`).join('')}</div>`;
 }
 
 const chatOnScreen = () => S.page === 'assistant' || dockShown();
@@ -2144,8 +2220,12 @@ function refreshMap() {
 // ── Automations ──────────────────────────────────────────────────────────
 const MODE_LABEL = { task: 'Assistant task', team: 'AI team', compare: 'Ask all' };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const scheduleText = (s) => (s.every === 'hour' ? `Every hour at :${s.at.slice(3)}` : s.every === 'day' ? `Every day at ${s.at}` : s.every === 'weekday' ? `Every weekday at ${s.at}` : `Every ${WEEKDAYS[s.day]} at ${s.at}`);
+const scheduleText = (s) => (s.every === 'manual' ? 'When you run it' : s.every === 'once' ? `Once, ${s.date} at ${s.at}` : s.every === 'hour' ? `Every hour at :${s.at.slice(3)}` : s.every === 'day' ? `Every day at ${s.at}` : s.every === 'weekday' ? `Every weekday at ${s.at}` : `Every ${WEEKDAYS[s.day]} at ${s.at}`);
+/** A day in this computer's local time, as a date box wants it ("2026-11-28"). */
+const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const AUTO_TEMPLATES = [
+  { name: 'Explain a project', mode: 'task', schedule: { every: 'manual' },
+    prompt: 'Read the project in this folder and write a short guide to it: what it does, how it’s organized, how to run it, and anything that looks unfinished or risky.' },
   { name: 'Weekly usage report', mode: 'task', schedule: { every: 'week', at: '09:00', day: 1 },
     prompt: 'Summarize last week’s AI usage by tool: tokens, cost where reported, and plan limits. Flag anything close to a budget or limit, and suggest where to cut back.' },
   { name: 'Morning briefing', mode: 'task', schedule: { every: 'weekday', at: '08:30' },
@@ -2158,13 +2238,16 @@ const AUTO_TEMPLATES = [
 
 /** The dashboard's Up next: queued and scheduled tasks, then the next automation runs. */
 function upNext(d) {
-  const autos = (d.automations ?? []).filter((a) => a.enabled && a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at));
+  const scheduled = (d.automations ?? []).filter((a) => a.enabled && a.next_run_at).sort((a, b) => a.next_run_at.localeCompare(b.next_run_at));
+  const autos = d.automations_paused ? [] : scheduled;
   const tasks = d.upcoming.slice(0, 6);
   const rows = [
     ...tasks.map((t) => taskRow(t, { compact: true })),
     ...autos.slice(0, Math.max(0, 6 - tasks.length)).map((a) => `<a class="row" href="#automations"><div class="status-ico s-scheduled">${ICON.repeat}</div>
       <div class="row-main"><div class="row-title">${esc(a.name)}</div><div class="row-sub">${esc(a.schedule_text)} · ${esc(a.mode_label)}</div></div>
       <div class="row-time" title="${esc(when(a.next_run_at))}">${esc(rel(a.next_run_at))}</div></a>`),
+    ...(d.automations_paused && scheduled.length ? [`<a class="row" href="#automations"><div class="status-ico s-queued">${ICON.pause}</div>
+      <div class="row-main"><div class="row-title">Automations are paused</div><div class="row-sub">${plural(scheduled.length, 'automation')} won’t run until you resume them</div></div></a>`] : []),
   ];
   return rows.length ? `<div class="rows">${rows.join('')}</div>` : emptyBlock('Nothing is scheduled', 'Queued tasks and your next automation runs appear here.', !d.demo ? '<button class="btn small" data-action="new-automation">New automation</button>' : '');
 }
@@ -2175,16 +2258,24 @@ function autoCard(a) {
   const last = a.last_task;
   const lastStatus = last ? TASK_STATUS[last.status] : null;
   const confirm = S.confirmAuto === a.id;
-  return `<section class="card auto ${a.enabled ? '' : 'off'}">
+  // A saved prompt runs only when you start it, and a one-time automation that ran is done: neither has an on/off switch.
+  const state = a.manual ? '<span class="tag">Saved prompt</span>' : a.done ? '<span class="tag">Ran once</span>'
+    : `<label class="switch mini" title="${a.enabled ? 'On' : 'Paused'}"><input type="checkbox" data-auto-toggle="${a.id}" ${a.enabled ? 'checked' : ''} ${dis} aria-label="${esc(a.name)} is ${a.enabled ? 'on' : 'paused'}"></label>`;
+  const next = a.manual ? '<span class="faint">When you choose Run now</span>'
+    : a.done ? '<span class="faint">None: it ran once. Edit it to give it a new time.</span>'
+      : !a.enabled || !a.next_run_at ? '<span class="faint">Paused</span>'
+        : d.automations_paused ? `<span class="faint" title="${esc(when(a.next_run_at))}">Paused with all automations</span>`
+          : `<span title="${esc(when(a.next_run_at))}">${esc(when(a.next_run_at))}</span>`;
+  return `<section class="card auto ${a.enabled && !a.done && !(d.automations_paused && !a.manual) ? '' : 'off'}">
     <div class="auto-head">
       <span class="auto-ico">${ICON[a.mode === 'team' ? 'team' : a.mode === 'compare' ? 'chat' : 'repeat']}</span>
       <div class="min0"><div class="row-title">${esc(a.name)}</div><div class="row-sub">${esc(a.schedule_text)} · ${esc(a.mode_label)}</div></div>
-      <label class="switch mini" title="${a.enabled ? 'On' : 'Paused'}"><input type="checkbox" data-auto-toggle="${a.id}" ${a.enabled ? 'checked' : ''} ${dis} aria-label="${esc(a.name)} is ${a.enabled ? 'on' : 'paused'}"></label>
+      ${state}
     </div>
     <p class="auto-prompt">${esc(a.prompt)}</p>
     ${a.folder ? `<div class="faint small auto-folder">${ICON.folder}<code>${esc(a.folder)}</code></div>` : ''}
     <dl class="auto-meta">
-      <div><dt>Next run</dt><dd>${a.enabled && a.next_run_at ? `<span title="${esc(when(a.next_run_at))}">${esc(when(a.next_run_at))}</span>` : '<span class="faint">Paused</span>'}</dd></div>
+      <div><dt>Next run</dt><dd>${next}</dd></div>
       <div><dt>Last run</dt><dd>${last ? `<button class="link" data-action="open-task" data-id="${last.id}">${esc(lastStatus?.label ?? last.status)} · ${esc(rel(a.last_run_at))}</button>` : a.last_run_at ? esc(rel(a.last_run_at)) : '<span class="faint">Not yet</span>'}</dd></div>
     </dl>
     ${a.last_error ? `<div class="callout warn small">${esc(a.last_error)}</div>` : ''}
@@ -2211,12 +2302,14 @@ function openAutomation(a = {}) {
         <div class="choice-row" role="radiogroup">${Object.entries(MODE_LABEL).map(([k, v]) => `<label class="choice"><input type="radio" name="mode" value="${k}" ${mode === k ? 'checked' : ''} data-auto-mode><span><b>${v}</b><span class="faint small block">${k === 'task' ? 'The best AI for it works alone' : k === 'team' ? 'Plan, build, review, fix' : 'Every AI answers, then a merge'}</span></span></label>`).join('')}</div></div>
       <div class="field" id="au-folder-field" ${mode === 'compare' ? 'hidden' : ''}><label for="au-folder">Folder to work in (optional)</label>
         <div class="folder-row"><input class="input" id="au-folder" name="folder" autocomplete="off" placeholder="Leave empty for a text result" value="${esc(a.folder ?? '')}"><button class="btn" type="button" data-action="pick-folder" data-target="au-folder">${ICON.folder}Choose…</button></div>
+        ${recentChips('au-folder')}
         <span class="help">With a folder, the AI can change files in it on every run; for git work (commit, push, pull), it runs git there instead, through GitHub Copilot or Claude Code. Use a folder you have a copy of, such as a git project.</span></div>
       <div class="form-row">
-        <div class="field"><label for="au-every">Repeats</label><select class="input" id="au-every" name="every" data-auto-every>
-          ${opt('hour', 'Every hour', s.every)}${opt('day', 'Every day', s.every)}${opt('weekday', 'Every weekday (Mon–Fri)', s.every)}${opt('week', 'Once a week', s.every)}</select></div>
+        <div class="field"><label for="au-every">When it runs</label><select class="input" id="au-every" name="every" data-auto-every>
+          ${opt('manual', 'Only when I run it', s.every)}${opt('once', 'Once, on a date', s.every)}${opt('hour', 'Every hour', s.every)}${opt('day', 'Every day', s.every)}${opt('weekday', 'Every weekday (Mon–Fri)', s.every)}${opt('week', 'Once a week', s.every)}</select></div>
         <div class="field" id="au-day-field" ${s.every === 'week' ? '' : 'hidden'}><label for="au-day">On</label><select class="input" id="au-day" name="day">${WEEKDAYS.map((w, i) => opt(i, w, s.day ?? 1)).join('')}</select></div>
-        <div class="field"><label for="au-at" id="au-at-label">${s.every === 'hour' ? 'Minutes past the hour' : 'At'}</label><input class="input" id="au-at" name="at" type="time" required value="${esc(s.at)}"></div>
+        <div class="field" id="au-date-field" ${s.every === 'once' ? '' : 'hidden'}><label for="au-date">On</label><input class="input" id="au-date" name="date" type="date" min="${localDay()}" value="${esc(s.date ?? localDay())}"></div>
+        <div class="field" id="au-at-field" ${s.every === 'manual' ? 'hidden' : ''}><label for="au-at" id="au-at-label">${s.every === 'hour' ? 'Minutes past the hour' : 'At'}</label><input class="input" id="au-at" name="at" type="time" value="${esc(s.at ?? '09:00')}"></div>
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">${a.id ? 'Save changes' : `${ICON.repeat}Save automation`}</button>${a.id ? '' : '<span class="faint small">It starts at the next scheduled time. Use Run now to try it first.</span>'}</div>
       <div class="error-text" data-error></div>
@@ -2501,6 +2594,8 @@ function closeModal() {
   if (hadPanel && back?.isConnected && typeof back.focus === 'function') back.focus({ preventScroll: true });
   S.add = null;
   S.openTask = null;
+  S.openChanges = null;
+  S.confirmTaskDelete = null;
 }
 
 /** Keeps an open task panel current while the task changes, such as an AI team moving to its next stage. */
@@ -2509,7 +2604,7 @@ function refreshOpenTask() {
   if (!o || !$('#modal-root .panel')) return;
   const t = S.data?.tasks.find((x) => x.id === o.id);
   if (!t) return;
-  const sig = `${t.status}|${t.updated_at}|${t.progress}`;
+  const sig = `${t.status}|${t.updated_at}|${t.progress}|${t.changes?.files ?? ''}`;
   if (sig !== o.sig) openTask(t.id, { refresh: true });
 }
 
@@ -2545,12 +2640,24 @@ async function openTask(id, { refresh = false } = {}) {
   const mine = Boolean(t.runner);
   const canAsk = !S.data.demo && S.data.engine;
   const st = session ? SESSION_STATUS[t.status] ?? SESSION_STATUS.completed : TASK_STATUS[t.status];
+  // Run again: an assistant task can go to an AI you pick this time, to compare; an AI team or Ask all runs the same way.
+  const again = !t.controls.includes('retry') ? ''
+    : t.team ? `<button class="btn" data-action="task-retry" data-id="${t.id}">Run again</button>`
+      : `<span class="retry-with"><button class="btn" data-action="task-retry" data-id="${t.id}">Run again</button>
+          <select class="input" id="retry-engine" aria-label="Which AI runs it again"><option value="">${esc(S.data.engine_choice === 'auto' ? 'Automatic picks the AI' : 'With the same AI')}</option>
+          ${S.data.engines.filter((x) => x.ready && (!t.folder || x.kind === 'cli')).map((x) => `<option value="${x.id}">With ${esc(x.label)}${x.id === t.runner ? ' (this time too)' : ''}</option>`).join('')}</select></span>`;
+  const removing = S.confirmTaskDelete === t.id;
+  const gone = ['this task', t.has_result && 'its result', t.changes && 'its list of changed files'].filter(Boolean);
+  const del = !t.controls.includes('delete') || S.data.demo ? ''
+    : removing ? `<div class="callout err inline del-confirm"><span class="grow">Delete ${gone.length > 1 ? `${gone.slice(0, -1).join(', ')} and ${gone.at(-1)}` : gone[0]}? It can’t be undone.${t.folder ? ' The files in its folder stay as they are.' : ''}</span>
+        <button class="btn small danger" data-action="confirm-task-delete" data-id="${t.id}">Delete</button><button class="btn small ghost" data-action="cancel-task-delete">Keep</button></div>`
+      : `<button class="btn ghost" data-action="task-delete" data-id="${t.id}">${ICON.trash}Delete task</button>`;
   const controls = session
     ? `<p class="muted small">This is a ${esc(t.tool_name)} session on this computer, read from its logs. Open ${esc(t.tool_name)} to continue it.</p>`
     : mine && !S.data.demo
       ? `<div class="form-actions">${t.controls.includes('cancel') ? `<button class="btn danger" data-action="task-cancel" data-id="${t.id}">Cancel task</button>` : ''}
-        ${t.controls.includes('retry') ? `<button class="btn" data-action="task-retry" data-id="${t.id}">Run again</button>` : ''}</div>`
-      : `<div class="form-actions"><button class="btn" disabled>Pause</button><button class="btn" disabled>Cancel</button><button class="btn" disabled>Restart</button></div>
+        ${again}${removing ? '' : del}</div>${removing ? del : ''}`
+      : `<div class="form-actions"><button class="btn" disabled>Pause</button><button class="btn" disabled>Cancel</button><button class="btn" disabled>Restart</button>${removing ? '' : del}</div>${removing ? del : ''}
        <p class="faint small">${esc(t.tool_name)} doesn’t offer task controls through this app. Stop or restart the task where it runs.</p>`;
   openPanel(t.name, `
     <div class="pill-row">${pill(st.pill, st.label)}${session ? '<span class="tag">Session</span>' : ''}${mine ? `<span class="tag accent">Run by ${esc(t.runner_label)}</span>` : ''}
@@ -2561,7 +2668,7 @@ async function openTask(id, { refresh = false } = {}) {
     ${e ? `<div class="callout ${e.cls === 'err' ? 'err' : e.cls === 'warn' ? 'warn' : 'info'}"><b>${esc(e.text)}</b>${e.basis ? `, ${esc(e.basis)}` : ''}.</div>` : ''}
     <dl class="detail-grid">
       ${row('Tool', esc(t.tool_name))}
-      ${row('Folder', t.folder && !t.team && `<code>${esc(t.folder)}</code><div class="faint small">${t.access === 'git' ? 'May read files and run git commands only' : 'May read and change files, no commands'}</div>`)}
+      ${row('Folder', t.folder && `<code>${esc(t.folder)}</code>${S.data.desktop_app && !S.data.demo ? ` <button class="link" data-action="open-task-folder" data-id="${t.id}">${ICON.folder}Open</button>` : ''}<div class="faint small">${t.team ? 'The builder may change files; the others only read them' : t.access === 'git' ? 'May read files and run git commands only' : 'May read and change files, no commands'}</div>`)}
       ${row('Why this AI', t.route_why && esc(t.route_why))}
       ${row('Handed over', t.handoff && esc(t.handoff))}
       ${row('Started', at(t.started_at))}
@@ -2577,13 +2684,15 @@ async function openTask(id, { refresh = false } = {}) {
     ${canAsk ? `<div class="form-actions"><button class="btn" data-action="ask-task" data-id="${t.id}">${ICON.chat}Ask the assistant about this</button></div>` : ''}
     ${mine && !S.data.demo && t.controls.includes('follow_up') ? followUpForm(t) : ''}
     <div class="section"><h4>Controls</h4>${controls}</div>`, { focus: !refresh });
-  S.openTask = { id: t.id, sig: `${t.status}|${t.updated_at}|${t.progress}` };
+  S.openTask = { id: t.id, sig: `${t.status}|${t.updated_at}|${t.progress}|${t.changes?.files ?? ''}` };
   const restore = () => {
     for (const id of open) document.querySelector(`#${id} details`)?.setAttribute('open', '');
     const body = $('#modal-root .panel-body');
     if (body && refresh) body.scrollTop = scroll;
   };
-  if (S.data.demo || (!t.has_result && !t.team)) return restore();
+  // The demo can't read a folder, so its sample task brings its changes with it.
+  if (S.data.demo && t.demo_changes) $('#task-detail')?.insertAdjacentHTML('beforebegin', changesSection(t.demo_changes, t));
+  if (S.data.demo || (!t.has_result && !t.team && !t.changes)) return restore();
   try {
     const detail = await api(`/api/tasks/${t.id}`);
     if (S.openTask?.id !== t.id) return;
@@ -2599,6 +2708,7 @@ async function openTask(id, { refresh = false } = {}) {
         <div class="form-actions"><button class="btn small" data-action="copy" data-target="task-result-raw">Copy result</button>
           <button class="btn small" data-action="save-result" data-name="${esc(t.name)}">${ICON.download}Save as file</button></div></div>`);
     }
+    if (box && detail.changes) box.insertAdjacentHTML('beforebegin', changesSection(detail.changes, t));
     restore();
   } catch (err) {
     if (!refresh) toast(err.message, true);
@@ -2620,6 +2730,37 @@ function followUpForm(t) {
   </form>`;
 }
 
+const CHANGE_LABEL = { added: 'Added', changed: 'Changed', deleted: 'Deleted' };
+const lineCounts = (added, removed) => `<span class="chg-add">+${fmtNum(added)}</span> <span class="chg-del">−${fmtNum(removed)}</span>`;
+
+/**
+ * What a task changed in its folder: each file with its lines added and removed. A file's diff is drawn when you open
+ * it, so a long list stays quick.
+ */
+function changesSection(c, t) {
+  S.openChanges = c.list ?? [];
+  const files = S.openChanges;
+  const head = c.files ? `${plural(c.files, 'file')} changed · ${lineCounts(c.added, c.removed)}` : 'No files changed';
+  return `<div class="section changes"><h4>What changed</h4>
+    <p class="chg-sum"><b>${head}</b> <span class="faint small">in <code>${esc(c.folder)}</code>, ${esc(when(c.from))} to ${esc(when(c.to))}</span></p>
+    ${files.length ? `<ul class="chg-list">${files.map((f, i) => `<li><details class="chg" data-chg="${i}"><summary>
+        <span class="chg-kind k-${esc(f.change)}">${esc(CHANGE_LABEL[f.change] ?? f.change)}</span>
+        <code class="chg-path" title="${esc(f.path)}">${esc(f.path)}</code>
+        <span class="chg-n">${f.added != null ? lineCounts(f.added, f.removed) : `<span class="faint">${f.binary ? 'Binary' : 'Not compared'}</span>`}</span></summary>
+        <div class="chg-body"></div></details></li>`).join('')}</ul>` : ''}
+    ${c.more ? `<p class="fine">${plural(c.more, 'more file')} changed too; the first ${files.length} are listed.</p>` : ''}
+    ${c.partial ? '<p class="fine">This folder has more files than the app reads, so some changes may not be listed.</p>' : ''}
+    <p class="fine">${t?.status === 'running' ? 'Listed when the task ends. ' : ''}Meridian read the folder when the task started and again when it ended, without running anything in it. Changes you or other programs made there in that time are included.</p></div>`;
+}
+
+/** One file's diff: hunk headers, then lines kept, removed and added. */
+function diffHtml(f) {
+  if (!f.diff) return `<p class="faint small chg-note">${esc(f.note ?? (f.binary ? 'Binary file: no line-by-line view.' : 'No line changes to show.'))}</p>`;
+  const cls = (l) => (l.startsWith('@@') ? 'dh' : l.startsWith('… ') ? 'dm' : l[0] === '+' ? 'da' : l[0] === '-' ? 'dd' : '');
+  // The lines sit in one box as wide as the longest line, so every line's tint reaches across when scrolled sideways.
+  return `${f.note ? `<p class="faint small chg-note">${esc(f.note)}</p>` : ''}<pre class="diff" tabindex="0" aria-label="${esc(`Changes to ${f.path}`)}"><code>${f.diff.split('\n').map((l) => `<span class="${cls(l)}">${esc(l) || ' '}</span>`).join('')}</code></pre>`;
+}
+
 const STAGE_STATE = {
   pending: { icon: 'clock', text: 'Waiting' },
   running: { icon: null, text: 'Working…' },
@@ -2630,7 +2771,7 @@ const STAGE_STATE = {
 
 /** The stages of an AI team task: who did each one, and how it went. */
 function teamTimeline(t) {
-  return `<div class="section"><h4>${ICON.team} ${t.team.mode === 'compare' ? 'Every AI’s answer' : 'The team'}${t.team.folder ? ` · working in <code>${esc(t.team.folder)}</code>` : ''}</h4>
+  return `<div class="section"><h4>${ICON.team} ${t.team.mode === 'compare' ? 'Every AI’s answer' : 'The team'}</h4>
     <ol class="timeline">${t.team.stages.map((s) => {
       const st = STAGE_STATE[s.status] ?? STAGE_STATE.pending;
       const took = s.started_at && s.finished_at ? ` · ${dur(Date.parse(s.finished_at) - Date.parse(s.started_at))}` : '';
@@ -2653,6 +2794,7 @@ function openTeamTask(preset = {}) {
       <div class="field"><label for="tt-goal">What should the team make?</label><textarea class="input" id="tt-goal" name="goal" rows="5" maxlength="4000" required placeholder="A one-page landing page for a dog-walking business: headline, three services with prices, and a contact section.">${esc(preset.goal ?? '')}</textarea></div>
       <div class="field"><label for="tt-folder">Folder to work in (optional)</label>
         <div class="folder-row"><input class="input" id="tt-folder" name="folder" autocomplete="off" placeholder="Leave empty for a text result, or paste a folder path" value="${esc(preset.folder ?? '')}"><button class="btn" type="button" data-action="pick-folder">${ICON.folder}Choose…</button></div>
+        ${recentChips('tt-folder')}
         <span class="help">With a folder, the builder can create and change files in it, and the planner, reviewer and debugger can read them. None of them run shell commands, except Codex inside its own sandbox. Use a folder you have a copy of, such as a git project.</span></div>
       <div><div class="lineup-label">Who does what</div><div id="tt-lineup">${lineupStrip(lineup)}</div></div>
       <div class="form-actions"><button class="btn primary" type="submit">${ICON.play}Start team task</button><a class="btn ghost" href="#settings" data-action="close">Change roles</a></div>
@@ -2699,6 +2841,7 @@ function openNewTask(preset = {}) {
         <span class="help">Be specific about what you want back. ${S.data.engine_choice === 'auto' ? 'On Automatic it goes to the best AI for it: building to Claude Code, debugging to Codex or Gemini, git to GitHub Copilot.' : `Runs with ${esc(e.via)}.`}</span></div>
       <div class="field"><label for="ct-folder">Folder to work in (optional)</label>
         <div class="folder-row"><input class="input" id="ct-folder" name="folder" autocomplete="off" placeholder="Leave empty for a text result" value="${esc(preset.folder ?? '')}"><button class="btn" type="button" data-action="pick-folder" data-target="ct-folder">${ICON.folder}Choose…</button></div>
+        ${recentChips('ct-folder')}
         <span class="help">With a folder, the AI can change files in it. For git work (commit, push, pull, branches), give the repository’s folder: it then runs through GitHub Copilot or Claude Code and may only run git commands there. Force-pushes and hard resets are always blocked.</span></div>
       <div class="form-actions"><button class="btn primary" type="submit">Start task</button></div>
       <div class="error-text" data-error></div>
@@ -2928,13 +3071,24 @@ const FORMS = {
     openTask(r.task_id);
   },
   async automation(fd, form) {
-    const body = { name: fd.name, prompt: fd.prompt, mode: fd.mode, folder: fd.mode === 'team' ? fd.folder?.trim() || null : null, schedule: { every: fd.every, at: fd.at, day: Number(fd.day) } };
+    // An assistant task or an AI team can work in a folder; Ask all gives a text result.
+    const schedule = fd.every === 'manual' ? { every: 'manual' } : fd.every === 'once' ? { every: 'once', date: fd.date, at: fd.at } : { every: fd.every, at: fd.at, day: Number(fd.day) };
+    const body = { name: fd.name, prompt: fd.prompt, mode: fd.mode, folder: fd.mode !== 'compare' ? fd.folder?.trim() || null : null, schedule };
     const id = form.dataset.id;
     const a = await api(id ? `/api/automations/${id}` : '/api/automations', { method: id ? 'PATCH' : 'POST', body });
     closeModal();
-    toast(a.enabled && a.next_run_at ? `Saved. Next run ${when(a.next_run_at)}` : 'Saved');
+    toast(a.manual ? 'Saved. Run it from here or with Ctrl+P whenever you need it.' : a.enabled && a.next_run_at ? `Saved. ${S.data.automations_paused ? 'Automations are paused; once resumed, it' : 'It'} runs ${when(a.next_run_at)}` : 'Saved');
     if (S.page !== 'automations') location.hash = '#automations';
     await load({ force: true });
+  },
+  async 'rename-thread'(fd, form) {
+    const r = await api(`/api/assistant/threads/${form.dataset.id}`, { method: 'PATCH', body: { title: fd.title } });
+    if (S.chat.thread?.id === r.id) S.chat.thread.title = r.title;
+    const entry = S.chat.threads.find((x) => x.id === r.id);
+    if (entry) entry.title = r.title;
+    closeModal();
+    toast('Conversation renamed');
+    renderChat();
   },
   async 'claude-task'(fd) {
     const r = await api('/api/claude-tasks', { method: 'POST', body: { name: fd.name, instructions: fd.instructions, folder: fd.folder?.trim() || null } });
@@ -3453,10 +3607,64 @@ const ACTIONS = {
   },
   async 'task-retry'(el) {
     el.disabled = true;
-    await api(`/api/tasks/${el.dataset.id}/retry`, { method: 'POST' });
-    toast('Task started again');
+    const engine = $('#retry-engine')?.value || null;
+    const r = await api(`/api/tasks/${el.dataset.id}/retry`, { method: 'POST', body: engine ? { engine } : {} });
+    const who = r.runner && S.data.engines.find((x) => x.id === r.runner)?.label;
+    toast(r.status === 'queued' ? 'Queued to run again. It starts when a running task finishes.' : `Started again${who ? ` with ${who}` : ''}`);
     closeModal();
     await load({ force: true });
+    if (r.task_id) openTask(r.task_id);
+  },
+  'task-delete'(el) {
+    S.confirmTaskDelete = Number(el.dataset.id);
+    openTask(el.dataset.id, { refresh: true });
+    $('#modal-root .del-confirm .btn.danger')?.focus();
+  },
+  'cancel-task-delete'() {
+    const id = S.confirmTaskDelete;
+    S.confirmTaskDelete = null;
+    if (id) openTask(id, { refresh: true });
+  },
+  async 'confirm-task-delete'(el) {
+    el.disabled = true;
+    await api(`/api/tasks/${el.dataset.id}`, { method: 'DELETE' });
+    S.confirmTaskDelete = null;
+    closeModal();
+    toast('Task deleted');
+    await load({ force: true });
+  },
+  async 'open-task-folder'(el) {
+    await api(`/api/tasks/${el.dataset.id}/open-folder`, { method: 'POST' });
+  },
+  /** A recent folder under a folder box: fills it in. */
+  'use-folder'(el) {
+    const input = document.getElementById(el.dataset.target);
+    if (!input) return;
+    input.value = el.dataset.folder;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  },
+  async 'pause-automations'(el) {
+    const pause = !S.data.automations_paused;
+    el.disabled = true;
+    await api('/api/settings', { method: 'PUT', body: { automations_paused: pause } });
+    toast(pause ? 'Automations paused. Nothing runs on a schedule until you resume them.' : 'Automations resumed. Each runs at its next time from now.');
+    await load({ force: true });
+  },
+  'rename-chat'() {
+    const th = S.chat.thread;
+    if (!th) return;
+    openPanel('Rename conversation', `<form class="form" data-form="rename-thread" data-id="${th.id}">
+      <div class="field"><label for="rn-title">Name</label><input class="input" id="rn-title" name="title" maxlength="80" required value="${esc(th.title)}" autocomplete="off"></div>
+      <div class="form-actions"><button class="btn primary" type="submit">Save name</button><button class="btn ghost" type="button" data-action="close">Cancel</button></div>
+      <div class="error-text" data-error></div></form>`, { center: true });
+    $('#rn-title')?.select();
+  },
+  'save-chat'() {
+    const th = S.chat.thread;
+    if (!th?.items?.length) return;
+    const slug = th.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'conversation';
+    saveFile(`${slug}.md`, chatMarkdown(th), 'text/markdown');
   },
   async logout() {
     await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
@@ -3631,7 +3839,22 @@ async function onChange(e) {
   }
   if ('autoEvery' in el.dataset) {
     $('#au-day-field').hidden = el.value !== 'week';
+    $('#au-date-field').hidden = el.value !== 'once';
+    $('#au-at-field').hidden = el.value === 'manual';
     $('#au-at-label').textContent = el.value === 'hour' ? 'Minutes past the hour' : 'At';
+    return;
+  }
+  if ('desktopShortcut' in el.dataset) {
+    try {
+      await api('/api/settings', { method: 'PUT', body: { desktop: { shortcut: el.value } } });
+      await load({ force: true });
+      const sc = S.data.shortcut;
+      const busy = el.value !== 'off' && sc && !sc.registered;
+      toast(el.value === 'off' ? 'Shortcut turned off' : busy ? `Another program is using ${el.value}. Choose other keys.` : `Press ${el.value} in any program to bring Meridian forward`, busy);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    if (S.page === 'settings') renderPage();
     return;
   }
   if ('autoMode' in el.dataset) {
@@ -3741,6 +3964,14 @@ async function boot() {
     });
     document.addEventListener('submit', onSubmit);
     document.addEventListener('change', onChange);
+    // A changed file's diff is drawn when its row is opened (toggle doesn't bubble, so this listens while capturing).
+    document.addEventListener('toggle', (e) => {
+      const box = e.target;
+      if (!box.matches?.('details.chg') || !box.open) return;
+      const body = box.querySelector('.chg-body');
+      const f = S.openChanges?.[Number(box.dataset.chg)];
+      if (body && f && !body.childElementCount) body.innerHTML = diffHtml(f);
+    }, true);
     document.addEventListener('input', (e) => {
       if (e.target.closest?.('form[data-form="setup"], form[data-form="change-password"]') && ['f-pass', 'f-user', 'cp-next'].includes(e.target.id)) updatePasswordRules(e.target.form);
       if (e.target.id === 'pal-q' && S.pal) {

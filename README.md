@@ -21,7 +21,8 @@ One dashboard for your AI tools: what's running, what's next, what you've spent,
 
 - **Your accounts, no API keys:** connect Claude Code, Codex, Gemini, GitHub Copilot and Cursor with the accounts you already use.
 - **Smart routing and teams:** each request goes to the AI best suited to it. An **AI team** splits work into plan, build, review and fix, and **Ask all** compares every AI's answer.
-- **Automations:** prompts that run on a schedule. Background tasks show live progress and an estimated finish.
+- **Automations and saved prompts:** prompts that run on a schedule, once at a time you pick, or whenever you start them. Background tasks show live progress and an estimated finish.
+- **See what changed:** a task that works in a folder lists every file it added, changed or deleted, with a line-by-line diff of each.
 - **The map:** your command center in the middle, your AI tools around it, and the routes your work takes.
 - **A workbench that feels like a code editor:** tabs, an explorer, a status bar, a command palette (Ctrl+P) and a chat side panel (Ctrl+L).
 - **Private by design:** everything stays on your computer, with no tracking. You get two-step verification, Sign in with Google, retention controls and one-click export or erase.
@@ -53,14 +54,15 @@ The desktop app keeps its data in `%APPDATA%\Meridian\data`. It syncs, raises al
 - **Backups:** **Settings → Backup** saves your tools, tasks and results, conversations, alerts and settings to a JSON file, and restores from one. Backups never include your password, API keys or ingest tokens, so the file is safe to keep; you add keys again after restoring. The code is on GitHub; your data stays on your computer and in the backups you save.
 - **Updates:** the app checks this project's GitHub releases every few hours and lets you know when there's a new version. **Settings → Updates** shows what's new and installs it: the app downloads the installer, checks it against the release (size and GitHub's SHA-256 checksum), closes, updates in place and opens again, with your data kept. It won't install while tasks are running. Public releases are read directly; while the repository is private, the check and download use your GitHub CLI sign-in (`gh auth login`), and the app never handles the token. Turn the automatic check off under **Settings → Desktop app**.
 - **Shortcuts stay on the installed app:** Electron writes a Start menu shortcut named after the program, pointing at whichever copy of `Meridian.exe` first asks whether it can show Windows notifications. So on Windows only the installed copy shows notifications (or asks); test and development copies don't, and never take over Meridian's shortcut. If a shortcut still points at another copy, that copy hands off to the installed Meridian when opened and closes, and the installed Meridian points its Start menu, desktop and taskbar shortcuts back at itself (`electron/identity.js`). Copies started with their own folders (`--user-data-dir`, `ACC_DATA_DIR`) are left alone.
-- **Exports:** **Usage & Costs** downloads the last 30 days as CSV, and each task's result saves as a Markdown file.
+- **Exports:** **Usage & Costs** downloads the last 30 days as CSV. A task's result and a whole conversation each save as a Markdown file.
 - **The layout** works like a code editor:
   - An icon bar on the left for each section.
   - An **Explorer** with your connected tools, what's running and what's up next.
   - **Tabs** for the pages you've opened (middle-click or × closes one), a breadcrumb bar, and a status bar along the bottom. The status bar shows which AI answers, your connections, live work, the next automation and the version.
   - In narrower windows the explorer folds away. On phones, the bottom tab bar takes over.
 - **Shortcuts:**
-  - **Ctrl+P** or **Ctrl+K** opens the search and command palette: jump to any page, tool or task, or type **>** for commands (new task, new automation, switch theme, check for updates and more).
+  - **Ctrl+P** or **Ctrl+K** opens the search and command palette: jump to any page, tool, task or conversation, or type **>** for commands (new task, run a saved prompt, pause automations, switch theme, check for updates and more).
+  - **From any program:** choose keys under **Settings → Desktop app → Shortcut from anywhere** (Ctrl+Alt+M, Ctrl+Alt+Space or Ctrl+Shift+Space; off until you choose). They bring Meridian forward with the chat ready to type in. If another program already uses them, Settings says so and Meridian tries again every minute.
   - **Ctrl+Shift+P** opens it straight on commands.
   - **Ctrl+L** opens the chat as a side panel next to whatever page you're on.
   - **/** jumps to the overview's command bar.
@@ -212,10 +214,17 @@ To steer it without turning it off, choose an AI for a kind of task under **Sett
 
 ## Automations
 
-The **Automations** page keeps prompts that run on a schedule: every hour, every day, every weekday or once a week, at a time you choose (this computer's local time). Each one runs as an assistant task or an AI team task (either optionally in a project folder) or Ask all. An assistant task with a git repository's folder can, for example, commit and push your notes every evening; it runs as a git task (see **Git work**).
+The **Automations** page keeps prompts that run:
+
+- **On a schedule:** every hour, every day, every weekday or once a week, at a time you choose (this computer's local time).
+- **Once:** on a date and at a time you pick, for example a long AI team task tonight while you're away. After its run it's kept, marked as run once, until you delete it or give it a new time.
+- **Only when you run it:** a saved prompt you start with **Run now**, or from Ctrl+P (type its name). Useful for requests you repeat, like explaining a project or a release checklist.
+
+Each one runs as an assistant task or an AI team task (either optionally in a project folder) or Ask all. An assistant task with a git repository's folder can, for example, commit and push your notes every evening; it runs as a git task (see **Git work**).
 
 - Every run goes through smart routing, shows up in Tasks with live progress, and alerts you when it finishes, like a task you start yourself.
-- **Run now** tries one straight away; pausing keeps it without running it.
+- **Run now** tries one straight away; its switch pauses one without deleting it.
+- **Pause all** stops every scheduled run until you resume, for example while you're travelling or saving your plans' usage. Runs that come due in between are skipped, not caught up, and a one-time run whose time passed is turned off with a note. Saved prompts and Run now still work.
 - Runs happen while the app is open or in the tray. A run that was due while the app was closed is skipped and noted, instead of starting late or several times at once.
 - The overview's **Up next** lists the next runs. Start from one of the ideas on the page or write your own.
 
@@ -265,6 +274,24 @@ The **Assistant** page, the command bar on the overview, and **Ask** on each too
 - **The daily summary** on the overview.
 
 **Follow-ups.** A finished or failed assistant task, AI team task or Ask all has **Continue from here** on its panel: write what to do next (“make it shorter”, “now add tests”) and a new task starts that runs the same way, in the same folder for an AI team, and gets the earlier request and result to build on. The earlier result is passed as material, not as instructions. The new task links back to the one it continues.
+
+**Run again** repeats a finished task. For an assistant task you can pick which AI runs it this time, to compare how two AIs handle the same request. **Delete task** removes a finished task with its result and its list of changed files, after asking. Sessions read from AI apps' logs aren't deleted here; turn them off in Privacy & data instead.
+
+**Folders.** Wherever you give a task a folder, the folders you used last are offered underneath, so one click fills it in.
+
+**Conversations** can be renamed (the pencil above the chat) and saved as a Markdown file, with each reply labelled with the AI that wrote it. Ctrl+P finds them by name.
+
+## What a task changed
+
+When an assistant task or an AI team works in a folder, its panel lists **What changed**: every file it added, changed or deleted, with the lines added and removed, and a line-by-line diff of each text file when you open it. **Open** next to the folder shows it in File Explorer.
+
+<p align="center"><img src="docs/screenshots/changes.png" width="720" alt="A finished AI team task's panel: What changed lists three files with lines added and removed, and two of them are open to show their diffs"></p>
+
+- Meridian reads the folder when the task starts and again when it ends, and compares the two. It only reads files: it runs no programs in the folder (not even git), and never follows links that lead out of it.
+- Files that often hold passwords or keys (`.env`, private keys, credential files) are listed when they change, but their contents are never kept, so they don't end up in the app's data or in a backup.
+- Generated and downloaded folders (`.git`, `node_modules`, `dist`, `.venv` and the like) aren't read. Binary files are listed without a diff, and so are very large ones. A very large folder is read up to 20,000 files, and the panel says when some changes may be missing.
+- Changes you or other programs made in the folder while the task ran are included too, since the app can't tell them apart.
+- The list is kept with the task: deleting the task, or the retention clean-up in Privacy & data, removes it. Backups and your downloaded copy include it.
 
 When it runs through a command-line app, the app's functions are offered to it as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off or limited: no shell commands except git in a git task's folder, and no file changes outside tasks given a folder. It runs in its own folder inside the app's data folder, so its sessions stay apart from yours (a task given one of your folders runs there instead, and the app notes when and where so that run isn't listed again among your sessions), and its usage is counted under that tool from its logs. Runs the app starts also turn off the CLI's auto-update for that run, so a run never stops to update.
 
@@ -378,7 +405,8 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `public/map.js`: the interactive map: its model (places, routes, regions, hand-offs) and the pan, zoom and search.
 - `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
 - `server/backup.js`: backups as a JSON file (tools, tasks, conversations, alerts, automations and settings), without secrets, and restoring them.
-- `server/automations.js`: saved prompts that run on a schedule; the scheduler in `server/sync.js` starts the ones that are due every minute.
+- `server/automations.js`: saved prompts that run on a schedule, once, or when you start them, and pausing them all; the scheduler in `server/sync.js` starts the ones that are due every minute.
+- `server/changes.js`: what a task changed in its folder: reads the folder before and after the run (files only, no programs) and keeps each changed file with a line diff.
 - `server/router.js`: smart routing: what kind of task a request is, and which ready AI suits it best, weighed for plan headroom, cost, recent failures and spread.
 - `server/local/git-guard.js`: the push check for git tasks: a hook, set only in that run's environment, that refuses pushes which would overwrite or delete history on the remote, then runs the repository's own hook.
 - `server/blocked.js`: AI apps that are signed in but whose account can't use them (Gemini CLI with a personal Google account): marked not ready, with the reason, until the sign-in changes or you press Check again.
@@ -404,6 +432,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - AI apps are started without a shell (prompts can't become commands) and without Meridian's own settings in their environment (`ACC_*`, such as `ACC_MASTER_KEY`). The app's functions reach them through a per-run bridge with a random token that stops working when the run ends.
 - AI apps run as your Windows user, so whatever their own rules allow them to read, they can read; Meridian limits each run to the access the task needs (none, read, edit, or git) in the folder you chose. Keep API keys in Meridian (encrypted at rest) rather than in plain files in folders you give to AI tasks.
 - Restoring a backup replaces everything, so it asks for your password again, like erasing.
+- **What a task changed** is worked out by reading files, never by running git or anything else in the folder, so a repository's own settings (hooks, filters, `fsmonitor`) can't make Meridian run a program. Links and junctions are never followed out of the folder, and only the files' differences are kept, on this computer.
 - Task names, errors and results that come from other tools are passed to Claude as data, and its instructions say to treat them that way. Background tasks get only read access plus progress reporting, so text inside a reported task can't make one change your settings.
 
 ## License

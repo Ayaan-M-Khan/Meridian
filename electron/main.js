@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, nativeImage, nativeTheme, shell } from 'electron';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,6 +11,8 @@ const ICON = path.join(root, 'public', 'icon-512.png');
 // The window buttons' colors, matching the app's frame in each theme.
 const TITLE_BAR = { dark: { color: '#141414', symbolColor: '#b5b5b5' }, light: { color: '#f0f0f0', symbolColor: '#4a4a4a' } };
 const TITLE_BAR_HEIGHT = 35;
+// The keys you can choose (Settings → Desktop app) to bring Meridian forward from any program, as Electron names them.
+const ACCELERATORS = { 'Ctrl+Alt+M': 'Control+Alt+M', 'Ctrl+Alt+Space': 'Control+Alt+Space', 'Ctrl+Shift+Space': 'Control+Shift+Space' };
 
 // The app ID stays the same through the rename to Meridian, so installs update in place and keep their taskbar pin.
 // A copy run from source gets its own ID, so its taskbar button (named "Electron") never stands in for Meridian's.
@@ -202,6 +204,51 @@ if (handOffToInstalledCopy() || !app.requestSingleInstanceLock()) {
 
   app.on('second-instance', () => showWindow());
 
+  /** Brings the window forward with the chat ready to type in, from any program. */
+  function quickAsk() {
+    showWindow();
+    win?.webContents.executeJavaScript('window.accQuickAsk && window.accQuickAsk()').catch(() => {});
+  }
+
+  let shortcut = null; // the accelerator registered now
+  let shortcutTimer = null;
+  /**
+   * The keys that bring Meridian forward from any program. Off until you choose keys in Settings. If another program
+   * already holds them, Settings says so, and the app tries again every minute in case that program lets go.
+   */
+  function applyShortcut(keys) {
+    const want = ACCELERATORS[keys] ?? null;
+    if (shortcut && shortcut !== want) {
+      globalShortcut.unregister(shortcut);
+      shortcut = null;
+    }
+    clearInterval(shortcutTimer);
+    shortcutTimer = null;
+    if (!want) {
+      globalThis.accShortcutState = { keys: 'off', registered: false };
+      return;
+    }
+    const attempt = () => {
+      if (shortcut !== want) {
+        try {
+          if (globalShortcut.register(want, quickAsk) && globalShortcut.isRegistered(want)) shortcut = want;
+        } catch {
+          /* an accelerator this system can't register */
+        }
+      }
+      globalThis.accShortcutState = { keys, registered: shortcut === want };
+      return shortcut === want;
+    };
+    if (!attempt()) {
+      shortcutTimer = setInterval(() => {
+        if (attempt()) {
+          clearInterval(shortcutTimer);
+          shortcutTimer = null;
+        }
+      }, 60_000);
+    }
+  }
+
   async function boot() {
     // The desktop app keeps its own database in the user's app-data folder.
     process.env.ACC_DATA_DIR ??= path.join(app.getPath('userData'), 'data');
@@ -290,6 +337,7 @@ if (handOffToInstalledCopy() || !app.requestSingleInstanceLock()) {
       if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: Boolean(d.open_at_login), args: ['--hidden'] });
       if (d.keep_running) ensureTray();
       else if (win?.isVisible()) removeTray();
+      applyShortcut(d.shortcut);
     };
     globalThis.accApplyDesktopSettings();
     /** The page tells the window which theme it's showing, so the window buttons match it. */
@@ -304,6 +352,19 @@ if (handOffToInstalledCopy() || !app.requestSingleInstanceLock()) {
     };
     globalThis.accOpenDataFolder = async () => {
       const err = await shell.openPath(process.env.ACC_DATA_DIR);
+      if (err) throw new Error(err);
+    };
+    /** Opens a folder a task worked in, in File Explorer. Only ever a folder: a file would be opened or run instead. */
+    globalThis.accOpenFolder = async (dir) => {
+      const p = path.resolve(String(dir));
+      let isDir = false;
+      try {
+        isDir = fs.statSync(p).isDirectory();
+      } catch {
+        isDir = false;
+      }
+      if (!isDir) throw new Error('That folder no longer exists.');
+      const err = await shell.openPath(p);
       if (err) throw new Error(err);
     };
 
@@ -358,4 +419,5 @@ if (handOffToInstalledCopy() || !app.requestSingleInstanceLock()) {
     removeTray();
     server?.close();
   });
+  app.on('will-quit', () => globalShortcut.unregisterAll());
 }

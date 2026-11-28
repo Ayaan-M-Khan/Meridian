@@ -72,6 +72,15 @@ export function deleteThread(id) {
   db.prepare('DELETE FROM assistant_threads WHERE id = ?').run(Number(id));
 }
 
+/** Renames a conversation. A name you give it stays: only "New conversation" is replaced by the first message. */
+export function renameThread(id, title) {
+  const name = typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : '';
+  if (!name || name.length > 80) throw new HttpError(400, 'Give the conversation a name of 1–80 characters.');
+  const r = db.prepare('UPDATE assistant_threads SET title = ? WHERE id = ?').run(name, Number(id));
+  if (!r.changes) throw new HttpError(404, 'That conversation no longer exists.');
+  return { ok: true, id: Number(id), title: name };
+}
+
 /** Turns the stored API transcript into what the chat shows: user text, Claude's text and the actions it took. */
 export function threadView(id) {
   const row = threadRow(id);

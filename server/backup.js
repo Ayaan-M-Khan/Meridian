@@ -2,14 +2,14 @@
  * Backups of your data as one JSON file, and restoring from one.
  *
  * Included: settings, your tools (names, budgets, on/off), usage you logged or your scripts reported, tasks and their
- * results, assistant conversations, and alerts. Left out on purpose: your password, API keys and ingest tokens (so a
+ * results (with the files they changed in their folders), assistant conversations, alerts and automations. Left out on purpose: your password, API keys and ingest tokens (so a
  * backup file is safe to keep anywhere), and anything the app reads again on its own (synced API usage, usage and
  * sessions from AI apps on this computer).
  */
 import { db, tx, getSettings, setRaw, addEvent } from './db.js';
 import { adapters } from './adapters/index.js';
 import { HttpError, nowIso } from './util.js';
-import { nextRun } from './automations.js';
+import { cleanSchedule, nextRun } from './automations.js';
 
 export const BACKUP_FORMAT = 'ai-command-center-backup';
 const KEPT_USAGE_SOURCES = ['manual', 'webhook', 'app'];
@@ -26,6 +26,7 @@ export function makeBackup(appVersion = null) {
     usage_daily: db.prepare(`SELECT * FROM usage_daily WHERE source IN (${KEPT_USAGE_SOURCES.map(() => '?').join(',')})`).all(...KEPT_USAGE_SOURCES),
     tasks: db.prepare("SELECT * FROM tasks WHERE kind IS NULL OR kind != 'session' ORDER BY id").all(),
     task_progress: db.prepare("SELECT p.* FROM task_progress p JOIN tasks t ON t.id = p.task_id WHERE t.kind IS NULL OR t.kind != 'session'").all(),
+    task_changes: db.prepare("SELECT c.* FROM task_changes c JOIN tasks t ON t.id = c.task_id WHERE t.kind IS NULL OR t.kind != 'session'").all(),
     assistant_threads: db.prepare('SELECT * FROM assistant_threads ORDER BY id').all(),
     notifications: db.prepare('SELECT id, kind, severity, title, body, dedupe_key, read, created_at FROM notifications ORDER BY id DESC LIMIT 500').all(),
     automations: db.prepare('SELECT id, name, prompt, mode, folder, schedule, enabled, created_at FROM automations ORDER BY id').all(),
@@ -85,17 +86,20 @@ export function restoreBackup(b) {
       : t)));
     const taskIds = new Set(tasks.map((t) => t.id));
     insertRows('task_progress', arr(b.task_progress, 'progress').filter((p) => taskIds.has(p.task_id)));
+    insertRows('task_changes', arr(b.task_changes, 'changes').filter((c) => c && taskIds.has(c.task_id)));
     insertRows('assistant_threads', arr(b.assistant_threads, 'conversations'));
     insertRows('notifications', arr(b.notifications, 'alerts'));
     db.prepare('DELETE FROM automations').run();
     for (const a of arr(b.automations, 'automations')) {
       try {
-        const schedule = typeof a.schedule === 'string' ? JSON.parse(a.schedule) : a.schedule;
+        if (!['task', 'team', 'compare'].includes(a.mode)) continue;
+        const schedule = cleanSchedule(typeof a.schedule === 'string' ? JSON.parse(a.schedule) : a.schedule);
         const next = a.enabled ? nextRun(schedule)?.toISOString() ?? null : null;
-        if (!['task', 'team', 'compare'].includes(a.mode) || !next && a.enabled) continue;
+        // One that only runs when you start it has no next time; a one-time one whose time has passed comes back off.
+        const enabled = a.enabled && (schedule.every === 'manual' || next) ? 1 : 0;
         db.prepare('INSERT INTO automations(name, prompt, mode, folder, schedule, enabled, next_run_at, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(String(a.name).slice(0, 80), String(a.prompt).slice(0, 4000), a.mode, a.mode === 'team' && typeof a.folder === 'string' ? a.folder : null,
-            JSON.stringify(schedule), a.enabled ? 1 : 0, next, a.created_at ?? now);
+          .run(String(a.name).slice(0, 80), String(a.prompt).slice(0, 4000), a.mode, a.mode !== 'compare' && typeof a.folder === 'string' ? a.folder : null,
+            JSON.stringify(schedule), enabled, enabled ? next : null, a.created_at ?? now);
       } catch {
         /* skip a malformed automation rather than fail the whole restore */
       }

@@ -33,6 +33,15 @@ if (role && process.env.FAKE_CLAUDE_TEAM) {
   fs.writeFileSync(counter, String(n + 1));
   plan = { calls: [], text: replies[Math.min(n, replies.length - 1)], access: args.includes('acceptEdits') ? 'edit' : args[args.indexOf('--tools') + 1] };
   fs.appendFileSync(`${process.env.FAKE_CLAUDE_TEAM_DIR}/calls.log`, `${JSON.stringify({ role, cwd: process.cwd(), tools: args[args.indexOf('--tools') + 1], acceptEdits: args.includes('acceptEdits') })}\n`);
+  // FAKE_CLAUDE_WRITES = {"Builder": {"index.html": "…", "old.txt": null}}: what that role writes (or deletes) in its
+  // folder, as its edits would. Only when it was allowed to edit.
+  const writes = JSON.parse(process.env.FAKE_CLAUDE_WRITES || '{}')[role];
+  if (writes && args.includes('acceptEdits')) {
+    for (const [file, text] of Object.entries(writes)) {
+      if (text == null) fs.rmSync(`${process.cwd()}/${file}`, { force: true });
+      else fs.writeFileSync(`${process.cwd()}/${file}`, text);
+    }
+  }
 }
 
 let server = null;

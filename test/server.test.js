@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -127,6 +128,12 @@ test('backups leave out every secret, and restoring brings tools, tasks and conv
   const agent = Number(db.prepare("INSERT INTO integrations(adapter, name, budget_usd, status, created_at) VALUES('custom-agent', 'Backup agent', 12, 'tracked', ?)").run(now).lastInsertRowid);
   upsertTask({ id: agent, name: 'Backup agent' }, parseTask({ id: 'b1', name: 'Nightly crawl', status: 'completed', result: 'Crawled 40 pages' }, 0));
   db.prepare("INSERT INTO assistant_threads(title, messages, created_at, updated_at) VALUES('Budget chat', '[]', ?, ?)").run(now, now);
+  // A task's changed files come back with it; so do saved prompts, with an assistant task's folder.
+  const crawl = db.prepare("SELECT id FROM tasks WHERE external_id = 'b1'").get().id;
+  db.prepare("INSERT INTO task_changes(task_id, path, change, added, removed, diff) VALUES(?, 'pages.md', 'added', 2, 0, '@@ -0,0 +1,2 @@')").run(crawl);
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-backup-folder-'));
+  db.prepare("INSERT INTO automations(name, prompt, mode, folder, schedule, enabled, created_at) VALUES('Saved prompt', 'Tidy up.', 'task', ?, '{\"every\":\"manual\"}', 1, ?)").run(folder, now);
+  db.prepare("INSERT INTO automations(name, prompt, mode, schedule, enabled, created_at) VALUES('Long gone', 'Old job.', 'task', '{\"every\":\"once\",\"date\":\"2020-01-01\",\"at\":\"09:00\"}', 1, ?)").run(now);
 
   const b = makeBackup('9.9.9');
   const text = JSON.stringify(b);
@@ -145,5 +152,12 @@ test('backups leave out every secret, and restoring brings tools, tasks and conv
   assert.equal(db.prepare('SELECT budget_usd FROM integrations WHERE id = ?').get(agent).budget_usd, 12);
   assert.equal(db.prepare("SELECT result FROM tasks WHERE external_id = 'b1'").get().result, 'Crawled 40 pages');
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM assistant_threads WHERE title = 'Budget chat'").get().n, 1);
+  assert.equal(db.prepare('SELECT path FROM task_changes WHERE task_id = ?').get(crawl)?.path, 'pages.md');
+  const saved = db.prepare("SELECT * FROM automations WHERE name = 'Saved prompt'").get();
+  assert.equal(saved.folder, folder, 'an assistant task’s folder comes back');
+  assert.equal(saved.enabled, 1);
+  assert.equal(db.prepare("SELECT enabled FROM automations WHERE name = 'Long gone'").get().enabled, 0, 'a one-time run whose time passed comes back off');
+  db.prepare('DELETE FROM automations').run();
+  fs.rmSync(folder, { recursive: true, force: true });
   assert.throws(() => restoreBackup({ format: 'something-else' }), /isn’t a Meridian backup/);
 });

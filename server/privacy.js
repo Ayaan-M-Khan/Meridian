@@ -63,6 +63,7 @@ export function dataInventory() {
     counts: {
       tools: n('SELECT COUNT(*) AS n FROM integrations'),
       tasks: n(`SELECT COUNT(*) AS n FROM tasks WHERE ${ownTasks}`),
+      changed_files: n('SELECT COUNT(*) AS n FROM task_changes'),
       sessions: n("SELECT COUNT(*) AS n FROM tasks WHERE kind = 'session'"),
       conversations: n('SELECT COUNT(*) AS n FROM assistant_threads'),
       alerts: n('SELECT COUNT(*) AS n FROM notifications'),

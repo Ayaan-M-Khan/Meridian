@@ -9,23 +9,26 @@ import { refreshSummary, SUMMARY_KEY_AAD } from './summary.js';
 import { evaluateAlerts } from './alerts.js';
 import { parseUsage, upsertUsage } from './ingest.js';
 import { AdapterError, HttpError, nowIso } from './util.js';
-import { startClaudeTask, cancelClaudeTask, retryClaudeTask, followUpTask, runningCount } from './runner.js';
+import { startClaudeTask, cancelClaudeTask, retryClaudeTask, followUpTask, deleteTask, runningCount } from './runner.js';
+import { taskChanges } from './changes.js';
 import { ToolInputError } from './assistant-tools.js';
 import { chooseEngine, listEngines } from './engine-list.js';
 import { LOCAL_ADAPTERS } from './adapters/local.js';
 import { openConsole, forgetResolved } from './local/cli.js';
-import { createThread, deleteThread, listThreads, sendMessage, stopThread, threadView } from './assistant.js';
+import { createThread, deleteThread, listThreads, renameThread, sendMessage, stopThread, threadView } from './assistant.js';
 import { ROLES, lineupView, startTeamTask, teamRunningCount } from './team.js';
 import { makeBackup, restoreBackup } from './backup.js';
 import { CATEGORIES, classify, routeTask } from './router.js';
 import { buildStats } from './stats.js';
-import { createAutomation, deleteAutomation, listAutomations, runAutomation, updateAutomation } from './automations.js';
+import { createAutomation, deleteAutomation, listAutomations, resumeAutomations, runAutomation, updateAutomation } from './automations.js';
 import { checkForUpdate, installUpdate, updateView } from './updates.js';
 import { APP_VERSION } from './version.js';
 import { DATA_FLOWS, RETENTION_CHOICES, applySessionPrivacy, dataInventory, eraseEverything, pruneOldData } from './privacy.js';
 import { issueSetupCode, verifyPassword } from './auth.js';
 
 const ENGINE_CHOICES = ['auto', 'claude-code', 'codex', 'gemini-cli', 'antigravity-cli', 'copilot-cli', 'cursor-cli', 'claude-api'];
+/** Keys that bring the desktop app forward from any program (electron/main.js). 'off' registers none. */
+export const SHORTCUTS = ['off', 'Ctrl+Alt+M', 'Ctrl+Alt+Space', 'Ctrl+Shift+Space'];
 
 function localAdapter(id) {
   const a = LOCAL_ADAPTERS.find((x) => x.id === id);
@@ -275,7 +278,17 @@ export function apiRoutes(app) {
       s.summary_mode = body.summary_mode;
     }
     if (body.desktop && typeof body.desktop === 'object') {
-      for (const k of Object.keys(s.desktop)) if (k in body.desktop) s.desktop[k] = Boolean(body.desktop[k]);
+      for (const k of Object.keys(s.desktop)) {
+        if (!(k in body.desktop)) continue;
+        if (k !== 'shortcut') s.desktop[k] = Boolean(body.desktop[k]);
+        else if (SHORTCUTS.includes(body.desktop.shortcut)) s.desktop.shortcut = body.desktop.shortcut;
+        else throw new HttpError(400, 'Choose one of the listed shortcuts.');
+      }
+    }
+    let resume = false;
+    if ('automations_paused' in body) {
+      resume = Boolean(s.automations_paused) && !body.automations_paused;
+      s.automations_paused = Boolean(body.automations_paused);
     }
     let privacyChanged = false;
     if (body.privacy && typeof body.privacy === 'object') {
@@ -297,6 +310,7 @@ export function apiRoutes(app) {
       for (const k of Object.keys(s.notify)) if (k in body.notify) s.notify[k] = Boolean(body.notify[k]);
     }
     setRaw('settings', s);
+    if (resume) resumeAutomations();
     if (body.desktop && typeof globalThis.accApplyDesktopSettings === 'function') globalThis.accApplyDesktopSettings(s.desktop);
     if (privacyChanged) {
       applySessionPrivacy(s.privacy);
@@ -387,7 +401,27 @@ export function apiRoutes(app) {
     } catch {
       detail = null;
     }
-    res.json({ id: t.id, description: t.description, result: t.result, detail, progress });
+    res.json({ id: t.id, description: t.description, result: t.result, detail, progress, changes: taskChanges(t.id) });
+  });
+  app.delete('/api/tasks/:id', (req, res) => res.json(deleteTask(req.params.id)));
+  /** The desktop app opens the folder a task worked in, in File Explorer. */
+  app.post('/api/tasks/:id/open-folder', async (req, res) => {
+    if (typeof globalThis.accOpenFolder !== 'function') throw new HttpError(501, 'Open the folder from your file manager.');
+    const t = db.prepare('SELECT detail FROM tasks WHERE id = ?').get(Number(req.params.id));
+    if (!t) throw new HttpError(404, 'That task no longer exists.');
+    let folder = null;
+    try {
+      folder = JSON.parse(t.detail ?? 'null')?.folder ?? null;
+    } catch {
+      folder = null;
+    }
+    if (typeof folder !== 'string' || !folder) throw new HttpError(404, 'This task didn’t work in a folder.');
+    try {
+      await globalThis.accOpenFolder(folder);
+    } catch (err) {
+      throw new HttpError(400, err.message);
+    }
+    res.json({ ok: true });
   });
 
   // ── AI team ──
@@ -430,7 +464,16 @@ export function apiRoutes(app) {
     }
   };
   app.post('/api/tasks/:id/cancel', control(cancelClaudeTask));
-  app.post('/api/tasks/:id/retry', control(retryClaudeTask));
+  app.post('/api/tasks/:id/retry', (req, res) => {
+    const engine = req.body?.engine ?? null;
+    if (engine != null && !ENGINE_CHOICES.includes(engine)) throw new HttpError(400, 'Choose one of the listed AIs.');
+    try {
+      res.json(retryClaudeTask(Number(req.params.id), { engine }));
+    } catch (err) {
+      if (err instanceof ToolInputError) throw new HttpError(400, err.message);
+      throw err;
+    }
+  });
   app.post('/api/tasks/:id/follow-up', (req, res) => {
     try {
       res.status(201).json(followUpTask(Number(req.params.id), req.body?.text));
@@ -444,6 +487,7 @@ export function apiRoutes(app) {
   app.get('/api/assistant/threads', (req, res) => res.json(listThreads()));
   app.post('/api/assistant/threads', (req, res) => res.status(201).json(createThread()));
   app.get('/api/assistant/threads/:id', (req, res) => res.json(threadView(req.params.id)));
+  app.patch('/api/assistant/threads/:id', (req, res) => res.json(renameThread(req.params.id, req.body?.title)));
   app.delete('/api/assistant/threads/:id', (req, res) => {
     deleteThread(req.params.id);
     res.json({ ok: true });
