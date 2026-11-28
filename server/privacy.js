@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { db, tx, getRaw, setRaw, getSettings, DATA_DIR } from './db.js';
+import { dropOldCopies } from './changes.js';
 import { nowIso } from './util.js';
 
 export const RETENTION_CHOICES = [0, 30, 90, 180, 365];
@@ -106,6 +107,7 @@ export function pruneOldData(days, now = Date.now()) {
 
 /** Runs the retention clean-up at most once a day. Called by the scheduler. */
 export function maybePrune(now = Date.now()) {
+  dropOldCopies(now); // earlier copies for Put back go after 30 days, whatever the retention setting
   const days = getSettings().privacy?.retention_days ?? 0;
   if (!days) return null;
   const last = getRaw('last_prune');

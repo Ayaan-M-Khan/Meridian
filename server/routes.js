@@ -10,7 +10,7 @@ import { evaluateAlerts } from './alerts.js';
 import { parseUsage, upsertUsage } from './ingest.js';
 import { AdapterError, HttpError, nowIso } from './util.js';
 import { startClaudeTask, cancelClaudeTask, retryClaudeTask, followUpTask, deleteTask, runningCount } from './runner.js';
-import { taskChanges } from './changes.js';
+import { putBack, taskChanges } from './changes.js';
 import { ToolInputError } from './assistant-tools.js';
 import { chooseEngine, listEngines } from './engine-list.js';
 import { LOCAL_ADAPTERS } from './adapters/local.js';
@@ -404,6 +404,8 @@ export function apiRoutes(app) {
     res.json({ id: t.id, description: t.description, result: t.result, detail, progress, changes: taskChanges(t.id) });
   });
   app.delete('/api/tasks/:id', (req, res) => res.json(deleteTask(req.params.id)));
+  /** Puts back what a task changed in its folder: all of it, or the files listed (changes.js). */
+  app.post('/api/tasks/:id/put-back', (req, res) => res.json(putBack(req.params.id, { paths: req.body?.paths ?? null })));
   /** The desktop app opens the folder a task worked in, in File Explorer. */
   app.post('/api/tasks/:id/open-folder', async (req, res) => {
     if (typeof globalThis.accOpenFolder !== 'function') throw new HttpError(501, 'Open the folder from your file manager.');

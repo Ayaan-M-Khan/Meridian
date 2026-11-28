@@ -338,7 +338,18 @@ test('in a folder, only the builder may change files, and an approved review end
   assert.deepEqual([html.added, html.removed], [1, 0]);
   assert.equal(html.diff, '@@ -1,3 +1,4 @@\n <main>\n   <h1>Dogs</h1>\n </main>\n+<footer>Call us</footer>');
   assert.equal(c.folder, fs.realpathSync.native(project));
-  assert.deepEqual(buildState().tasks.find((x) => x.id === t.id).changes, { files: 3, added: 2, removed: 1 });
+  assert.deepEqual(buildState().tasks.find((x) => x.id === t.id).changes, { files: 3, added: 2, removed: 1, put_back: 0 });
+  // Put back: the folder is as it was before the team ran (node_modules isn't read, so it's left alone).
+  assert.equal(c.put_back_ready, true);
+  const { putBack } = await import('../server/changes.js');
+  const back = putBack(t.id);
+  assert.deepEqual(back.put_back, ['index.html', 'notes.md', 'old.txt']);
+  assert.deepEqual(back.skipped, []);
+  assert.equal(fs.readFileSync(path.join(project, 'index.html'), 'utf8'), '<main>\n  <h1>Dogs</h1>\n</main>\n');
+  assert.equal(fs.readFileSync(path.join(project, 'old.txt'), 'utf8'), 'remove me\n');
+  assert.equal(fs.existsSync(path.join(project, 'notes.md')), false);
+  assert.equal(buildState().tasks.find((x) => x.id === t.id).changes.put_back, 3);
+  assert.equal(taskChanges(t.id).put_back_ready, false, 'nothing left to put back');
   const calls = fs.readFileSync(path.join(dir, 'calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(calls.map((c) => c.role), ['Planner', 'Builder', 'Reviewer']);
   for (const c of calls) assert.equal(path.resolve(c.cwd), fs.realpathSync.native(project), 'every member works in the folder (its full path)');

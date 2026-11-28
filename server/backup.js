@@ -26,7 +26,8 @@ export function makeBackup(appVersion = null) {
     usage_daily: db.prepare(`SELECT * FROM usage_daily WHERE source IN (${KEPT_USAGE_SOURCES.map(() => '?').join(',')})`).all(...KEPT_USAGE_SOURCES),
     tasks: db.prepare("SELECT * FROM tasks WHERE kind IS NULL OR kind != 'session' ORDER BY id").all(),
     task_progress: db.prepare("SELECT p.* FROM task_progress p JOIN tasks t ON t.id = p.task_id WHERE t.kind IS NULL OR t.kind != 'session'").all(),
-    task_changes: db.prepare("SELECT c.* FROM task_changes c JOIN tasks t ON t.id = c.task_id WHERE t.kind IS NULL OR t.kind != 'session'").all(),
+    // The list and diffs of changed files, without the earlier copies kept for Put back (large, and only for this computer).
+    task_changes: db.prepare("SELECT c.task_id, c.path, c.change, c.added, c.removed, c.binary, c.diff, c.note, c.restored_at FROM task_changes c JOIN tasks t ON t.id = c.task_id WHERE t.kind IS NULL OR t.kind != 'session'").all(),
     assistant_threads: db.prepare('SELECT * FROM assistant_threads ORDER BY id').all(),
     notifications: db.prepare('SELECT id, kind, severity, title, body, dedupe_key, read, created_at FROM notifications ORDER BY id DESC LIMIT 500').all(),
     automations: db.prepare('SELECT id, name, prompt, mode, folder, schedule, enabled, created_at FROM automations ORDER BY id').all(),
@@ -86,7 +87,8 @@ export function restoreBackup(b) {
       : t)));
     const taskIds = new Set(tasks.map((t) => t.id));
     insertRows('task_progress', arr(b.task_progress, 'progress').filter((p) => taskIds.has(p.task_id)));
-    insertRows('task_changes', arr(b.task_changes, 'changes').filter((c) => c && taskIds.has(c.task_id)));
+    // Never what Put back writes: a restored task's changes can be read, not put back.
+    insertRows('task_changes', arr(b.task_changes, 'changes').filter((c) => c && taskIds.has(c.task_id)), ['after_hash', 'before_text']);
     insertRows('assistant_threads', arr(b.assistant_threads, 'conversations'));
     insertRows('notifications', arr(b.notifications, 'alerts'));
     db.prepare('DELETE FROM automations').run();

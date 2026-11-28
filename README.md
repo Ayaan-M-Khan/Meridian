@@ -22,7 +22,7 @@ One dashboard for your AI tools: what's running, what's next, what you've spent,
 - **Your accounts, no API keys:** connect Claude Code, Codex, Gemini, GitHub Copilot and Cursor with the accounts you already use.
 - **Smart routing and teams:** each request goes to the AI best suited to it. An **AI team** splits work into plan, build, review and fix, and **Ask all** compares every AI's answer.
 - **Automations and saved prompts:** prompts that run on a schedule, once at a time you pick, or whenever you start them. Background tasks show live progress and an estimated finish.
-- **See what changed:** a task that works in a folder lists every file it added, changed or deleted, with a line-by-line diff of each.
+- **See what changed, and put it back:** a task that works in a folder lists every file it added, changed or deleted, with a line-by-line diff of each. One click undoes it, leaving alone anything you've changed since.
 - **The map:** your command center in the middle, your AI tools around it, and the routes your work takes.
 - **A workbench that feels like a code editor:** tabs, an explorer, a status bar, a command palette (Ctrl+P) and a chat side panel (Ctrl+L).
 - **Private by design:** everything stays on your computer, with no tracking. You get two-step verification, Sign in with Google, retention controls and one-click export or erase.
@@ -285,13 +285,23 @@ The **Assistant** page, the command bar on the overview, and **Ask** on each too
 
 When an assistant task or an AI team works in a folder, its panel lists **What changed**: every file it added, changed or deleted, with the lines added and removed, and a line-by-line diff of each text file when you open it. **Open** next to the folder shows it in File Explorer.
 
-<p align="center"><img src="docs/screenshots/changes.png" width="720" alt="A finished AI team task's panel: What changed lists three files with lines added and removed, and two of them are open to show their diffs"></p>
+<p align="center"><img src="docs/screenshots/changes.png" width="720" alt="A finished AI team task's panel: What changed, with a Put back button, lists three files with lines added and removed, and two of them are open to show their diffs"></p>
 
 - Meridian reads the folder when the task starts and again when it ends, and compares the two. It only reads files: it runs no programs in the folder (not even git), and never follows links that lead out of it.
 - Files that often hold passwords or keys (`.env`, private keys, credential files) are listed when they change, but their contents are never kept, so they don't end up in the app's data or in a backup.
 - Generated and downloaded folders (`.git`, `node_modules`, `dist`, `.venv` and the like) aren't read. Binary files are listed without a diff, and so are very large ones. A very large folder is read up to 20,000 files, and the panel says when some changes may be missing.
 - Changes you or other programs made in the folder while the task ran are included too, since the app can't tell them apart.
 - The list is kept with the task: deleting the task, or the retention clean-up in Privacy & data, removes it. Backups and your downloaded copy include it.
+
+### Putting it back
+
+**Put back** in **What changed** undoes the task's changes in the folder: changed files get their earlier contents, files it added are deleted (with any folders it created, once they're empty), and files it deleted come back. Each file's row can also be put back on its own. It asks first, in plain words.
+
+- A file is touched only if it's still exactly as the task left it, checked by its contents. Anything you or another program changed since is left as it is, and the panel says which files, and why, before and after you choose Put back.
+- Changed files come back byte for byte, line endings and all. To make that possible, Meridian keeps a copy of each text file the task changed or deleted, as it was before the run, for 30 days (up to 8 MB per task). Files that often hold passwords or keys, binary files and very large files aren't kept, so they're listed as not put back.
+- It writes only inside the task's folder: never through a link or junction, never into `.git` or the other folders it doesn't read, and never while another task is working in the same folder.
+- Git tasks can't be put back here, since their work may already be committed or pushed: undo those with git.
+- Backups and your downloaded copy leave out the earlier copies, so a task restored from a backup shows its changes but can't put them back.
 
 When it runs through a command-line app, the app's functions are offered to it as an MCP server (`server/local/mcp-bridge.cjs`). That server only relays calls back to this app, with a token that works for that one run. The CLI's own tools are switched off or limited: no shell commands except git in a git task's folder, and no file changes outside tasks given a folder. It runs in its own folder inside the app's data folder, so its sessions stay apart from yours (a task given one of your folders runs there instead, and the app notes when and where so that run isn't listed again among your sessions), and its usage is counted under that tool from its logs. Runs the app starts also turn off the CLI's auto-update for that run, so a run never stops to update.
 
@@ -406,7 +416,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - `server/team.js`: AI team tasks (who does each role, the plan → build → review → debug → fix → final check stages, hand-overs when an AI fails) and Ask all (parallel answers, then a combined one).
 - `server/backup.js`: backups as a JSON file (tools, tasks, conversations, alerts, automations and settings), without secrets, and restoring them.
 - `server/automations.js`: saved prompts that run on a schedule, once, or when you start them, and pausing them all; the scheduler in `server/sync.js` starts the ones that are due every minute.
-- `server/changes.js`: what a task changed in its folder: reads the folder before and after the run (files only, no programs) and keeps each changed file with a line diff.
+- `server/changes.js`: what a task changed in its folder: reads the folder before and after the run (files only, no programs), keeps each changed file with a line diff, and puts the changes back when you ask.
 - `server/router.js`: smart routing: what kind of task a request is, and which ready AI suits it best, weighed for plan headroom, cost, recent failures and spread.
 - `server/local/git-guard.js`: the push check for git tasks: a hook, set only in that run's environment, that refuses pushes which would overwrite or delete history on the remote, then runs the repository's own hook.
 - `server/blocked.js`: AI apps that are signed in but whose account can't use them (Gemini CLI with a personal Google account): marked not ready, with the reason, until the sign-in changes or you press Check again.
@@ -433,6 +443,7 @@ Add a module in `server/adapters/` and list it in `server/adapters/index.js`. Th
 - AI apps run as your Windows user, so whatever their own rules allow them to read, they can read; Meridian limits each run to the access the task needs (none, read, edit, or git) in the folder you chose. Keep API keys in Meridian (encrypted at rest) rather than in plain files in folders you give to AI tasks.
 - Restoring a backup replaces everything, so it asks for your password again, like erasing.
 - **What a task changed** is worked out by reading files, never by running git or anything else in the folder, so a repository's own settings (hooks, filters, `fsmonitor`) can't make Meridian run a program. Links and junctions are never followed out of the folder, and only the files' differences are kept, on this computer.
+- **Put back** writes only files it recorded for that task, only inside the task's folder, and only when each file is still exactly as the task left it. Recorded paths that could lead out of the folder (`..`, links, junctions, drive or stream names) or into `.git` are refused, and a backup can't supply what Put back writes.
 - Task names, errors and results that come from other tools are passed to Claude as data, and its instructions say to treat them that way. Background tasks get only read access plus progress reporting, so text inside a reported task can't make one change your settings.
 
 ## License

@@ -7,12 +7,17 @@
  * text files. It only reads files. It runs no programs (not even git), so nothing written into the folder can make it
  * run one, and it never follows links out of the folder. Changes you or another program made in the folder while the
  * task ran are included; the task panel says so.
+ *
+ * Put back undoes a task's changes: each changed file gets its exact earlier contents (kept when the task ended), each
+ * file it added is deleted, and each file it deleted comes back. A file is touched only if it's still exactly as the
+ * task left it (by checksum), so anything you changed since is left alone. It writes only inside the task's folder,
+ * never through a link, and never into .git or the other folders that aren't read.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { db, tx } from './db.js';
-import { nowIso } from './util.js';
+import { addEvent, db, tx } from './db.js';
+import { HttpError, nowIso } from './util.js';
 
 /** Folders that hold generated or downloaded files, not the work itself. They're not read. */
 export const SKIP_DIRS = new Set([
@@ -31,6 +36,8 @@ export const LIMITS = {
   diffLines: 3_000, // diff lines kept per file
   diffBytes: 2 * 1024 * 1024, // diff text kept per task
   maxEdits: 2_000, // past this many edits in one file, the diff shows the changed part replaced as a whole
+  keepBytes: 8 * 1024 * 1024, // earlier copies kept per task, so its changes can be put back
+  newDirs: 200, // folders a task created, removed again by Put back once they're empty
 };
 
 /**
@@ -58,6 +65,7 @@ const isBinary = (buf) => buf.subarray(0, 8000).includes(0);
 /** Reads a folder: every file's size and time, a checksum of its contents, and the text of text files. */
 export async function snapshot(root, limits = LIMITS) {
   const files = new Map();
+  const folders = new Set();
   let textLeft = limits.totalText;
   let dirs = 0;
   let stopped = false;
@@ -81,7 +89,10 @@ export async function snapshot(root, limits = LIMITS) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isSymbolicLink()) continue; // never followed: a link (or junction) could lead out of the folder
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) subdirs.push(r);
+        if (!SKIP_DIRS.has(e.name)) {
+          subdirs.push(r);
+          folders.add(r);
+        }
         continue;
       }
       if (!e.isFile()) continue;
@@ -97,7 +108,7 @@ export async function snapshot(root, limits = LIMITS) {
         continue;
       }
       if (!st.isFile()) continue;
-      const entry = { size: st.size, mtime: st.mtimeMs, hash: null, text: null, binary: false, large: st.size > limits.hashBytes, secret: isSecretFile(r) };
+      const entry = { size: st.size, mtime: st.mtimeMs, hash: null, text: null, exact: false, binary: false, large: st.size > limits.hashBytes, secret: isSecretFile(r) };
       if (!entry.large) {
         try {
           const buf = await fs.promises.readFile(full);
@@ -105,6 +116,8 @@ export async function snapshot(root, limits = LIMITS) {
           entry.binary = isBinary(buf);
           if (!entry.binary && !entry.secret && buf.length <= limits.textBytes && buf.length <= textLeft) {
             entry.text = buf.toString('utf8');
+            // Put back writes this text: only when it turns back into exactly these bytes (valid UTF-8).
+            entry.exact = Buffer.from(entry.text, 'utf8').equals(buf);
             textLeft -= buf.length;
           }
         } catch {
@@ -117,7 +130,7 @@ export async function snapshot(root, limits = LIMITS) {
     // Pushed in reverse so they're read in name order.
     for (let i = subdirs.length - 1; i >= 0; i--) stack.push(subdirs[i]);
   }
-  return { root, files, partial: stopped, lastKey: stopped ? lastKey : null, at: nowIso() };
+  return { root, files, folders, partial: stopped, lastKey: stopped ? lastKey : null, at: nowIso() };
 }
 
 const splitLines = (s) => {
@@ -283,9 +296,13 @@ export function compare(before, after, limits = LIMITS) {
   return out;
 }
 
-/** The rows kept for a task: each file's change and its diff, within the size limits. */
+/**
+ * The rows kept for a task: each file's change and its diff, within the size limits, with what Put back needs: the
+ * file's checksum as the task left it, and (for a changed or deleted text file) its exact earlier contents.
+ */
 export function describeChanges(list, limits = LIMITS) {
   let budget = limits.diffBytes;
+  let keep = limits.keepBytes;
   const rows = [];
   let added = 0;
   let removed = 0;
@@ -293,7 +310,13 @@ export function describeChanges(list, limits = LIMITS) {
     const a = c.a;
     const b = c.b;
     const binary = Boolean((a && a.binary) || (b && b.binary));
-    let row = { path: c.path, change: c.change, added: null, removed: null, binary, diff: null, note: null };
+    let row = { path: c.path, change: c.change, added: null, removed: null, binary, diff: null, note: null, after_hash: b?.hash ?? null, before_text: null };
+    // The earlier copy: never of a file that may hold secrets, a binary file, or text that wouldn't come back byte for byte.
+    const size = a?.text != null ? Buffer.byteLength(a.text) : 0;
+    if (c.change !== 'added' && a?.text != null && a.exact && !isSecretFile(c.path) && size <= keep) {
+      row.before_text = a.text;
+      keep -= size;
+    }
     const textA = c.change === 'added' ? '' : a?.text;
     const textB = c.change === 'deleted' ? '' : b?.text;
     if (isSecretFile(c.path)) row.note = 'Contents not kept: files like this often hold passwords or keys';
@@ -343,15 +366,18 @@ export async function recordChanges(taskId) {
     const list = compare(before, after);
     const shown = list.slice(0, LIMITS.listed);
     const { rows, added, removed } = describeChanges(shown);
+    const partial = before.partial || after.partial;
+    // Folders the task created: Put back removes them again once they're empty (only when both readings were whole).
+    const newDirs = partial ? [] : [...after.folders].filter((d) => !before.folders.has(d)).slice(0, LIMITS.newDirs);
     const summary = {
       folder: before.root, files: list.length, added, removed, more: list.length - shown.length,
-      partial: before.partial || after.partial, from: before.at, to: after.at,
+      partial, from: before.at, to: after.at, new_dirs: newDirs,
     };
     if (!db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(taskId)) return null; // deleted while it ran
     tx(() => {
       db.prepare('DELETE FROM task_changes WHERE task_id = ?').run(taskId);
-      const ins = db.prepare('INSERT INTO task_changes(task_id, path, change, added, removed, binary, diff, note) VALUES(?, ?, ?, ?, ?, ?, ?, ?)');
-      for (const r of rows) ins.run(taskId, r.path, r.change, r.added, r.removed, r.binary ? 1 : 0, r.diff, r.note);
+      const ins = db.prepare('INSERT INTO task_changes(task_id, path, change, added, removed, binary, diff, note, after_hash, before_text) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      for (const r of rows) ins.run(taskId, r.path, r.change, r.added, r.removed, r.binary ? 1 : 0, r.diff, r.note, r.after_hash, r.before_text);
       db.prepare('UPDATE tasks SET changes = ? WHERE id = ?').run(JSON.stringify(summary), taskId);
     });
     return summary;
@@ -364,17 +390,205 @@ export async function recordChanges(taskId) {
 /** Drops a reading without keeping anything, for a task that never ran (handed to another AI before it started). */
 export const forgetChanges = (taskId) => active.delete(taskId);
 
-/** Every changed file of a task, for its panel. */
-export function taskChanges(taskId) {
-  const t = db.prepare('SELECT changes FROM tasks WHERE id = ?').get(Number(taskId));
-  if (!t?.changes) return null;
-  let summary = null;
+const parse = (s) => {
   try {
-    summary = JSON.parse(t.changes);
+    return JSON.parse(s ?? 'null');
   } catch {
     return null;
   }
-  const files = db.prepare('SELECT path, change, added, removed, binary, diff, note FROM task_changes WHERE task_id = ? ORDER BY path').all(Number(taskId))
-    .map((r) => ({ ...r, binary: Boolean(r.binary) }));
-  return { ...summary, list: files };
+};
+const samePath = (a, b) => (process.platform === 'win32' ? String(a).toLowerCase() === String(b).toLowerCase() : a === b);
+
+/** Why a task's changes can't be put back right now, or null when they can. */
+function putBackBlocked(t, summary) {
+  if (t.status === 'running' || t.status === 'queued') return 'It’s still running. Put back its changes when it finishes.';
+  if (parse(t.detail)?.access === 'git') return 'It ran git, so its work may be committed or pushed. Undo it with git instead.';
+  if ([...active.values()].some((s) => samePath(s.root, summary.folder))) return 'Another task is working in this folder. Put back when it finishes.';
+  return null;
+}
+
+/** Whether one file's change can still be undone, from what was kept; and if not, why. */
+function fileState(r) {
+  if (r.restored_at) return { can: false, why: null };
+  const copy = r.has_copy ?? r.before_text != null;
+  if (r.change !== 'added' && !copy) {
+    return { can: false, why: isSecretFile(r.path) ? 'files like this often hold passwords or keys, so their contents aren’t kept'
+      : r.binary ? 'binary files aren’t kept' : 'its earlier contents aren’t kept (too large, or more than 30 days ago)' };
+  }
+  if (r.change !== 'deleted' && !r.after_hash) return { can: false, why: 'it’s too large to check it’s unchanged' };
+  return { can: true, why: null };
+}
+
+/** The task's folder, as long as it's still the same real folder; else null. */
+function folderNow(summary) {
+  try {
+    const root = fs.realpathSync.native(summary.folder);
+    return samePath(root, summary.folder) && fs.statSync(root).isDirectory() ? root : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every changed file of a task, for its panel, and whether its changes can be put back now. */
+export function taskChanges(taskId) {
+  const t = db.prepare('SELECT changes, detail, status FROM tasks WHERE id = ?').get(Number(taskId));
+  const summary = parse(t?.changes);
+  if (!summary) return null;
+  let blocked = putBackBlocked(t, summary);
+  const root = blocked ? null : folderNow(summary);
+  if (!blocked && !root) blocked = 'Its folder isn’t there any more, or has moved.';
+  // Each file is looked at as it is now, so one you've changed since says so before you choose Put back.
+  let budget = 64 * 1024 * 1024;
+  const files = db.prepare('SELECT path, change, added, removed, binary, diff, note, after_hash, before_text IS NOT NULL AS has_copy, restored_at FROM task_changes WHERE task_id = ? ORDER BY path')
+    .all(Number(taskId)).map((r) => {
+      let s = fileState(r);
+      if (s.can && root && budget > 0) {
+        try {
+          const full = target(root, r.path);
+          budget -= full && fs.existsSync(full) ? fs.lstatSync(full).size : 0;
+          const why = checkNow(root, r);
+          if (why) s = { can: false, why };
+        } catch {
+          /* checked again when putting back */
+        }
+      }
+      return { path: r.path, change: r.change, added: r.added, removed: r.removed, binary: Boolean(r.binary), diff: r.diff, note: r.note, restored_at: r.restored_at, can_put_back: s.can, put_back_note: s.why };
+    });
+  return { ...summary, list: files, put_back_ready: !blocked && files.some((f) => f.can_put_back), put_back_blocked: blocked };
+}
+
+const DEVICE = /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i;
+const isInside = (root, p) => {
+  const rel = path.relative(root, p);
+  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
+
+/** A changed file's full path inside the folder, or null when its recorded path could lead anywhere else. */
+function target(root, rel) {
+  if (typeof rel !== 'string' || !rel || rel.length > 1000 || /[\\\0:]/.test(rel)) return null;
+  const parts = rel.split('/');
+  if (parts.some((p) => !p || p === '.' || p === '..' || SKIP_DIRS.has(p) || DEVICE.test(p))) return null;
+  const full = path.join(root, ...parts);
+  if (!isInside(root, full)) return null;
+  // Nothing on the way may be a link or junction (which could point out of the folder), or a file.
+  for (let dir = path.dirname(full); isInside(root, dir); dir = path.dirname(dir)) {
+    try {
+      const st = fs.lstatSync(dir);
+      if (st.isSymbolicLink() || !st.isDirectory()) return null;
+    } catch {
+      /* not there now: created as a plain folder when the file comes back */
+    }
+  }
+  return full;
+}
+
+const checksum = (full, size) => (size > LIMITS.hashBytes ? null : crypto.createHash('sha1').update(fs.readFileSync(full)).digest('hex'));
+
+/**
+ * Whether one file can be put back now, by looking at it: null when it can (or there's nothing left to do), else why
+ * not. It must still be exactly as the task left it.
+ */
+function checkNow(root, r) {
+  const full = target(root, r.path);
+  if (!full) return 'its path could lead outside the folder';
+  const state = fileState(r);
+  if (!state.can) return state.why;
+  let st = null;
+  try {
+    st = fs.lstatSync(full);
+  } catch {
+    st = null;
+  }
+  if (st && !st.isFile()) return 'it isn’t a plain file now';
+  if (r.change === 'added') return !st || checksum(full, st.size) === r.after_hash ? null : 'it has changed since the task ended';
+  if (r.change === 'changed') return !st ? 'it was deleted after the task ended' : checksum(full, st.size) === r.after_hash ? null : 'it has changed since the task ended';
+  return st ? 'a file with this name is there again' : null;
+}
+
+/** Undoes one file's change. Returns null when done (or already undone), else why it was left alone. */
+function putBackFile(root, r) {
+  const why = checkNow(root, r);
+  if (why) return why;
+  const full = target(root, r.path);
+  if (r.change === 'added') {
+    try {
+      fs.unlinkSync(full);
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err; // gone already: nothing to do
+    }
+    return null;
+  }
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, Buffer.from(r.before_text, 'utf8'));
+  return null;
+}
+
+/**
+ * Puts back what a task changed in its folder: all of it, or the files in `paths`. Changed files get their earlier
+ * contents, added files are deleted (and folders the task created, once empty), deleted files come back. A file you
+ * changed since is left alone. Returns what was put back and what was left alone, with why.
+ */
+export function putBack(taskId, { paths = null } = {}) {
+  const t = db.prepare('SELECT id, name, integration_id, changes, detail, status FROM tasks WHERE id = ?').get(Number(taskId));
+  if (!t) throw new HttpError(404, 'That task no longer exists.');
+  const summary = parse(t.changes);
+  if (!summary?.folder) throw new HttpError(400, 'This task didn’t change any files.');
+  const blocked = putBackBlocked(t, summary);
+  if (blocked) throw new HttpError(409, blocked);
+  let root = null;
+  try {
+    root = fs.realpathSync.native(summary.folder);
+    if (!fs.statSync(root).isDirectory()) root = null;
+  } catch {
+    root = null;
+  }
+  if (!root) throw new HttpError(400, 'Its folder isn’t there any more.');
+  if (!samePath(root, summary.folder)) throw new HttpError(400, 'Its folder has moved or is now a link, so nothing was changed.');
+  if (paths != null && (!Array.isArray(paths) || paths.length > LIMITS.listed || paths.some((p) => typeof p !== 'string'))) throw new HttpError(400, 'Choose files from this task’s changes.');
+  const want = paths ? new Set(paths) : null;
+  const rows = db.prepare('SELECT * FROM task_changes WHERE task_id = ? AND restored_at IS NULL ORDER BY path').all(t.id).filter((r) => !want || want.has(r.path));
+  if (want && !rows.length) throw new HttpError(404, 'That file isn’t in this task’s changes, or it was put back already.');
+  const done = [];
+  const skipped = [];
+  for (const r of rows) {
+    let why;
+    try {
+      why = putBackFile(root, r);
+    } catch (err) {
+      why = `Couldn’t change it: ${err.code === 'EBUSY' || err.code === 'EPERM' ? 'it’s open in another program, or read-only' : err.message}`;
+    }
+    if (why) skipped.push({ path: r.path, why });
+    else done.push(r.path);
+  }
+  // Folders the task created, deepest first, removed once empty. Ones with anything in them stay.
+  if (!want) {
+    for (const d of [...(summary.new_dirs ?? [])].sort((a, b) => b.split('/').length - a.split('/').length)) {
+      const full = target(root, d);
+      try {
+        if (full && fs.lstatSync(full).isDirectory() && !fs.readdirSync(full).length) fs.rmdirSync(full);
+      } catch {
+        /* gone already, or not empty */
+      }
+    }
+  }
+  const now = nowIso();
+  tx(() => {
+    // The earlier copy has done its job once the file is back.
+    const mark = db.prepare('UPDATE task_changes SET restored_at = ?, before_text = NULL WHERE task_id = ? AND path = ?');
+    for (const p of done) mark.run(now, t.id, p);
+    summary.put_back = { at: now, files: (summary.put_back?.files ?? 0) + done.length };
+    db.prepare('UPDATE tasks SET changes = ? WHERE id = ?').run(JSON.stringify(summary), t.id);
+  });
+  if (done.length) addEvent(t.integration_id, 'task_put_back', `Put back ${done.length} file${done.length === 1 ? '' : 's'} changed by “${t.name}”`);
+  return { ok: true, put_back: done, skipped };
+}
+
+let copiesDropped = 0;
+/** Earlier copies kept so a task's changes can be put back are dropped 30 days after it finished; its diffs stay. */
+export function dropOldCopies(now = Date.now()) {
+  if (now - copiesDropped < 3_600_000) return 0;
+  copiesDropped = now;
+  const cutoff = new Date(now - 30 * 86_400_000).toISOString();
+  return Number(db.prepare(`UPDATE task_changes SET before_text = NULL WHERE before_text IS NOT NULL
+    AND task_id IN (SELECT id FROM tasks WHERE COALESCE(finished_at, updated_at) < ?)`).run(cutoff).changes);
 }

@@ -1571,3 +1571,15 @@ pre.diff:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
 
 .auto-paused { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .auto-paused > svg { width: 15px; height: 15px; flex: none; }
+
+/* ── 1.9: putting back what a task changed ─────────────────────────────── */
+.changes .chg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.changes .chg-head h4 { margin: 0; }
+.changes .chg-head .btn { margin-left: auto; }
+.pb-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.pb-report { margin: 0 0 10px; font-size: 12.5px; }
+.pb-report ul { margin: 6px 0 0; padding-left: 18px; }
+.pb-report code { font-size: 11.5px; }
+.chg-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border-sub); }
+.chg-tools .grow { min-width: 0; overflow-wrap: anywhere; }
+.chg.restored > summary .chg-path { color: var(--text-3); text-decoration: line-through; text-decoration-color: var(--text-3); }

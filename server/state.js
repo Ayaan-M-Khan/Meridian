@@ -79,7 +79,7 @@ export function taskViewOf(t, history, durations, adapterOf, now = new Date()) {
 /** How much a task changed in its folder (changes.js), for task lists; the files themselves load with the task. */
 function changeSummary(s) {
   const c = parseMeta(s);
-  return c ? { files: c.files ?? 0, added: c.added ?? 0, removed: c.removed ?? 0 } : null;
+  return c ? { files: c.files ?? 0, added: c.added ?? 0, removed: c.removed ?? 0, put_back: c.put_back?.files ?? 0 } : null;
 }
 
 /** Everything the UI renders, in one payload. The demo payload (demo.js) has the same shape. */

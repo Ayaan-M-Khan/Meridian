@@ -186,6 +186,9 @@ addColumns('tasks', [['step', 'TEXT'], ['result', 'TEXT'], ['kind', 'TEXT'], ['r
 addColumns('integrations', [['meta', 'TEXT']]);
 addColumns('assistant_threads', [['engine', 'TEXT'], ['route', 'TEXT']]);
 addColumns('automations', [['folder', 'TEXT']]);
+//   task_changes: the file's checksum as the task left it, its exact earlier text (so Put back can restore it; dropped
+//   after 30 days or once put back), and when it was put back.
+addColumns('task_changes', [['after_hash', 'TEXT'], ['before_text', 'TEXT'], ['restored_at', 'TEXT']]);
 //   users: a linked Google account (its stable ID and email), two-step verification (encrypted secret, the last code
 //   step used so a code works once, hashes of unused recovery codes), and when the password last changed.
 //   sessions: when it started and was last used, the browser it's in, how you signed in, and "keep me signed in".

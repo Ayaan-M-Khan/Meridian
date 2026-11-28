@@ -67,6 +67,7 @@ const ICON = {
   shield: svg('<path d="M8 1.6l5.2 2v4.1c0 3.2-2.2 5.6-5.2 6.7-3-1.1-5.2-3.5-5.2-6.7V3.6z"/><path d="M5.8 8l1.6 1.6 2.9-3"/>'),
   map: svg('<path d="M1.8 3.6l4-1.6 4.4 1.8 4-1.6v10.2l-4 1.6-4.4-1.8-4 1.6z"/><path d="M5.8 2v10.2M10.2 3.8V14"/>'),
   pause: svg('<path d="M5.5 3.5v9M10.5 3.5v9"/>', 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"'),
+  undo: svg('<path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.8 6.5h6.7a3.75 3.75 0 0 1 0 7.5H7"/>'),
 };
 ICON.claude = ICON.spark;
 
@@ -771,7 +772,7 @@ function taskRow(t, { compact = false } = {}) {
     ${session ? `<div class="status-ico ${t.status === 'running' ? 's-running' : 's-queued'}">${ICON.terminal}</div>` : statusIcon(t.status)}
     <div class="row-main">
       <div class="row-title">${esc(t.name)} ${badge}</div>
-      <div class="row-sub">${esc(t.tool_name)} · ${esc(taskWhen(t))}${t.step && t.status === 'running' ? ` · ${esc(t.step)}` : ''}${t.changes?.files ? ` · ${plural(t.changes.files, 'file')} changed` : ''}</div>
+      <div class="row-sub">${esc(t.tool_name)} · ${esc(taskWhen(t))}${t.step && t.status === 'running' ? ` · ${esc(t.step)}` : ''}${t.changes?.files ? ` · ${plural(t.changes.files, 'file')} changed${t.changes.put_back ? (t.changes.put_back >= t.changes.files ? ', all put back' : `, ${t.changes.put_back} put back`) : ''}` : ''}</div>
       ${prog ? `<div class="row-progress"><div>${bar(t.progress, t.stalled ? 'err' : 'info', true)}</div><span class="num">${Math.round(t.progress)}%</span></div>` : ''}
       ${compact && session ? '' : etaLine(t)}
       ${t.status === 'failed' && t.error && !compact ? `<div class="row-sub err-text">${esc(t.error)}</div>` : ''}
@@ -1649,7 +1650,7 @@ const VIEWS = {
           <div class="pv-kvs">
             ${kv('Connected tools', c.tools, 'Names and budgets; keys are encrypted')}
             ${kv('Your tasks and results', c.tasks)}
-            ${kv('Files tasks changed', c.changed_files ?? 0, 'Which files, and the lines added and removed')}
+            ${kv('Files tasks changed', c.changed_files ?? 0, 'Which files, the lines added and removed, and earlier copies for Put back (30 days)')}
             ${kv('Sessions from AI apps', c.sessions, st.read_sessions === false ? 'Off' : 'When, where, model, tokens')}
             ${kv('Assistant conversations', c.conversations)}
             ${kv('Alerts', c.alerts)}
@@ -2596,6 +2597,8 @@ function closeModal() {
   S.openTask = null;
   S.openChanges = null;
   S.confirmTaskDelete = null;
+  S.confirmPutBack = null;
+  S.putBackReport = null;
 }
 
 /** Keeps an open task panel current while the task changes, such as an AI team moving to its next stage. */
@@ -2740,17 +2743,49 @@ const lineCounts = (added, removed) => `<span class="chg-add">+${fmtNum(added)}<
 function changesSection(c, t) {
   S.openChanges = c.list ?? [];
   const files = S.openChanges;
+  const demo = S.data.demo;
   const head = c.files ? `${plural(c.files, 'file')} changed · ${lineCounts(c.added, c.removed)}` : 'No files changed';
-  return `<div class="section changes"><h4>What changed</h4>
+  // Put back: one button for the whole task, after a plain-words confirmation; each file has its own inside its row.
+  const asking = S.confirmPutBack === t?.id;
+  const back = files.filter((f) => f.restored_at).length;
+  const button = !t || !files.length || asking ? ''
+    : demo ? `<button class="btn small" disabled title="Demo data is read-only">${ICON.undo}Put back</button>`
+      : c.put_back_ready ? `<button class="btn small" data-action="put-back" data-id="${t.id}" title="Undo this task’s changes in the folder">${ICON.undo}Put back</button>` : '';
+  const confirm = asking ? `<div class="callout warn inline pb-confirm"><span class="grow"><b>Put back what this task changed?</b> Changed files get their earlier contents, files it added are deleted, and files it deleted come back. Any file that has changed since the task ended is left as it is.</span>
+      <button class="btn small primary" data-action="confirm-put-back" data-id="${t.id}">${ICON.undo}Put back</button><button class="btn small ghost" data-action="cancel-put-back">Cancel</button></div>` : '';
+  const report = S.putBackReport?.id === t?.id && S.putBackReport.skipped.length
+    ? `<div class="callout warn pb-report"><b>Left as ${S.putBackReport.skipped.length === 1 ? 'it is' : 'they are'}:</b><ul>${S.putBackReport.skipped.map((s) => `<li><code>${esc(s.path)}</code> · ${esc(s.why)}</li>`).join('')}</ul></div>` : '';
+  return `<div class="section changes"><div class="chg-head"><h4>What changed</h4>${back ? `<span class="tag">${plural(back, 'file')} put back</span>` : ''}${button}</div>
     <p class="chg-sum"><b>${head}</b> <span class="faint small">in <code>${esc(c.folder)}</code>, ${esc(when(c.from))} to ${esc(when(c.to))}</span></p>
-    ${files.length ? `<ul class="chg-list">${files.map((f, i) => `<li><details class="chg" data-chg="${i}"><summary>
+    ${confirm}${report}
+    ${files.length ? `<ul class="chg-list">${files.map((f, i) => `<li><details class="chg ${f.restored_at ? 'restored' : ''}" data-chg="${i}"><summary>
         <span class="chg-kind k-${esc(f.change)}">${esc(CHANGE_LABEL[f.change] ?? f.change)}</span>
         <code class="chg-path" title="${esc(f.path)}">${esc(f.path)}</code>
-        <span class="chg-n">${f.added != null ? lineCounts(f.added, f.removed) : `<span class="faint">${f.binary ? 'Binary' : 'Not compared'}</span>`}</span></summary>
+        <span class="chg-n">${f.restored_at ? '<span class="faint">Put back</span>' : f.added != null ? lineCounts(f.added, f.removed) : `<span class="faint">${f.binary ? 'Binary' : 'Not compared'}</span>`}</span></summary>
         <div class="chg-body"></div></details></li>`).join('')}</ul>` : ''}
+    ${!demo && c.put_back_blocked && files.some((f) => f.can_put_back) ? `<p class="fine">${esc(c.put_back_blocked)}</p>` : ''}
     ${c.more ? `<p class="fine">${plural(c.more, 'more file')} changed too; the first ${files.length} are listed.</p>` : ''}
     ${c.partial ? '<p class="fine">This folder has more files than the app reads, so some changes may not be listed.</p>' : ''}
-    <p class="fine">${t?.status === 'running' ? 'Listed when the task ends. ' : ''}Meridian read the folder when the task started and again when it ended, without running anything in it. Changes you or other programs made there in that time are included.</p></div>`;
+    <p class="fine">${t?.status === 'running' ? 'Listed when the task ends. ' : ''}Meridian read the folder when the task started and again when it ended, without running anything in it. Changes you or other programs made there in that time are included. Earlier copies for putting files back are kept for 30 days.</p></div>`;
+}
+
+/** After putting files back: says how it went, keeps what was left alone (and why) in the panel, and redraws it. */
+async function putBackDone(id, r) {
+  const n = r.put_back?.length ?? 0;
+  const left = r.skipped?.length ?? 0;
+  S.putBackReport = { id, skipped: r.skipped ?? [] };
+  toast(n ? `Put back ${plural(n, 'file')}${left ? `; ${left} left as ${left === 1 ? 'it is' : 'they are'}` : ''}` : 'Nothing was put back. The panel says why.', !n);
+  await load({ force: true });
+  openTask(id, { refresh: true });
+}
+
+/** A changed file's own Put back, or why it can't be put back, above its diff. */
+function fileTools(f, i) {
+  if (f.restored_at) return `<p class="faint small chg-note">Put back ${esc(rel(f.restored_at))}. ${f.diff ? 'The diff shows what the task had changed.' : ''}</p>`;
+  if (S.data.demo) return '';
+  if (!f.can_put_back) return f.put_back_note ? `<p class="faint small chg-note">Can’t be put back: ${esc(f.put_back_note)}.</p>` : '';
+  const verb = f.change === 'added' ? 'Delete this file' : f.change === 'deleted' ? 'Bring this file back' : 'Put back this file';
+  return `<div class="chg-tools"><button class="btn small ghost" data-action="put-back-file" data-i="${i}">${ICON.undo}${verb}</button></div>`;
 }
 
 /** One file's diff: hunk headers, then lines kept, removed and added. */
@@ -3636,6 +3671,47 @@ const ACTIONS = {
   async 'open-task-folder'(el) {
     await api(`/api/tasks/${el.dataset.id}/open-folder`, { method: 'POST' });
   },
+  // Put back a task's changes: all of them after a confirmation in the panel, or one file from its row.
+  'put-back'(el) {
+    S.confirmPutBack = Number(el.dataset.id);
+    S.putBackReport = null;
+    openTask(el.dataset.id, { refresh: true });
+  },
+  'cancel-put-back'() {
+    const id = S.confirmPutBack;
+    S.confirmPutBack = null;
+    if (id) openTask(id, { refresh: true });
+  },
+  async 'confirm-put-back'(el) {
+    el.disabled = true;
+    const id = Number(el.dataset.id);
+    S.confirmPutBack = null;
+    try {
+      await putBackDone(id, await api(`/api/tasks/${id}/put-back`, { method: 'POST', body: {} }));
+    } catch (err) {
+      openTask(id, { refresh: true });
+      throw err;
+    }
+  },
+  'put-back-file'(el) {
+    const f = S.openChanges?.[Number(el.dataset.i)];
+    if (!f) return;
+    const q = f.change === 'added' ? `Delete ${f.path}, which the task added?` : f.change === 'deleted' ? `Bring back ${f.path}, which the task deleted?` : `Put back ${f.path} as it was before the task?`;
+    el.closest('.chg-tools').innerHTML = `<span class="small grow">${esc(q)}</span>
+      <button class="btn small primary" data-action="confirm-put-back-file" data-i="${el.dataset.i}">${f.change === 'added' ? 'Delete' : 'Put back'}</button><button class="btn small ghost" data-action="cancel-put-back-file" data-i="${el.dataset.i}">Cancel</button>`;
+    el.closest('.chg-tools')?.querySelector('.btn.primary')?.focus();
+  },
+  'cancel-put-back-file'(el) {
+    const i = Number(el.dataset.i);
+    el.closest('.chg-tools').outerHTML = fileTools(S.openChanges[i], i);
+  },
+  async 'confirm-put-back-file'(el) {
+    const f = S.openChanges?.[Number(el.dataset.i)];
+    const id = S.openTask?.id;
+    if (!f || !id) return;
+    el.disabled = true;
+    await putBackDone(id, await api(`/api/tasks/${id}/put-back`, { method: 'POST', body: { paths: [f.path] } }));
+  },
   /** A recent folder under a folder box: fills it in. */
   'use-folder'(el) {
     const input = document.getElementById(el.dataset.target);
@@ -3970,7 +4046,7 @@ async function boot() {
       if (!box.matches?.('details.chg') || !box.open) return;
       const body = box.querySelector('.chg-body');
       const f = S.openChanges?.[Number(box.dataset.chg)];
-      if (body && f && !body.childElementCount) body.innerHTML = diffHtml(f);
+      if (body && f && !body.childElementCount) body.innerHTML = fileTools(f, Number(box.dataset.chg)) + diffHtml(f);
     }, true);
     document.addEventListener('input', (e) => {
       if (e.target.closest?.('form[data-form="setup"], form[data-form="change-password"]') && ['f-pass', 'f-user', 'cp-next'].includes(e.target.id)) updatePasswordRules(e.target.form);

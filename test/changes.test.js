@@ -11,7 +11,8 @@ process.env.ACC_DB_PATH = ':memory:';
 process.env.ACC_MASTER_KEY = crypto.randomBytes(32).toString('hex');
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-const { snapshot, compare, describeChanges, diffText, LIMITS } = await import('../server/changes.js');
+const { snapshot, compare, describeChanges, diffText, LIMITS, trackChanges, recordChanges, taskChanges, putBack, dropOldCopies } = await import('../server/changes.js');
+const { db } = await import('../server/db.js');
 
 const put = (root, files) => {
   for (const [rel, text] of Object.entries(files)) {
@@ -109,6 +110,105 @@ test('files that often hold secrets are listed when they change, but their conte
   assert.match(env.note, /passwords or keys/);
   assert.ok(!JSON.stringify(rows).includes('secret-value') && !JSON.stringify(rows).includes('old-value'));
   assert.ok(rows.find((r) => r.path === 'config.js').diff.includes('+export default { debug: true };'));
+});
+
+// A finished task that worked in `root`: the folder is read, `work` changes it, and the changes are recorded.
+const integ = Number(db.prepare("INSERT INTO integrations(adapter, name, status, created_at) VALUES('custom-agent', 'Changes test', 'tracked', '2026-01-01')").run().lastInsertRowid);
+let n = 0;
+async function taskThat(root, work, { access = 'edit' } = {}) {
+  const id = Number(db.prepare("INSERT INTO tasks(integration_id, external_id, name, status, detail, created_at, updated_at) VALUES(?, ?, 'Edit the site', 'running', ?, '2026-01-01', '2026-01-01')")
+    .run(integ, `t${++n}`, JSON.stringify({ folder: root, access })).lastInsertRowid);
+  await trackChanges(id, root);
+  work();
+  await recordChanges(id);
+  db.prepare("UPDATE tasks SET status = 'completed', finished_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+  return id;
+}
+
+test('put back: changed files get their exact earlier bytes, added files and new folders go, deleted files come back', async () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(tmp, 'pb-')));
+  put(root, { 'index.html': '<h1>Hi</h1>\r\n<p>café</p>\r\n', 'old.txt': 'bye\n', 'keep.txt': 'same\n' });
+  const id = await taskThat(root, () => put(root, {
+    'index.html': '<h1>Hello</h1>\n', 'old.txt': null, 'src/new/deep.js': 'export {};\n', 'src/new/other.js': '1\n',
+  }));
+  const c = taskChanges(id);
+  assert.deepEqual(c.list.map((f) => `${f.change} ${f.path} ${f.can_put_back}`), ['changed index.html true', 'deleted old.txt true', 'added src/new/deep.js true', 'added src/new/other.js true']);
+  assert.equal(c.put_back_ready, true);
+  // One file first, on its own.
+  assert.deepEqual(putBack(id, { paths: ['old.txt'] }).put_back, ['old.txt']);
+  assert.equal(fs.readFileSync(path.join(root, 'old.txt'), 'utf8'), 'bye\n');
+  assert.throws(() => putBack(id, { paths: ['old.txt'] }), /put back already/);
+  // Then the rest: Windows line endings and accents come back byte for byte, and the folders the task made go.
+  const r = putBack(id);
+  assert.deepEqual(r.put_back, ['index.html', 'src/new/deep.js', 'src/new/other.js']);
+  assert.ok(fs.readFileSync(path.join(root, 'index.html')).equals(Buffer.from('<h1>Hi</h1>\r\n<p>café</p>\r\n', 'utf8')));
+  assert.equal(fs.existsSync(path.join(root, 'src')), false, 'empty folders the task created are removed');
+  assert.equal(fs.readFileSync(path.join(root, 'keep.txt'), 'utf8'), 'same\n');
+  assert.deepEqual(taskChanges(id).list.map((f) => Boolean(f.restored_at)), [true, true, true, true]);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM task_changes WHERE task_id = ? AND before_text IS NOT NULL').get(id).n, 0, 'earlier copies are dropped once used');
+});
+
+test('put back leaves alone anything changed since, secrets, binaries, git work and running tasks', async () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(tmp, 'pb2-')));
+  put(root, { 'a.txt': 'one\n', 'b.txt': 'two\n', '.env': 'KEY=1\n', 'logo.png': Buffer.from([1, 0, 2]), 'gone.txt': 'x\n' });
+  const id = await taskThat(root, () => put(root, {
+    'a.txt': 'ONE\n', 'b.txt': 'TWO\n', '.env': 'KEY=2\n', 'logo.png': Buffer.from([1, 0, 3]), 'gone.txt': null, 'made.txt': 'new\n',
+  }));
+  // You changed some of it after the task ended.
+  put(root, { 'b.txt': 'two, edited by you\n', 'gone.txt': 'you made it again\n', 'made.txt': 'you edited this\n' });
+  const states = Object.fromEntries(taskChanges(id).list.map((f) => [f.path, f.can_put_back ? 'yes' : f.put_back_note]));
+  assert.match(states['.env'], /passwords or keys/);
+  assert.match(states['logo.png'], /binary/);
+  const r = putBack(id);
+  assert.deepEqual(r.put_back, ['a.txt']);
+  const why = Object.fromEntries(r.skipped.map((s) => [s.path, s.why]));
+  assert.match(why['b.txt'], /changed since the task ended/);
+  assert.match(why['made.txt'], /changed since the task ended/);
+  assert.match(why['gone.txt'], /there again/);
+  assert.match(why['.env'], /passwords or keys/);
+  assert.equal(fs.readFileSync(path.join(root, 'b.txt'), 'utf8'), 'two, edited by you\n', 'your edit stays');
+  assert.equal(fs.readFileSync(path.join(root, '.env'), 'utf8'), 'KEY=2\n');
+  assert.equal(fs.readFileSync(path.join(root, 'a.txt'), 'utf8'), 'one\n');
+
+  // A path recorded as leading out of the folder, or into .git, is never written.
+  db.prepare("INSERT INTO task_changes(task_id, path, change, before_text, after_hash) VALUES(?, '../outside.txt', 'deleted', 'pwned', NULL), (?, '.git/hooks/pre-commit', 'deleted', 'pwned', NULL), (?, 'x:stream', 'deleted', 'pwned', NULL)").run(id, id, id);
+  const evil = putBack(id);
+  assert.deepEqual(evil.put_back, []);
+  assert.ok(evil.skipped.filter((s) => /outside the folder/.test(s.why)).length === 3);
+  assert.equal(fs.existsSync(path.join(path.dirname(root), 'outside.txt')), false);
+  assert.equal(fs.existsSync(path.join(root, '.git')), false);
+
+  // Through a junction: the folder on the way is now a link, so nothing is written through it.
+  const link = await taskThat(root, () => put(root, { 'sub/file.txt': 'made\n' }));
+  fs.rmSync(path.join(root, 'sub'), { recursive: true });
+  let linked = false;
+  try {
+    fs.symlinkSync(tmp, path.join(root, 'sub'), 'junction');
+    linked = true;
+  } catch {
+    /* links need extra rights on some systems */
+  }
+  if (linked) {
+    db.prepare("UPDATE task_changes SET change = 'deleted', before_text = 'pwned' WHERE task_id = ?").run(link);
+    assert.match(putBack(link).skipped[0].why, /outside the folder/);
+    assert.equal(fs.existsSync(path.join(tmp, 'file.txt')), false);
+  }
+
+  // A git task's work may be committed: undo it with git. A running task can't be put back yet.
+  const git = await taskThat(root, () => put(root, { 'c.txt': 'c\n' }), { access: 'git' });
+  assert.match(taskChanges(git).put_back_blocked, /with git/);
+  assert.throws(() => putBack(git), /with git/);
+  const running = await taskThat(root, () => put(root, { 'd.txt': 'd\n' }));
+  db.prepare("UPDATE tasks SET status = 'running' WHERE id = ?").run(running);
+  assert.throws(() => putBack(running), /still running/);
+
+  // Earlier copies go 30 days after a task finished; its list and diffs stay.
+  const old = await taskThat(root, () => put(root, { 'a.txt': 'once more\n' }));
+  db.prepare("UPDATE tasks SET finished_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(old);
+  assert.ok(dropOldCopies(Date.now()) >= 1);
+  const kept = taskChanges(old).list[0];
+  assert.equal(kept.can_put_back, false);
+  assert.ok(kept.diff.includes('+once more'));
 });
 
 test('reading a folder stops at its limits without inventing changes past where it stopped', async () => {
